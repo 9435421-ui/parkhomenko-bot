@@ -80,6 +80,9 @@ class UserState:
         self.city = None
         self.change_plan = None
         self.bti_status = None
+                self.floor = None
+                self.total_floors = None
+                self.remodeling_status = None  # выполнена или планируется
 
 user_states: dict[int, UserState] = {}
 user_consents: dict[int, UserConsent] = {}
@@ -530,7 +533,6 @@ def mode_select_handler(call):
 
         state.quiz_step = 4
         bot.send_message(user_id, "Укажите город/регион:")
-
 # ========== КВИЗ: Сбор заявки ==========
 
 @bot.message_handler(func=lambda m: get_user_state(m.chat.id).mode == BotModes.QUIZ, 
@@ -563,10 +565,35 @@ def quiz_handler(message):
         )
         return
 
+        # Шаг 5: этаж/этажность дома
+        if state.quiz_step == 5:
+                    parts = message.text.strip().split('/')
+                    if len(parts) >= 2:
+                                    state.floor = parts[0]
+                                    state.total_floors = parts[1]
+                                else:
+                                                state.floor = message.text.strip()
+                                            state.quiz_step = 6
+        bot.send_message(
+                        chat_id,
+                        "Перепланировка уже выполнена или только планируете? Напишите 'выполнена' или 'планируется'."
+                    )
+        return
+
+    # Шаг 6: статус перепланировки
+    if state.quiz_step == 6:
+                state.remodeling_status = message.text.strip()
+        state.quiz_step = 7
+        bot.send_message(
+                        chat_id,
+                        "Кратко опишите, что хотите изменить в перепланировке (объединить комнаты, перенести санузел, расширить кухню и т.п.)."
+                    )
+        return
+
     # Шаг 5: описание изменений
-    if state.quiz_step == 5:
+    # Шаг 7: о    if state.quiz_step == 7:писание изменений
         state.change_plan = message.text.strip()
-        state.quiz_step = 6
+        state.quiz_step = 8
         bot.send_message(
             chat_id, 
             "Есть ли у вас сейчас на руках документы БТИ (поэтажный план, экспликация, техпаспорт)? Опишите: есть/нет, что именно."
@@ -585,7 +612,6 @@ def quiz_handler(message):
         # Сброс состояния
         state.mode = None
         state.quiz_step = 0
-        show_main_menu(chat_id)
         return
 
 # ========== ДИАЛОГОВЫЙ РЕЖИМ ==========
