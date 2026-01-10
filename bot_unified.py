@@ -63,6 +63,7 @@ class UserConsent:
         self.ai_disclaimer_seen = False
         self.consent_timestamp = None
         self.contact_received = False
+        self.name_confirmed = False
 
 class UserState:
     def __init__(self):
@@ -185,27 +186,35 @@ def save_lead_and_notify(user_id: int):
 
 # --------- YandexGPT + RAG ---------
 
-def call_yandex_gpt(prompt: str, model: str = "yandexgpt") -> str:
+def call_yandex_gpt(prompt: str, user_name: str = None, model: str = "yandexgpt") -> str:
     try:
         headers = {
             "Authorization": f"Api-Key {YANDEX_API_KEY}",
             "Content-Type": "application/json"
         }
 
+        greeting = f"{user_name}, " if user_name else ""
+        
         data = {
             "modelUri": f"gpt://{FOLDER_ID}/{model}/latest",
             "completionOptions": {
                 "stream": False,
                 "temperature": 0.3,
-                "maxTokens": 2000
+                "maxTokens": 800
             },
             "messages": [
                 {
                     "role": "system",
                     "text": (
-                        "Ты - Антон, AI-консультант по перепланировкам в компании "
-                        "«Пархоменко и компания». Отвечай профессионально, но понятно "
-                        "для клиентов. Всегда учитывай законодательство РФ."
+                        "Ты - Антон, AI-консультант по перепланировкам в компании «Пархоменко и компания». "
+                        "Твои ответы должны быть:\n"
+                        "- Короткими (2-3 абзаца, максимум 5 предложений)\n"
+                        "- Конкретными и по делу\n"
+                        "- С уточняющим вопросом в конце для продолжения диалога\n"
+                        "- Дружелюбными и профессиональными\n"
+                        f"- Обращайся к клиенту по имени в начале ответа{': ' + greeting if user_name else ''}\n"
+                        "Если клиент просит связать с живым специалистом или хочет заказать услугу - "
+                        "предложи оставить заявку через меню."
                     )
                 },
                 {
@@ -239,17 +248,16 @@ def get_rag_context(question: str) -> str:
     except Exception as e:
         return f"Ошибка поиска в базе знаний: {e}"
 
-def ask_yandex_gpt_with_context(question: str, context: str = "") -> str:
+def ask_yandex_gpt_with_context(question: str, context: str = "", user_name: str = None) -> str:
     prompt = f"""
-Контекст для ответа (из базы знаний «Пархоменко и компания»):
+Контекст из базы знаний:
 {context}
 
-Вопрос пользователя: {question}
+Вопрос: {question}
 
-Ответь как AI-консультант по перепланировкам. Будь точен, профессионален и дружелюбен.
+Дай короткий конкретный ответ (2-3 абзаца) и задай уточняющий вопрос для продолжения диалога.
 """
-    response = call_yandex_gpt(prompt)
-    return add_legal_disclaimer(response)
+    return call_yandex_gpt(prompt, user_name=user_name)
 
 # --------- Хэндлеры согласий ---------
 
@@ -320,17 +328,51 @@ def initial_contact_handler(message):
     user_id = message.chat.id
     state = get_user_state(user_id)
     consent = get_user_consent(user_id)
-    
+
     state.phone = message.contact.phone_number
+    # Извлекаем имя из контакта
+    extracted_name = message.contact.first_name or "Уважаемый клиент"
+    state.name = extracted_name
     consent.contact_received = True
-    
+
     hide_kb = types.ReplyKeyboardRemove()
+    markup = types.ReplyKeyboardMarkup(resize_keyboard=True, one_time_keyboard=True)
+    markup.add(types.KeyboardButton("✅ Верно"))
+    markup.add(types.KeyboardButton("✏️ Изменить"))
+
     bot.send_message(
         user_id,
-        f"Спасибо! Ваш контакт {state.phone} сохранён.",
-        reply_markup=hide_kb
+        f"Спасибо! Ваш контакт {state.phone} сохранён.\n\n"
+        f"Ваше имя: {extracted_name}\n"
+        f"Верно или хотите изменить?",
+        reply_markup=markup
     )
-    
+
+@bot.message_handler(func=lambda m: m.text in ["✅ Верно", "✏️ Изменить"] and get_user_consent(m.chat.id).contact_received and not hasattr(get_user_consent(m.chat.id), 'name_confirmed'))
+def name_confirmation_handler(message):
+    user_id = message.chat.id
+    state = get_user_state(user_id)
+    consent = get_user_consent(user_id)
+
+    if message.text == "✅ Верно":
+        consent.name_confirmed = True
+        hide_kb = types.ReplyKeyboardRemove()
+        bot.send_message(user_id, "Отлично! Теперь вы можете пользоваться ботом.", reply_markup=hide_kb)
+        show_main_menu(user_id)
+    elif message.text == "✏️ Изменить":
+        consent.name_confirmed = False
+        hide_kb = types.ReplyKeyboardRemove()
+        bot.send_message(user_id, "Как вас зовут?", reply_markup=hide_kb)
+
+@bot.message_handler(func=lambda m: get_user_consent(m.chat.id).contact_received and not hasattr(get_user_consent(m.chat.id), 'name_confirmed'), content_types=["text"])
+def name_change_handler(message):
+    user_id = message.chat.id
+    state = get_user_state(user_id)
+    consent = get_user_consent(user_id)
+
+    state.name = message.text.strip()
+    consent.name_confirmed = True
+    bot.send_message(user_id, f"Имя изменено на {state.name}. Теперь вы можете пользоваться ботом.")
     show_main_menu(user_id)
 
 # ========== CALLBACK HANDLER: Выбор режимов и объектов ==========
@@ -442,10 +484,11 @@ def quiz_handler(message):
 
 # ========== ДИАЛОГОВЫЙ РЕЖИМ ==========
 
-@bot.message_handler(func=lambda m: get_user_state(m.chat.id).mode == BotModes.DIALOG, 
+@bot.message_handler(func=lambda m: get_user_state(m.chat.id).mode == BotModes.DIALOG,
                      content_types=["text"])
 def dialog_handler(message):
     chat_id = message.chat.id
+    state = get_user_state(chat_id)
     consent = get_user_consent(chat_id)
     if not consent.privacy_accepted:
         show_privacy_consent(chat_id)
@@ -454,16 +497,18 @@ def dialog_handler(message):
     rag_context = get_rag_context(message.text)
     response = ask_yandex_gpt_with_context(
         question=message.text,
-        context=rag_context
+        context=rag_context,
+        user_name=state.name
     )
     bot.send_message(chat_id, response)
 
 # ========== БЫСТРАЯ КОНСУЛЬТАЦИЯ ==========
 
-@bot.message_handler(func=lambda m: get_user_state(m.chat.id).mode == BotModes.QUICK, 
+@bot.message_handler(func=lambda m: get_user_state(m.chat.id).mode == BotModes.QUICK,
                      content_types=["text"])
 def quick_handler(message):
     chat_id = message.chat.id
+    state = get_user_state(chat_id)
     consent = get_user_consent(chat_id)
     if not consent.privacy_accepted:
         show_privacy_consent(chat_id)
@@ -472,7 +517,8 @@ def quick_handler(message):
     rag_context = get_rag_context(message.text)
     response = ask_yandex_gpt_with_context(
         question=message.text,
-        context=rag_context
+        context=rag_context,
+        user_name=state.name
     )
     bot.send_message(chat_id, response)
 
