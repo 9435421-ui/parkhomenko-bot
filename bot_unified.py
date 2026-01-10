@@ -67,22 +67,26 @@ class UserConsent:
 
 class UserState:
     def __init__(self):
-        self.mode = None
-        self.quiz_step = 0
-        self.dialog_history = []
-        self.has_plan = False
-        self.plan_path = None
-        # данные лида
         self.name = None
         self.phone = None
         self.extra_contact = None
+
+        self.mode = None
+        self.quiz_step = 0
+
         self.object_type = None
         self.city = None
-        self.change_plan = None
         self.bti_status = None
-                self.floor = None
-                self.total_floors = None
-                self.remodeling_status = None  # выполнена или планируется
+
+        # новые поля — ВНУТРИ __init__, с тем же отступом
+        self.floor = None
+        self.total_floors = None
+        self.remodeling_status = None  # выполнена или планируется
+
+        self.dialog_history = []
+        self.has_plan = False
+        self.plan_path = None
+        self.change_plan = None
 
 user_states: dict[int, UserState] = {}
 user_consents: dict[int, UserConsent] = {}
@@ -534,13 +538,13 @@ def mode_select_handler(call):
         bot.send_message(user_id, "Укажите город/регион:")
 # ========== КВИЗ: Сбор заявки ==========
 
-@bot.message_handler(func=lambda m: get_user_state(m.chat.id).mode == BotModes.QUIZ, 
+@bot.message_handler(func=lambda m: get_user_state(m.chat.id).mode == BotModes.QUIZ,
                      content_types=["text"])
 def quiz_handler(message):
     chat_id = message.chat.id
     state = get_user_state(chat_id)
 
-    # Шаг 2: доп. контакт (опционально)
+    # Шаг 2: дополнительный контакт (опционально)
     if state.quiz_step == 2:
         text = message.text.strip()
         state.extra_contact = None if text.lower() == "нет" else text
@@ -554,53 +558,55 @@ def quiz_handler(message):
         bot.send_message(chat_id, "Выберите тип объекта:", reply_markup=markup)
         return
 
-    # Шаг 4: город (после выбора объекта через callback)
+    # Шаг 4: город/регион (после выбора объекта через callback)
     if state.quiz_step == 4:
         state.city = message.text.strip()
         state.quiz_step = 5
         bot.send_message(
-            chat_id, 
-            "Кратко опишите, что хотите изменить в перепланировке (объединить комнаты, перенести санузел, расширить кухню и т.п.)."
+            chat_id,
+            "Укажите этаж и этажность дома (например: 5/9 или просто 5):"
         )
         return
 
-        # Шаг 5: этаж/этажность дома
-        if state.quiz_step == 5:
-                    parts = message.text.strip().split('/')
-                    if len(parts) >= 2:
-                                    state.floor = parts[0]
-                                    state.total_floors = parts[1]
-                                else:
-                                                state.floor = message.text.strip()
-                                            state.quiz_step = 6
+    # Шаг 5: этаж/этажность дома
+    if state.quiz_step == 5:
+        parts = message.text.strip().split('/')
+        if len(parts) >= 2:
+            state.floor = parts[0].strip()
+            state.total_floors = parts[1].strip()
+        else:
+            state.floor = message.text.strip()
+            state.total_floors = None
+
+        state.quiz_step = 6
         bot.send_message(
-                        chat_id,
-                        "Перепланировка уже выполнена или только планируете? Напишите 'выполнена' или 'планируется'."
-                    )
+            chat_id,
+            "Перепланировка уже выполнена или только планируете? Напишите 'выполнена' или 'планируется'."
+        )
         return
 
     # Шаг 6: статус перепланировки
     if state.quiz_step == 6:
-                state.remodeling_status = message.text.strip()
+        state.remodeling_status = message.text.strip()
         state.quiz_step = 7
         bot.send_message(
-                        chat_id,
-                        "Кратко опишите, что хотите изменить в перепланировке (объединить комнаты, перенести санузел, расширить кухню и т.п.)."
-                    )
+            chat_id,
+            "Кратко опишите, что хотите изменить в перепланировке (объединить комнаты, перенести санузел, расширить кухню и т.п.)."
+        )
         return
 
-    # Шаг 5: описание изменений
-    # Шаг 7: о    if state.quiz_step == 7:писание изменений
+    # Шаг 7: описание изменений
+    if state.quiz_step == 7:
         state.change_plan = message.text.strip()
         state.quiz_step = 8
         bot.send_message(
-            chat_id, 
+            chat_id,
             "Есть ли у вас сейчас на руках документы БТИ (поэтажный план, экспликация, техпаспорт)? Опишите: есть/нет, что именно."
         )
         return
 
-    # Шаг 6: статус БТИ и завершение квиза
-    if state.quiz_step == 6:
+    # Шаг 8: статус документов БТИ + завершение квиза
+    if state.quiz_step == 8:
         state.bti_status = message.text.strip()
         save_lead_and_notify(chat_id)
         bot.send_message(
@@ -608,7 +614,7 @@ def quiz_handler(message):
             f"✅ Спасибо, {state.name}! Ваша заявка на перепланировку {state.object_type.lower()} принята.\n"
             f"Наш специалист свяжется с вами по номеру {state.phone} в ближайшее время."
         )
-        # Сброс состояния
+        # Сброс состояния БЕЗ показа меню
         state.mode = None
         state.quiz_step = 0
         return
@@ -702,15 +708,9 @@ def dialog_handler(message):
 2. Если контекст покрывает вопрос частично, дополни ответ общими знаниями о перепланировках, не противореча базе.
 3. НЕ повторяй дословно то, что уже было сказано в ПРЕДЫДУЩЕМ ДИАЛОГЕ.
 4. Если по контексту можно сделать предварительный вывод (можно/нельзя узаконить, что рискованно) — обязательно сделай его.
-5. Весь ответ должен умещаться примерно в 400–550 символов.
+5. Весь ответ должен умещаться примерно в 400-550 символов.
 6. Делай упор на уточняющие вопросы и аккуратную оценку рисков, не давай гарантий и обещаний.
 7. В конце можешь предложить консультацию со специалистом, но только ПОСЛЕ ответа и вопросов.
-=======
-ИНСТРУКЦИЯ:
-Дай короткий точный ответ (2-3 предложения) СТРОГО на основе базы знаний выше.
-НЕ повторяй то, что уже было сказано в диалоге.
-
->>>>>>> b91e3c1eca08a4c9f0acf0438344af323478dadc
 """
 
     response = call_yandex_gpt(full_prompt, user_name=state.name)
