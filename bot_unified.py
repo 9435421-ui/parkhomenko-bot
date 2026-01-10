@@ -62,6 +62,7 @@ class UserConsent:
         self.notifications_accepted = False
         self.ai_disclaimer_seen = False
         self.consent_timestamp = None
+        self.contact_received = False
 
 class UserState:
     def __init__(self):
@@ -153,8 +154,8 @@ def save_lead_and_notify(user_id: int):
 📞 Телефон (TG): {state.phone}
 📪 Доп. контакт: {state.extra_contact or 'не указан'}
 🏠 Тип объекта: {state.object_type or 'не выбран'}
-🏙️ Город/регион: {state.city or 'не указан'}
-🔧 Что хочет изменить: {state.change_plan or 'не указано'}
+� Город: {state.city or 'не указан'}
+� Что хочет изменить: {state.change_plan or 'не указано'}
 📄 Статус БТИ: {state.bti_status or 'не указан'}
 🕐 Время: {datetime.datetime.now().strftime("%d.%m.%Y %H:%M")}
 👤 User ID: {user_id}
@@ -265,6 +266,24 @@ def start_handler(message):
         show_ai_disclaimer(user_id)
         consent.ai_disclaimer_seen = True
         consent.consent_timestamp = datetime.datetime.now()
+        
+        markup = types.ReplyKeyboardMarkup(resize_keyboard=True, one_time_keyboard=True)
+        markup.add(types.KeyboardButton("📱 Поделиться контактом", request_contact=True))
+        bot.send_message(
+            user_id,
+            "Для продолжения работы поделитесь своим контактом Telegram — это защитит нас от спама и поможет быстрее связаться.",
+            reply_markup=markup
+        )
+        return
+
+    if not consent.contact_received:
+        markup = types.ReplyKeyboardMarkup(resize_keyboard=True, one_time_keyboard=True)
+        markup.add(types.KeyboardButton("📱 Поделиться контактом", request_contact=True))
+        bot.send_message(
+            user_id,
+            "Для продолжения работы поделитесь своим контактом Telegram.",
+            reply_markup=markup
+        )
         return
 
     show_main_menu(user_id)
@@ -287,6 +306,31 @@ def privacy_consent_handler(message):
     consent.consent_timestamp = datetime.datetime.now()
     show_ai_disclaimer(user_id)
     consent.ai_disclaimer_seen = True
+    
+    markup = types.ReplyKeyboardMarkup(resize_keyboard=True, one_time_keyboard=True)
+    markup.add(types.KeyboardButton("📱 Поделиться контактом", request_contact=True))
+    bot.send_message(
+        user_id,
+        "Для продолжения работы поделитесь своим контактом Telegram — это защитит нас от спама и поможет быстрее связаться.",
+        reply_markup=markup
+    )
+
+@bot.message_handler(content_types=["contact"], func=lambda m: get_user_consent(m.chat.id).privacy_accepted and not get_user_consent(m.chat.id).contact_received)
+def initial_contact_handler(message):
+    user_id = message.chat.id
+    state = get_user_state(user_id)
+    consent = get_user_consent(user_id)
+    
+    state.phone = message.contact.phone_number
+    consent.contact_received = True
+    
+    hide_kb = types.ReplyKeyboardRemove()
+    bot.send_message(
+        user_id,
+        f"Спасибо! Ваш контакт {state.phone} сохранён.",
+        reply_markup=hide_kb
+    )
+    
     show_main_menu(user_id)
 
 # --------- Переключение режимов ---------
