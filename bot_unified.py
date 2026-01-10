@@ -184,6 +184,27 @@ def save_lead_and_notify(user_id: int):
         except:
             pass
 
+def save_dialog_lead(chat_id: int, dialog_summary: str):
+    state = get_user_state(chat_id)
+
+    lead_info = f"""
+💬 Консультация в диалоговом режиме
+
+👤 Имя: {state.name}
+📞 Телефон: {state.phone}
+📝 Тема: {dialog_summary}
+🕐 Время: {datetime.datetime.now().strftime("%d.%m.%Y %H:%M")}
+👤 User ID: {chat_id}
+
+⚠️ Клиент получил консультацию, но не оставил полную заявку
+    """.strip()
+
+    try:
+        bot.send_message(LEADS_GROUP_CHAT_ID, lead_info)
+        print(f"✅ Диалог-лид отправлен: {state.name}")
+    except Exception as e:
+        print(f"❌ Ошибка отправки диалог-лида: {e}")
+
 # --------- YandexGPT + RAG ---------
 
 def call_yandex_gpt(prompt: str, user_name: str = None, model: str = "yandexgpt") -> str:
@@ -194,13 +215,13 @@ def call_yandex_gpt(prompt: str, user_name: str = None, model: str = "yandexgpt"
         }
 
         greeting = f"{user_name}, " if user_name else ""
-        
+
         data = {
             "modelUri": f"gpt://{FOLDER_ID}/{model}/latest",
             "completionOptions": {
                 "stream": False,
                 "temperature": 0.3,
-                "maxTokens": 800
+                "maxTokens": 500  # уменьшено с 800
             },
             "messages": [
                 {
@@ -208,13 +229,12 @@ def call_yandex_gpt(prompt: str, user_name: str = None, model: str = "yandexgpt"
                     "text": (
                         "Ты - Антон, AI-консультант по перепланировкам в компании «Пархоменко и компания». "
                         "Твои ответы должны быть:\n"
-                        "- Короткими (2-3 абзаца, максимум 5 предложений)\n"
-                        "- Конкретными и по делу\n"
-                        "- С уточняющим вопросом в конце для продолжения диалога\n"
-                        "- Дружелюбными и профессиональными\n"
-                        f"- Обращайся к клиенту по имени в начале ответа{': ' + greeting if user_name else ''}\n"
-                        "Если клиент просит связать с живым специалистом или хочет заказать услугу - "
-                        "предложи оставить заявку через меню."
+                        "- Очень короткими (максимум 3-4 предложения)\n"
+                        "- Конкретными, без повторений того, что уже было сказано\n"
+                        "- С одним коротким уточняющим вопросом в конце\n"
+                        "- Учитывай предыдущий диалог из контекста\n"
+                        f"- Обращайся к клиенту по имени: {greeting if user_name else ''}\n"
+                        "Если клиент просит связать с живым специалистом - предложи оставить заявку."
                     )
                 },
                 {
@@ -514,13 +534,39 @@ def dialog_handler(message):
         )
         return
 
+    # Сохраняем вопрос клиента в историю
+    state.dialog_history.append({"role": "user", "text": message.text})
+
+    # Получаем контекст из RAG
     rag_context = get_rag_context(message.text)
+
+    # Формируем историю диалога для контекста (последние 5 реплик)
+    history_text = ""
+    if len(state.dialog_history) > 1:
+        recent_history = state.dialog_history[-6:-1]  # последние 5, без текущего вопроса
+        history_text = "\n".join([f"{'Клиент' if h['role'] == 'user' else 'Антон'}: {h['text']}"
+                                  for h in recent_history])
+
+    # Формируем полный контекст
+    full_context = rag_context
+    if history_text:
+        full_context += f"\n\nПредыдущий диалог:\n{history_text}"
+
     response = ask_yandex_gpt_with_context(
         question=message.text,
-        context=rag_context,
+        context=full_context,
         user_name=state.name
     )
+
+    # Сохраняем ответ в историю
+    state.dialog_history.append({"role": "assistant", "text": response})
+
     bot.send_message(chat_id, response)
+
+    # После 3-х реплик от клиента — автоматически фиксируем лид
+    user_messages_count = len([h for h in state.dialog_history if h['role'] == 'user'])
+    if user_messages_count == 3:
+        save_dialog_lead(chat_id, state.dialog_history[0]['text'][:100])
 
 # ========== БЫСТРАЯ КОНСУЛЬТАЦИЯ ==========
 
