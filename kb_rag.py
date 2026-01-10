@@ -10,25 +10,28 @@ class KnowledgeBaseRAG:
         self.documents: List[Dict[str, str]] = []
         
     def index_markdown_files(self):
-        """Индексация всех .md и .txt файлов из папки"""
+        """Индексация всех .md и .txt файлов из папки и подпапок"""
         if not os.path.exists(self.knowledge_dir):
             print(f"⚠️ Папка {self.knowledge_dir} не найдена")
             return
-            
-        for filename in os.listdir(self.knowledge_dir):
-            if filename.endswith(('.md', '.txt')):
-                filepath = os.path.join(self.knowledge_dir, filename)
-                try:
-                    with open(filepath, 'r', encoding='utf-8') as f:
-                        content = f.read()
-                        self.documents.append({
-                            'filename': filename,
-                            'content': content
-                        })
-                        print(f"✅ Проиндексирован файл: {filename}")
-                except Exception as e:
-                    print(f"❌ Ошибка чтения {filename}: {e}")
-        
+
+        for root, dirs, files in os.walk(self.knowledge_dir):
+            for filename in files:
+                if filename.endswith(('.md', '.txt')):
+                    filepath = os.path.join(root, filename)
+                    try:
+                        with open(filepath, 'r', encoding='utf-8') as f:
+                            content = f.read()
+                            # Сохраняем относительный путь для лучшей идентификации
+                            relative_path = os.path.relpath(filepath, self.knowledge_dir)
+                            self.documents.append({
+                                'filename': relative_path,
+                                'content': content
+                            })
+                            print(f"✅ Проиндексирован файл: {relative_path}")
+                    except Exception as e:
+                        print(f"❌ Ошибка чтения {filename}: {e}")
+
         print(f"📚 Всего документов в базе знаний: {len(self.documents)}")
     
     def get_rag_context(self, query: str, max_chunks: int = 3) -> str:
