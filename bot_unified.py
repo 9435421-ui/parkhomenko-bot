@@ -327,7 +327,8 @@ def mode_select_handler(call):
 
 # --------- КВИЗ: имя + контакт через кнопку ---------
 
-@bot.message_handler(content_types=["text", "contact"])
+@bot.message_handler(func=lambda m: get_user_state(m.chat.id).mode == BotModes.QUIZ,
+                     content_types=["text", "contact"])
 def quiz_handler(message):
     chat_id = message.chat.id
     state = get_user_state(chat_id)
@@ -411,7 +412,8 @@ def quiz_handler(message):
 
 # --------- Диалоговый режим ---------
 
-@bot.message_handler(func=lambda m: get_user_state(m.chat.id).mode == BotModes.DIALOG)
+@bot.message_handler(func=lambda m: get_user_state(m.chat.id).mode == BotModes.DIALOG,
+                     content_types=["text"])
 def dialog_handler(message):
     chat_id = message.chat.id
     consent = get_user_consent(chat_id)
@@ -428,7 +430,8 @@ def dialog_handler(message):
 
 # --------- Быстрая консультация ---------
 
-@bot.message_handler(func=lambda m: get_user_state(m.chat.id).mode == BotModes.QUICK)
+@bot.message_handler(func=lambda m: get_user_state(m.chat.id).mode == BotModes.QUICK,
+                     content_types=["text"])
 def quick_handler(message):
     chat_id = message.chat.id
     consent = get_user_consent(chat_id)
