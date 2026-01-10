@@ -333,7 +333,7 @@ def initial_contact_handler(message):
     
     show_main_menu(user_id)
 
-# --------- Переключение режимов ---------
+# ========== CALLBACK HANDLER: Выбор режимов и объектов ==========
 
 @bot.callback_query_handler(func=lambda call: call.data.startswith("mode_") or call.data.startswith("obj_"))
 def mode_select_handler(call):
@@ -345,17 +345,21 @@ def mode_select_handler(call):
 
     state = get_user_state(user_id)
 
+    # Выбор режима работы
     if call.data == "mode_quiz":
-        # стартуем квиз
         state.mode = BotModes.QUIZ
         state.quiz_step = 1
         bot.send_message(user_id, "Как к вам обращаться?")
+        
     elif call.data == "mode_dialog":
         state.mode = BotModes.DIALOG
         bot.send_message(user_id, "💬 Режим диалога активирован. Опишите вашу ситуацию по перепланировке.")
+        
     elif call.data == "mode_quick":
         state.mode = BotModes.QUICK
         bot.send_message(user_id, "⚡ Режим быстрой консультации. Напишите свой вопрос.")
+    
+    # Выбор типа объекта в квизе
     elif call.data.startswith("obj_") and state.mode == BotModes.QUIZ:
         if call.data == "obj_kvartira":
             state.object_type = "Квартира"
@@ -366,54 +370,32 @@ def mode_select_handler(call):
         else:
             state.object_type = "Неизвестно"
 
-        state.quiz_step = 5
+        state.quiz_step = 4
         bot.send_message(user_id, "Укажите город/регион:")
 
-# --------- КВИЗ: имя + контакт через кнопку ---------
+# ========== КВИЗ: Сбор заявки ==========
 
-@bot.message_handler(func=lambda m: get_user_state(m.chat.id).mode == BotModes.QUIZ,
-                     content_types=["text", "contact"])
+@bot.message_handler(func=lambda m: get_user_state(m.chat.id).mode == BotModes.QUIZ, 
+                     content_types=["text"])
 def quiz_handler(message):
     chat_id = message.chat.id
     state = get_user_state(chat_id)
 
-    # если не режим квиза — отдаём другим хэндлерам
-    if state.mode != BotModes.QUIZ:
-        return
-
-    # Шаг 1: имя (только текст)
-    if state.quiz_step == 1 and message.content_type == "text":
+    # Шаг 1: имя
+    if state.quiz_step == 1:
         state.name = message.text.strip()
         state.quiz_step = 2
-
-        markup = types.ReplyKeyboardMarkup(resize_keyboard=True, one_time_keyboard=True)
-        markup.add(types.KeyboardButton("📱 Отправить контакт", request_contact=True))
         bot.send_message(
-            chat_id,
-            f"{state.name}, нажмите кнопку ниже, чтобы отправить номер телефона для связи.",
-            reply_markup=markup
+            chat_id, 
+            "Если у вас есть дополнительный способ связи (WhatsApp/почта/другой номер) — напишите его, или отправьте «нет»."
         )
         return
 
-    # Шаг 2: обязательный контакт
-    if state.quiz_step == 2 and message.content_type == "contact":
-        state.phone = message.contact.phone_number
-        state.quiz_step = 3
-
-        hide_kb = types.ReplyKeyboardRemove()
-        bot.send_message(
-            chat_id,
-            "Спасибо, контакт получен. Если есть дополнительный способ связи "
-            "(WhatsApp/почта/другой номер) — напишите его, или отправьте «нет».",
-            reply_markup=hide_kb
-        )
-        return
-
-    # Шаг 3: доп. контакт (опционально)
-    if state.quiz_step == 3 and message.content_type == "text":
+    # Шаг 2: доп. контакт (опционально)
+    if state.quiz_step == 2:
         text = message.text.strip()
         state.extra_contact = None if text.lower() == "нет" else text
-        state.quiz_step = 4
+        state.quiz_step = 3
 
         markup = types.InlineKeyboardMarkup()
         markup.add(types.InlineKeyboardButton("Квартира", callback_data="obj_kvartira"))
@@ -423,40 +405,44 @@ def quiz_handler(message):
         bot.send_message(chat_id, "Выберите тип объекта:", reply_markup=markup)
         return
 
-    # Шаг 5: город/регион
-    if state.quiz_step == 5 and message.content_type == "text":
+    # Шаг 4: город (после выбора объекта через callback)
+    if state.quiz_step == 4:
         state.city = message.text.strip()
-        state.quiz_step = 6
-        bot.send_message(chat_id, "Кратко опишите, что хотите изменить в перепланировке (объединить комнаты, перенести санузел, расширить кухню и т.п.).")
+        state.quiz_step = 5
+        bot.send_message(
+            chat_id, 
+            "Кратко опишите, что хотите изменить в перепланировке (объединить комнаты, перенести санузел, расширить кухню и т.п.)."
+        )
         return
 
-    # Шаг 6: описание изменений
-    if state.quiz_step == 6 and message.content_type == "text":
+    # Шаг 5: описание изменений
+    if state.quiz_step == 5:
         state.change_plan = message.text.strip()
-        state.quiz_step = 7
-        bot.send_message(chat_id, "Есть ли у вас сейчас на руках документы БТИ (поэтажный план, экспликация, техпаспорт)? Опишите: есть/нет, что именно.")
+        state.quiz_step = 6
+        bot.send_message(
+            chat_id, 
+            "Есть ли у вас сейчас на руках документы БТИ (поэтажный план, экспликация, техпаспорт)? Опишите: есть/нет, что именно."
+        )
         return
 
-    # Шаг 7: статус БТИ
-    if state.quiz_step == 7 and message.content_type == "text":
+    # Шаг 6: статус БТИ и завершение квиза
+    if state.quiz_step == 6:
         state.bti_status = message.text.strip()
-        state.quiz_step = 8
-        # завершаем квиз
         save_lead_and_notify(chat_id)
         bot.send_message(
             chat_id,
             f"✅ Спасибо, {state.name}! Ваша заявка на перепланировку {state.object_type.lower()} принята.\n"
             f"Наш специалист свяжется с вами по номеру {state.phone} в ближайшее время."
         )
-        # сброс состояния
+        # Сброс состояния
         state.mode = None
         state.quiz_step = 0
         show_main_menu(chat_id)
         return
 
-# --------- Диалоговый режим ---------
+# ========== ДИАЛОГОВЫЙ РЕЖИМ ==========
 
-@bot.message_handler(func=lambda m: get_user_state(m.chat.id).mode == BotModes.DIALOG,
+@bot.message_handler(func=lambda m: get_user_state(m.chat.id).mode == BotModes.DIALOG, 
                      content_types=["text"])
 def dialog_handler(message):
     chat_id = message.chat.id
@@ -472,9 +458,9 @@ def dialog_handler(message):
     )
     bot.send_message(chat_id, response)
 
-# --------- Быстрая консультация ---------
+# ========== БЫСТРАЯ КОНСУЛЬТАЦИЯ ==========
 
-@bot.message_handler(func=lambda m: get_user_state(m.chat.id).mode == BotModes.QUICK,
+@bot.message_handler(func=lambda m: get_user_state(m.chat.id).mode == BotModes.QUICK, 
                      content_types=["text"])
 def quick_handler(message):
     chat_id = message.chat.id
@@ -490,7 +476,7 @@ def quick_handler(message):
     )
     bot.send_message(chat_id, response)
 
-# --------- Файлы (пока заглушка) ---------
+# ========== ОБРАБОТКА ФАЙЛОВ ==========
 
 @bot.message_handler(content_types=['document', 'photo'])
 def handle_files(message):
@@ -498,7 +484,7 @@ def handle_files(message):
     bot.send_message(chat_id, "📁 Функция анализа планов будет доступна в следующем обновлении.")
     show_main_menu(chat_id)
 
-# --------- Тестовые команды ---------
+# ========== ТЕСТОВЫЕ КОМАНДЫ ==========
 
 @bot.message_handler(commands=['test_gpt'])
 def test_gpt_handler(message):
