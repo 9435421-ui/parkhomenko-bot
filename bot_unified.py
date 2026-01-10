@@ -328,51 +328,66 @@ def initial_contact_handler(message):
     user_id = message.chat.id
     state = get_user_state(user_id)
     consent = get_user_consent(user_id)
-
+    
     state.phone = message.contact.phone_number
-    # Извлекаем имя из контакта
-    extracted_name = message.contact.first_name or "Уважаемый клиент"
-    state.name = extracted_name
     consent.contact_received = True
-
+    
+    # Извлекаем имя из контакта
+    contact_name = message.contact.first_name or ""
+    
     hide_kb = types.ReplyKeyboardRemove()
-    markup = types.ReplyKeyboardMarkup(resize_keyboard=True, one_time_keyboard=True)
-    markup.add(types.KeyboardButton("✅ Верно"))
-    markup.add(types.KeyboardButton("✏️ Изменить"))
+    
+    if contact_name:
+        # Если имя есть — предлагаем подтвердить
+        markup = types.InlineKeyboardMarkup()
+        markup.add(types.InlineKeyboardButton(f"✅ Да, {contact_name}", callback_data=f"confirm_name_{contact_name}"))
+        markup.add(types.InlineKeyboardButton("✏️ Нет, указать другое", callback_data="change_name"))
+        
+        bot.send_message(
+            user_id,
+            f"Спасибо! Ваш контакт {state.phone} сохранён.\n\n"
+            f"Могу к вам обращаться «{contact_name}»?",
+            reply_markup=markup
+        )
+    else:
+        # Если имени нет — спрашиваем
+        bot.send_message(
+            user_id,
+            f"Спасибо! Ваш контакт {state.phone} сохранён.\n\nКак к вам обращаться?",
+            reply_markup=hide_kb
+        )
 
-    bot.send_message(
-        user_id,
-        f"Спасибо! Ваш контакт {state.phone} сохранён.\n\n"
-        f"Ваше имя: {extracted_name}\n"
-        f"Верно или хотите изменить?",
-        reply_markup=markup
-    )
-
-@bot.message_handler(func=lambda m: m.text in ["✅ Верно", "✏️ Изменить"] and get_user_consent(m.chat.id).contact_received and not hasattr(get_user_consent(m.chat.id), 'name_confirmed'))
-def name_confirmation_handler(message):
-    user_id = message.chat.id
+@bot.callback_query_handler(func=lambda call: call.data.startswith("confirm_name_") or call.data == "change_name")
+def name_confirmation_handler(call):
+    user_id = call.message.chat.id
     state = get_user_state(user_id)
-    consent = get_user_consent(user_id)
-
-    if message.text == "✅ Верно":
-        consent.name_confirmed = True
-        hide_kb = types.ReplyKeyboardRemove()
-        bot.send_message(user_id, "Отлично! Теперь вы можете пользоваться ботом.", reply_markup=hide_kb)
+    
+    if call.data.startswith("confirm_name_"):
+        # Подтверждение имени
+        name = call.data.replace("confirm_name_", "")
+        state.name = name
+        bot.edit_message_text(
+            f"Приятно познакомиться, {name}!",
+            chat_id=user_id,
+            message_id=call.message.message_id
+        )
         show_main_menu(user_id)
-    elif message.text == "✏️ Изменить":
-        consent.name_confirmed = False
-        hide_kb = types.ReplyKeyboardRemove()
-        bot.send_message(user_id, "Как вас зовут?", reply_markup=hide_kb)
+        
+    elif call.data == "change_name":
+        # Запрос нового имени
+        bot.edit_message_text(
+            "Хорошо, напишите, как к вам обращаться:",
+            chat_id=user_id,
+            message_id=call.message.message_id
+        )
 
-@bot.message_handler(func=lambda m: get_user_consent(m.chat.id).contact_received and not hasattr(get_user_consent(m.chat.id), 'name_confirmed'), content_types=["text"])
-def name_change_handler(message):
+@bot.message_handler(func=lambda m: get_user_consent(m.chat.id).contact_received and get_user_state(m.chat.id).name is None and get_user_state(m.chat.id).mode is None, content_types=["text"])
+def initial_name_handler(message):
     user_id = message.chat.id
     state = get_user_state(user_id)
-    consent = get_user_consent(user_id)
-
+    
     state.name = message.text.strip()
-    consent.name_confirmed = True
-    bot.send_message(user_id, f"Имя изменено на {state.name}. Теперь вы можете пользоваться ботом.")
+    bot.send_message(user_id, f"Приятно познакомиться, {state.name}!")
     show_main_menu(user_id)
 
 # ========== CALLBACK HANDLER: Выбор режимов и объектов ==========
@@ -390,16 +405,19 @@ def mode_select_handler(call):
     # Выбор режима работы
     if call.data == "mode_quiz":
         state.mode = BotModes.QUIZ
-        state.quiz_step = 1
-        bot.send_message(user_id, "Как к вам обращаться?")
+        state.quiz_step = 2  # Начинаем с шага 2, имя уже есть
+        bot.send_message(
+            user_id, 
+            "Если у вас есть дополнительный способ связи (WhatsApp/почта/другой номер) — напишите его, или отправьте «нет»."
+        )
         
     elif call.data == "mode_dialog":
         state.mode = BotModes.DIALOG
-        bot.send_message(user_id, "💬 Режим диалога активирован. Опишите вашу ситуацию по перепланировке.")
+        bot.send_message(user_id, f"{state.name}, опишите вашу ситуацию по перепланировке.")
         
     elif call.data == "mode_quick":
         state.mode = BotModes.QUICK
-        bot.send_message(user_id, "⚡ Режим быстрой консультации. Напишите свой вопрос.")
+        bot.send_message(user_id, f"{state.name}, напишите свой вопрос.")
     
     # Выбор типа объекта в квизе
     elif call.data.startswith("obj_") and state.mode == BotModes.QUIZ:
@@ -422,16 +440,6 @@ def mode_select_handler(call):
 def quiz_handler(message):
     chat_id = message.chat.id
     state = get_user_state(chat_id)
-
-    # Шаг 1: имя
-    if state.quiz_step == 1:
-        state.name = message.text.strip()
-        state.quiz_step = 2
-        bot.send_message(
-            chat_id, 
-            "Если у вас есть дополнительный способ связи (WhatsApp/почта/другой номер) — напишите его, или отправьте «нет»."
-        )
-        return
 
     # Шаг 2: доп. контакт (опционально)
     if state.quiz_step == 2:
@@ -492,6 +500,18 @@ def dialog_handler(message):
     consent = get_user_consent(chat_id)
     if not consent.privacy_accepted:
         show_privacy_consent(chat_id)
+        return
+
+    # Проверка на запрос связи с человеком
+    trigger_words = ["соедините", "специалист", "менеджер", "человек", "живой", "реальный", "заказать"]
+    if any(word in message.text.lower() for word in trigger_words):
+        markup = types.InlineKeyboardMarkup()
+        markup.add(types.InlineKeyboardButton("📝 Оставить заявку", callback_data="mode_quiz"))
+        bot.send_message(
+            chat_id,
+            f"{state.name}, чтобы наш специалист связался с вами, оставьте заявку:",
+            reply_markup=markup
+        )
         return
 
     rag_context = get_rag_context(message.text)
