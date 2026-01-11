@@ -510,8 +510,31 @@ def mode_select_handler(call):
     if call.data == "mode_quiz":
         state.mode = BotModes.QUIZ
         state.quiz_step = 2  # Начинаем с шага 2, имя уже есть
+
+        # ПЕРЕДАЧА КОНТЕКСТА ИЗ ДИАЛОГА В КВИЗ
+        if state.dialog_history:
+            # Извлекаем город из истории диалога
+            for msg in reversed(state.dialog_history):
+                if msg['role'] == 'user' and any(city in msg['text'].lower() for city in ['москва', 'химки', 'сочи', 'краснодар', 'спб', 'питер']):
+                    if 'химки' in msg['text'].lower():
+                        state.city = 'Химки'
+                        state.quiz_step = 5  # Пропускаем шаг города
+                    elif 'сочи' in msg['text'].lower():
+                        state.city = 'Сочи'
+                        state.quiz_step = 5
+                    elif 'краснодар' in msg['text'].lower():
+                        state.city = 'Краснодар'
+                        state.quiz_step = 5
+                    break
+
+            # Извлекаем запрос из истории
+            for msg in reversed(state.dialog_history):
+                if msg['role'] == 'user' and any(word in msg['text'].lower() for word in ['ванную', 'туалет', 'кухню', 'балкон', 'лоджию']):
+                    state.change_plan = msg['text']
+                    break
+
         bot.send_message(
-            user_id, 
+            user_id,
             "Если у вас есть дополнительный способ связи (WhatsApp/почта/другой номер) — напишите его, или отправьте «нет»."
         )
         
