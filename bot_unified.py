@@ -5,6 +5,7 @@ import requests
 import telebot
 from telebot import types
 from dotenv import load_dotenv
+from typing import Optional
 
 load_dotenv()
 
@@ -336,6 +337,63 @@ def ask_yandex_gpt_with_context(question: str, context: str = "", user_name: str
 """
     return call_yandex_gpt(prompt, user_name=user_name)
 
+# --------- Yandex SpeechKit (Voice Transcription) ---------
+
+def transcribe_audio(file_path: str) -> Optional[str]:
+    """
+    Транскрибирует аудиофайл через Yandex SpeechKit STT API
+    Возвращает распознанный текст или None при ошибке
+    """
+    try:
+        # Проверяем существование файла
+        if not os.path.exists(file_path):
+            print(f"❌ Файл не найден: {file_path}")
+            return None
+
+        # Читаем файл
+        with open(file_path, 'rb') as f:
+            audio_data = f.read()
+
+        # Заголовки для SpeechKit API
+        headers = {
+            "Authorization": f"Api-Key {YANDEX_API_KEY}",
+            "Content-Type": "audio/ogg"  # Telegram voice messages обычно в OGG/Opus
+        }
+
+        # Параметры запроса для русского языка
+        params = {
+            "folderId": FOLDER_ID,
+            "lang": "ru-RU",
+            "format": "oggopus"  # Формат Telegram voice messages
+        }
+
+        # Отправляем запрос в SpeechKit
+        response = requests.post(
+            "https://stt.api.cloud.yandex.net/speech/v1/stt:recognize",
+            headers=headers,
+            params=params,
+            data=audio_data,
+            timeout=30
+        )
+
+        if response.status_code == 200:
+            result = response.json()
+            text = result.get("result", "").strip()
+
+            if text:
+                print(f"✅ Распознано: '{text}'")
+                return text
+            else:
+                print("⚠️ Пустой результат распознавания")
+                return None
+        else:
+            print(f"❌ Ошибка SpeechKit API: {response.status_code} - {response.text}")
+            return None
+
+    except Exception as e:
+        print(f"❌ Ошибка транскрибации: {e}")
+        return None
+
 # --------- Хэндлеры согласий ---------
 
 @bot.message_handler(commands=["start"])
@@ -484,37 +542,36 @@ def initial_name_handler(message):
 @bot.message_handler(func=lambda m: get_user_state(m.chat.id).mode == "waiting_time",
                      content_types=["text"])
 def time_handler(message):
+    from datetime import datetime
+
     chat_id = message.chat.id
     state = get_user_state(chat_id)
+    preferred_time = message.text.strip()
 
-    preferred_time = message.text.strip().lower()
+    # Определяем текущий день и время
+    now = datetime.now()
+    is_weekend = now.weekday() >= 5  # 5=суббота, 6=воскресенье
+    is_saturday = now.weekday() == 5
+    is_evening = now.hour >= 18 or now.hour < 9
+    is_saturday_late = is_saturday and now.hour >= 16
 
-    # Проверяем рабочее время
-    now = datetime.datetime.now()
-    current_day = now.weekday()  # 0-6, где 0 - понедельник
-    current_hour = now.hour
+    # Формируем реалистичное сообщение
+    if is_weekend and not is_saturday:
+        callback_info = "⏰ Сейчас выходной. Наш специалист перезвонит вам в понедельник утром (9:00-12:00)."
+    elif is_saturday_late:
+        callback_info = "⏰ Рабочий день в субботу до 16:00. Наш специалист перезвонит вам в понедельник утром (9:00-12:00)."
+    elif is_evening:
+        callback_info = "⏰ Рабочий день закончился. Наш специалист перезвонит вам завтра утром (9:00-12:00)."
+    else:
+        callback_info = "⏰ Наш специалист перезвонит вам в ближайший час."
 
-    # Рабочие дни: пн-пт (0-4), рабочие часы: 9-18, сб (5): 10-16
-    is_working_day = current_day < 5  # пн-пт
-    is_working_saturday = current_day == 5 and 10 <= current_hour < 16
-    is_working_hours = (is_working_day and 9 <= current_hour < 18) or is_working_saturday
-
-    # Если клиент хочет поговорить сейчас, но нерабочее время
-    if any(word in preferred_time for word in ["сейчас", "немедленно", "прямо сейчас", "сейчас же"]) and not is_working_hours:
-        bot.send_message(
-            chat_id,
-            f"{state.name}, сейчас нерабочее время. Специалисты работают:\n"
-            f"📞 пн-пт: 9:00-18:00\n"
-            f"📞 сб: 10:00-16:00\n\n"
-            f"Укажите удобное время в рабочее время, и мы обязательно перезвоним!"
-        )
-        return
-
+    # Отправляем в группу лидов
     lead_update = f"""
 📞 Уточнение времени звонка
 
 👤 {state.name} ({state.phone})
-🕐 Удобное время: {preferred_time}
+🕐 Запрос клиента: {preferred_time}
+{callback_info}
     """.strip()
 
     try:
@@ -522,12 +579,17 @@ def time_handler(message):
     except Exception as e:
         print(f"❌ Ошибка отправки времени: {e}")
 
+    # Отправляем клиенту
     bot.send_message(
         chat_id,
-        f"Спасибо, {state.name}! Мы свяжемся с вами в указанное время."
+        f"Спасибо, {state.name}!\n\n"
+        f"📞 Вы указали: {preferred_time}\n"
+        f"{callback_info}\n\n"
+        f"📅 Рабочие часы: пн-пт 9:00-18:00, сб 10:00-16:00"
     )
 
     state.mode = None
+    # НЕ показываем меню после завершения
 
 # ========== CALLBACK HANDLER: Выбор режимов и объектов ==========
 
@@ -726,17 +788,29 @@ def dialog_handler(message):
     frustration_words = ["шоке", "кругу", "переспрашиваете", "раздражает", "повторяете",
                          "не понимаете", "не слушаете", "уже говорил", "уже писал", "забываете"]
     if any(word in message.text.lower() for word in frustration_words):
-        # Формируем краткую сводку что мы уже знаем
+        # НЕ сохранять это сообщение в историю как полезное!
+        # Не передавать в change_plan!
+
         summary = f"Извините за неудобство, {state.name}! Давайте я помогу вам прямо здесь.\n\n"
 
         if state.city:
-            summary += f"Город: {state.city}\n"
+            summary += f"📍 Город: {state.city}\n"
         if state.floor:
-            summary += f"Этаж: {state.floor}\n"
-        if state.change_plan:
-            summary += f"Планируете: {state.change_plan}\n"
+            summary += f"🏢 Этаж: {state.floor}/{state.total_floors}\n"
 
-        summary += "\nНаш специалист может приехать на объект, сделать замеры и подготовить проект. Хотите обсудить детали здесь или соединить со специалистом?"
+        # Ищем последний НОРМАЛЬНЫЙ запрос (не frustration)
+        last_normal = None
+        for msg in reversed(state.dialog_history):
+            text_lower = msg.get('text', '').lower()
+            if not any(fw in text_lower for fw in frustration_words):
+                if any(word in text_lower for word in ['объединить', 'убрать', 'перенести', 'расширить']):
+                    last_normal = msg.get('text')
+                    break
+
+        if last_normal:
+            summary += f"📝 Планируете: {last_normal}\n"
+
+        summary += "\n🤝 Наш специалист может приехать на осмотр, сделать замеры и подготовить проект. Хотите обсудить детали здесь или соединить со специалистом?"
 
         bot.send_message(chat_id, summary)
         return
@@ -876,6 +950,140 @@ def quick_handler(message):
         user_name=state.name
     )
     bot.send_message(chat_id, response)
+
+# ========== ГОЛОСОВЫЕ И АУДИО СООБЩЕНИЯ ==========
+
+@bot.message_handler(content_types=['voice'])
+def handle_voice(message):
+    chat_id = message.chat.id
+    state = get_user_state(chat_id)
+
+    # Проверяем согласие
+    consent = get_user_consent(chat_id)
+    if not consent.privacy_accepted:
+        show_privacy_consent(chat_id)
+        return
+
+    try:
+        # Скачиваем голосовое сообщение
+        file_info = bot.get_file(message.voice.file_id)
+        downloaded_file = bot.download_file(file_info.file_path)
+
+        # Сохраняем во временный файл
+        import tempfile
+        with tempfile.NamedTemporaryFile(suffix='.ogg', delete=False) as temp_file:
+            temp_file.write(downloaded_file)
+            temp_file_path = temp_file.name
+
+        # Транскрибируем
+        recognized_text = transcribe_audio(temp_file_path)
+
+        # Удаляем временный файл
+        os.unlink(temp_file_path)
+
+        if recognized_text:
+            # Создаем искусственное текстовое сообщение для передачи в существующие хендлеры
+            fake_message = type('FakeMessage', (), {
+                'chat': type('Chat', (), {'id': chat_id})(),
+                'text': f"[VOICE] {recognized_text}",
+                'from_user': message.from_user
+            })()
+
+            # Уведомляем пользователя о распознавании
+            if not hasattr(state, 'voice_used') or not state.voice_used:
+                bot.send_message(chat_id, f"🎤 Расшифровала ваше голосовое сообщение и сейчас отвечу по сути.")
+                state.voice_used = True
+
+            # Передаем в существующие хендлеры в зависимости от режима
+            if state.mode == BotModes.DIALOG:
+                dialog_handler(fake_message)
+            elif state.mode == BotModes.QUIZ:
+                quiz_handler(fake_message)
+            elif state.mode == BotModes.QUICK:
+                quick_handler(fake_message)
+            else:
+                # Если режим не активен - включаем диалог
+                state.mode = BotModes.DIALOG
+                dialog_handler(fake_message)
+        else:
+            # Если не удалось распознать
+            bot.send_message(
+                chat_id,
+                "Не получилось разобрать голосовое сообщение. Можно, пожалуйста, коротко написать текстом, что вы хотите сделать с перепланировкой?"
+            )
+
+    except Exception as e:
+        print(f"❌ Ошибка обработки голосового: {e}")
+        bot.send_message(
+            chat_id,
+            "Не получилось разобрать голосовое сообщение. Можно, пожалуйста, коротко написать текстом, что вы хотите сделать с перепланировкой?"
+        )
+
+@bot.message_handler(content_types=['audio'])
+def handle_audio(message):
+    chat_id = message.chat.id
+    state = get_user_state(chat_id)
+
+    # Проверяем согласие
+    consent = get_user_consent(chat_id)
+    if not consent.privacy_accepted:
+        show_privacy_consent(chat_id)
+        return
+
+    try:
+        # Скачиваем аудиофайл
+        file_info = bot.get_file(message.audio.file_id)
+        downloaded_file = bot.download_file(file_info.file_path)
+
+        # Сохраняем во временный файл
+        import tempfile
+        with tempfile.NamedTemporaryFile(suffix='.mp3', delete=False) as temp_file:
+            temp_file.write(downloaded_file)
+            temp_file_path = temp_file.name
+
+        # Транскрибируем
+        recognized_text = transcribe_audio(temp_file_path)
+
+        # Удаляем временный файл
+        os.unlink(temp_file_path)
+
+        if recognized_text:
+            # Создаем искусственное текстовое сообщение
+            fake_message = type('FakeMessage', (), {
+                'chat': type('Chat', (), {'id': chat_id})(),
+                'text': f"[AUDIO] {recognized_text}",
+                'from_user': message.from_user
+            })()
+
+            # Уведомляем пользователя о распознавании
+            if not hasattr(state, 'voice_used') or not state.voice_used:
+                bot.send_message(chat_id, f"🎵 Расшифровала ваше аудиосообщение и сейчас отвечу по сути.")
+                state.voice_used = True
+
+            # Передаем в существующие хендлеры в зависимости от режима
+            if state.mode == BotModes.DIALOG:
+                dialog_handler(fake_message)
+            elif state.mode == BotModes.QUIZ:
+                quiz_handler(fake_message)
+            elif state.mode == BotModes.QUICK:
+                quick_handler(fake_message)
+            else:
+                # Если режим не активен - включаем диалог
+                state.mode = BotModes.DIALOG
+                dialog_handler(fake_message)
+        else:
+            # Если не удалось распознать
+            bot.send_message(
+                chat_id,
+                "Не получилось разобрать аудиосообщение. Можно, пожалуйста, коротко написать текстом, что вы хотите сделать с перепланировкой?"
+            )
+
+    except Exception as e:
+        print(f"❌ Ошибка обработки аудио: {e}")
+        bot.send_message(
+            chat_id,
+            "Не получилось разобрать аудиосообщение. Можно, пожалуйста, коротко написать текстом, что вы хотите сделать с перепланировкой?"
+        )
 
 # ========== ОБРАБОТКА ФАЙЛОВ ==========
 
