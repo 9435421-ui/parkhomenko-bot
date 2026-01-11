@@ -509,29 +509,45 @@ def mode_select_handler(call):
     # Выбор режима работы
     if call.data == "mode_quiz":
         state.mode = BotModes.QUIZ
-        state.quiz_step = 2  # Начинаем с шага 2, имя уже есть
-
-        # ПЕРЕДАЧА КОНТЕКСТА ИЗ ДИАЛОГА В КВИЗ
+        # Извлекаем данные из истории диалога если есть
         if state.dialog_history:
-            # Извлекаем город из истории диалога
-            for msg in reversed(state.dialog_history):
-                if msg['role'] == 'user' and any(city in msg['text'].lower() for city in ['москва', 'химки', 'сочи', 'краснодар', 'спб', 'питер']):
-                    if 'химки' in msg['text'].lower():
-                        state.city = 'Химки'
-                        state.quiz_step = 5  # Пропускаем шаг города
-                    elif 'сочи' in msg['text'].lower():
-                        state.city = 'Сочи'
-                        state.quiz_step = 5
-                    elif 'краснодар' in msg['text'].lower():
-                        state.city = 'Краснодар'
-                        state.quiz_step = 5
+            # Извлекаем город
+            for msg in state.dialog_history:
+                text_lower = msg.get('text', '').lower()
+                if 'москв' in text_lower:
+                    state.city = 'Москва'
+                elif 'химк' in text_lower:
+                    state.city = 'Химки'
+                elif 'сочи' in text_lower:
+                    state.city = 'Сочи'
+                # Добавь другие города по необходимости
+
+            # Извлекаем этаж (формат 2/5, 16/25 и т.п.)
+            for msg in state.dialog_history:
+                text = msg.get('text', '')
+                if '/' in text and text.replace('/', '').isdigit():
+                    parts = text.split('/')
+                    if len(parts) == 2:
+                        state.floor = parts[0]
+                        state.total_floors = parts[1]
+
+            # Извлекаем описание работ
+            for msg in state.dialog_history:
+                text_lower = msg.get('text', '').lower()
+                if any(word in text_lower for word in ['объединить', 'перенести', 'расширить', 'убрать', 'снести']):
+                    state.change_plan = msg.get('text', '')
                     break
 
-            # Извлекаем запрос из истории
-            for msg in reversed(state.dialog_history):
-                if msg['role'] == 'user' and any(word in msg['text'].lower() for word in ['ванную', 'туалет', 'кухню', 'балкон', 'лоджию']):
-                    state.change_plan = msg['text']
-                    break
+            # Пропускаем заполненные шаги
+            state.quiz_step = 2  # Начинаем с шага 2, имя уже есть
+            if state.city:
+                state.quiz_step = 5  # Пропускаем город
+            if state.floor:
+                state.quiz_step = 6  # Пропускаем этаж
+            if state.change_plan:
+                state.quiz_step = 8  # Пропускаем описание
+        else:
+            state.quiz_step = 2  # Начинаем с шага 2, имя уже есть
 
         bot.send_message(
             user_id,
@@ -656,6 +672,20 @@ def dialog_handler(message):
         show_privacy_consent(chat_id)
         return
 
+    # Распознавание frustration - клиент раздражён
+    frustration_words = ["шоке", "кругу", "переспрашиваете", "раздражает", "повторяете",
+                         "не понимаете", "не слушаете", "уже говорил", "уже писал"]
+    if any(word in message.text.lower() for word in frustration_words):
+        bot.send_message(
+            chat_id,
+            f"Извините за неудобство, {state.name}! Давайте я помогу вам прямо здесь.\n\n"
+            f"Вы хотите объединить ванную и туалет в {state.city if state.city else 'вашем городе'}, "
+            f"{'этаж ' + state.floor if state.floor else 'на вашем этаже'}. "
+            f"Наш специалист может приехать на осмотр, сделать замеры и подготовить проект. "
+            f"Хотите обсудить детали или соединить со специалистом?"
+        )
+        return
+
     # Проверка на запрос связи с человеком
     trigger_words = ["соедините", "специалист", "менеджер", "человек", "живой", "реальный", "заказать", "связаться"]
     if any(word in message.text.lower() for word in trigger_words):
@@ -763,22 +793,8 @@ def dialog_handler(message):
     state.dialog_history.append({"role": "assistant", "text": response})
     bot.send_message(chat_id, response)
 
-    # После 3-х вопросов — записка + предложение заявки
-    user_messages_count = len([h for h in state.dialog_history if h['role'] == 'user'])
-    if user_messages_count == 3:
-        manager_brief = generate_manager_brief(chat_id)
-        try:
-            bot.send_message(LEADS_GROUP_CHAT_ID, manager_brief)
-        except Exception as e:
-            print(f"❌ Ошибка отправки записки: {e}")
-
-        markup = types.InlineKeyboardMarkup()
-        markup.add(types.InlineKeyboardButton("📝 Оставить заявку", callback_data="mode_quiz"))
-        bot.send_message(
-            chat_id,
-            f"{state.name}, для детального расчёта и консультации оставьте заявку:",
-            reply_markup=markup
-        )
+    # УБРАНА автоматическая отправка заявки после 3 сообщений
+    # Теперь квиз запускается ТОЛЬКО по кнопке "📝 Оставить заявку" или явной просьбе клиента
 
 # ========== БЫСТРАЯ КОНСУЛЬТАЦИЯ ==========
 
