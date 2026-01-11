@@ -405,9 +405,23 @@ def initial_contact_handler(message):
     user_id = message.chat.id
     state = get_user_state(user_id)
     consent = get_user_consent(user_id)
-    
+
     state.phone = message.contact.phone_number
     consent.contact_received = True
+
+    # МИНИМАЛЬНЫЙ ЛИД после получения контакта
+    contact_lead = f"""
+🆕 НОВЫЙ КОНТАКТ: {message.contact.first_name} {message.contact.last_name or ''}
+📞 Телефон: {state.phone}
+👤 User ID: {user_id}
+🕐 Время: {datetime.datetime.now().strftime("%d.%m.%Y %H:%M")}
+    """.strip()
+
+    try:
+        bot.send_message(LEADS_GROUP_CHAT_ID, contact_lead)
+        print(f"✅ Минимальный лид отправлен: {message.contact.first_name}, {state.phone}")
+    except Exception as e:
+        print(f"❌ Ошибка отправки минимального лида: {e}")
     
     # Извлекаем имя из контакта
     contact_name = message.contact.first_name or ""
@@ -473,7 +487,28 @@ def time_handler(message):
     chat_id = message.chat.id
     state = get_user_state(chat_id)
 
-    preferred_time = message.text.strip()
+    preferred_time = message.text.strip().lower()
+
+    # Проверяем рабочее время
+    now = datetime.datetime.now()
+    current_day = now.weekday()  # 0-6, где 0 - понедельник
+    current_hour = now.hour
+
+    # Рабочие дни: пн-пт (0-4), рабочие часы: 9-18, сб (5): 10-16
+    is_working_day = current_day < 5  # пн-пт
+    is_working_saturday = current_day == 5 and 10 <= current_hour < 16
+    is_working_hours = (is_working_day and 9 <= current_hour < 18) or is_working_saturday
+
+    # Если клиент хочет поговорить сейчас, но нерабочее время
+    if any(word in preferred_time for word in ["сейчас", "немедленно", "прямо сейчас", "сейчас же"]) and not is_working_hours:
+        bot.send_message(
+            chat_id,
+            f"{state.name}, сейчас нерабочее время. Специалисты работают:\n"
+            f"📞 пн-пт: 9:00-18:00\n"
+            f"📞 сб: 10:00-16:00\n\n"
+            f"Укажите удобное время в рабочее время, и мы обязательно перезвоним!"
+        )
+        return
 
     lead_update = f"""
 📞 Уточнение времени звонка
@@ -711,6 +746,9 @@ def dialog_handler(message):
     # Проверка на запрос связи с человеком
     trigger_words = ["соедините", "специалист", "менеджер", "человек", "живой", "реальный", "заказать", "связаться"]
     if any(word in message.text.lower() for word in trigger_words):
+        # Создаём лид НЕМЕДЛЕННО при запросе специалиста
+        save_lead_and_notify(chat_id)
+
         # Генерируем пояснительную записку для менеджера
         if len(state.dialog_history) > 0:
             manager_brief = generate_manager_brief(chat_id)
@@ -723,6 +761,7 @@ def dialog_handler(message):
         bot.send_message(
             chat_id,
             f"{state.name}, отлично! Наш специалист свяжется с вами по номеру {state.phone}.\n\n"
+            f"📞 Специалисты работают: пн-пт 9:00-18:00, сб 10:00-16:00\n\n"
             "Укажите, пожалуйста, в какое время вам удобно принять звонок?"
         )
         state.mode = "waiting_time"
