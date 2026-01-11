@@ -92,6 +92,7 @@ class UserState:
         self.has_plan = False
         self.plan_path = None
         self.change_plan = None
+        self.voice_used = False
 
 
 user_states: dict[int, UserState] = {}
@@ -377,60 +378,43 @@ def ask_yandex_gpt_with_context(
 # --------- Yandex SpeechKit (Voice Transcription) ---------
 
 
-def transcribe_audio(file_path: str) -> Optional[str]:
-    """
-    Транскрибирует аудиофайл через Yandex SpeechKit STT API
-    Возвращает распознанный текст или None при ошибке
-    """
+def transcribe_audio(file_path: str) -> str:
     try:
-        # Проверяем существование файла
-        if not os.path.exists(file_path):
-            print(f"❌ Файл не найден: {file_path}")
-            return None
-
-        # Читаем файл
-        with open(file_path, "rb") as f:
+        with open(file_path, 'rb') as f:
             audio_data = f.read()
 
-        # Заголовки для SpeechKit API
         headers = {
-            "Authorization": f"Api-Key {YANDEX_API_KEY}",
-            "Content-Type": "audio/ogg",  # Telegram voice messages обычно в OGG/Opus
+            'Authorization': f'Api-Key {YANDEX_API_KEY}',
         }
 
-        # Параметры запроса для русского языка
+        if file_path.endswith('.ogg'):
+            content_type = 'audio/ogg;codecs=opus'
+        elif file_path.endswith('.mp3'):
+            content_type = 'audio/mpeg'
+        else:
+            content_type = 'audio/mpeg'
+
+        headers['Content-Type'] = content_type
+
         params = {
-            "folderId": FOLDER_ID,
-            "lang": "ru-RU",
-            "format": "oggopus",  # Формат Telegram voice messages
+            'lang': 'ru-RU',
+            'folderId': FOLDER_ID
         }
 
-        # Отправляем запрос в SpeechKit
-        response = requests.post(
-            "https://stt.api.cloud.yandex.net/speech/v1/stt:recognize",
-            headers=headers,
-            params=params,
-            data=audio_data,
-            timeout=30,
-        )
+        url = 'https://stt.api.cloud.yandex.net/speech/v1/stt:recognize'
+
+        response = requests.post(url, headers=headers, params=params, data=audio_data, timeout=30)
 
         if response.status_code == 200:
             result = response.json()
-            text = result.get("result", "").strip()
-
-            if text:
-                print(f"✅ Распознано: '{text}'")
-                return text
-            else:
-                print("⚠️ Пустой результат распознавания")
-                return None
+            return result.get('result', '')
         else:
-            print(f"❌ Ошибка SpeechKit API: {response.status_code} - {response.text}")
-            return None
+            print(f"STT API error: {response.status_code} - {response.text}")
+            return ''
 
     except Exception as e:
-        print(f"❌ Ошибка транскрибации: {e}")
-        return None
+        print(f"Error in transcribe_audio: {e}")
+        return ''
 
 
 # --------- Хэндлеры согласий ---------
@@ -1268,7 +1252,7 @@ def handle_voice(message):
             )()
 
             # Уведомляем пользователя о распознавании
-            if not hasattr(state, "voice_used") or not state.voice_used:
+            if not state.voice_used:
                 bot.send_message(
                     chat_id,
                     f"🎤 Расшифровала ваше голосовое сообщение и сейчас отвечу по сути.",
@@ -1343,7 +1327,7 @@ def handle_audio(message):
             )()
 
             # Уведомляем пользователя о распознавании
-            if not hasattr(state, "voice_used") or not state.voice_used:
+            if not state.voice_used:
                 bot.send_message(
                     chat_id,
                     f"🎵 Расшифровала ваше аудиосообщение и сейчас отвечу по сути.",
