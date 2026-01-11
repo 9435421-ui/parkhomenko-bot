@@ -509,6 +509,8 @@ def mode_select_handler(call):
     # Выбор режима работы
     if call.data == "mode_quiz":
         state.mode = BotModes.QUIZ
+        state.quiz_step = 2  # По умолчанию начинаем с шага 2
+
         # Извлекаем данные из истории диалога если есть
         if state.dialog_history:
             # Извлекаем город
@@ -516,43 +518,56 @@ def mode_select_handler(call):
                 text_lower = msg.get('text', '').lower()
                 if 'москв' in text_lower:
                     state.city = 'Москва'
+                    state.quiz_step = 5  # Пропускаем шаг города
                 elif 'химк' in text_lower:
                     state.city = 'Химки'
+                    state.quiz_step = 5
                 elif 'сочи' in text_lower:
                     state.city = 'Сочи'
-                # Добавь другие города по необходимости
+                    state.quiz_step = 5
+                elif any(city in text_lower for city in ['краснодар', 'петербург', 'екатеринбург']):
+                    state.city = msg.get('text', '').strip()
+                    state.quiz_step = 5
 
             # Извлекаем этаж (формат 2/5, 16/25 и т.п.)
             for msg in state.dialog_history:
                 text = msg.get('text', '')
-                if '/' in text and text.replace('/', '').isdigit():
+                if '/' in text and len(text.split('/')) == 2:
                     parts = text.split('/')
-                    if len(parts) == 2:
-                        state.floor = parts[0]
-                        state.total_floors = parts[1]
+                    if parts[0].strip().isdigit() and parts[1].strip().isdigit():
+                        state.floor = parts[0].strip()
+                        state.total_floors = parts[1].strip()
+                        if state.quiz_step == 5:
+                            state.quiz_step = 6  # Пропускаем этаж
 
             # Извлекаем описание работ
             for msg in state.dialog_history:
                 text_lower = msg.get('text', '').lower()
-                if any(word in text_lower for word in ['объединить', 'перенести', 'расширить', 'убрать', 'снести']):
+                if any(word in text_lower for word in ['объединить', 'перенести', 'расширить',
+                                                        'убрать', 'снести', 'увеличить']):
                     state.change_plan = msg.get('text', '')
+                    if state.quiz_step == 6:
+                        state.quiz_step = 7  # Пропускаем описание
                     break
 
-            # Пропускаем заполненные шаги
-            state.quiz_step = 2  # Начинаем с шага 2, имя уже есть
-            if state.city:
-                state.quiz_step = 5  # Пропускаем город
-            if state.floor:
-                state.quiz_step = 6  # Пропускаем этаж
-            if state.change_plan:
-                state.quiz_step = 8  # Пропускаем описание
+        # Отправляем соответствующий вопрос в зависимости от шага
+        if state.quiz_step == 2:
+            bot.send_message(
+                user_id,
+                "Если у вас есть дополнительный способ связи (WhatsApp/почта/другой номер) — напишите его, или отправьте «нет»."
+            )
+        elif state.quiz_step == 5:
+            bot.send_message(user_id, "Укажите этаж и этажность дома (например: 5/9 или просто 5):")
+        elif state.quiz_step == 6:
+            bot.send_message(user_id, "Перепланировка уже выполнена или только планируете? Напишите 'выполнена' или 'планируется'.")
+        elif state.quiz_step == 7:
+            bot.send_message(user_id, "Кратко опишите, что хотите изменить в перепланировке (объединить комнаты, перенести санузел, расширить кухню и т.п.).")
         else:
-            state.quiz_step = 2  # Начинаем с шага 2, имя уже есть
-
-        bot.send_message(
-            user_id,
-            "Если у вас есть дополнительный способ связи (WhatsApp/почта/другой номер) — напишите его, или отправьте «нет»."
-        )
+            # Если пропустили всё - переходим к БТИ
+            bot.send_message(
+                user_id,
+                "Если у вас есть дополнительный способ связи (WhatsApp/почта/другой номер) — напишите его, или отправьте «нет»."
+            )
         
     elif call.data == "mode_dialog":
         state.mode = BotModes.DIALOG
@@ -674,17 +689,24 @@ def dialog_handler(message):
 
     # Распознавание frustration - клиент раздражён
     frustration_words = ["шоке", "кругу", "переспрашиваете", "раздражает", "повторяете",
-                         "не понимаете", "не слушаете", "уже говорил", "уже писал"]
+                         "не понимаете", "не слушаете", "уже говорил", "уже писал", "забываете"]
     if any(word in message.text.lower() for word in frustration_words):
-        bot.send_message(
-            chat_id,
-            f"Извините за неудобство, {state.name}! Давайте я помогу вам прямо здесь.\n\n"
-            f"Вы хотите объединить ванную и туалет в {state.city if state.city else 'вашем городе'}, "
-            f"{'этаж ' + state.floor if state.floor else 'на вашем этаже'}. "
-            f"Наш специалист может приехать на осмотр, сделать замеры и подготовить проект. "
-            f"Хотите обсудить детали или соединить со специалистом?"
-        )
+        # Формируем краткую сводку что мы уже знаем
+        summary = f"Извините за неудобство, {state.name}! Давайте я помогу вам прямо здесь.\n\n"
+
+        if state.city:
+            summary += f"Город: {state.city}\n"
+        if state.floor:
+            summary += f"Этаж: {state.floor}\n"
+        if state.change_plan:
+            summary += f"Планируете: {state.change_plan}\n"
+
+        summary += "\nНаш специалист может приехать на объект, сделать замеры и подготовить проект. Хотите обсудить детали здесь или соединить со специалистом?"
+
+        bot.send_message(chat_id, summary)
         return
+
+    # Удален дублированный код frustration recognition
 
     # Проверка на запрос связи с человеком
     trigger_words = ["соедините", "специалист", "менеджер", "человек", "живой", "реальный", "заказать", "связаться"]
