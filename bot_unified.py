@@ -159,10 +159,7 @@ def show_ai_disclaimer(chat_id: int):
 def show_main_menu(chat_id: int):
     markup = types.InlineKeyboardMarkup()
     markup.add(
-        types.InlineKeyboardButton("💬 Задать вопрос", callback_data="mode_question")
-    )
-    markup.add(
-        types.InlineKeyboardButton("📝 Оставить заявку", callback_data="mode_quiz")
+        types.InlineKeyboardButton(" Оставить заявку", callback_data="mode_quiz")
     )
     bot.send_message(chat_id, "Выберите, чем Антон может помочь:", reply_markup=markup)
 
@@ -744,22 +741,6 @@ def mode_select_handler(call):
                 "Если у вас есть дополнительный способ связи (WhatsApp/почта/другой номер) — напишите его, или отправьте «нет».",
             )
 
-    elif call.data == "mode_question":
-        markup = types.InlineKeyboardMarkup()
-        markup.add(
-            types.InlineKeyboardButton("📝 Оставить заявку", callback_data="mode_quiz")
-        )
-        markup.add(
-            types.InlineKeyboardButton("↩️ Вернуться в главное меню", callback_data="show_menu")
-        )
-        bot.send_message(
-            user_id,
-            "Сейчас Антон работает как бот для заявок.\n\n"
-            "Я могу собрать информацию по вашей квартире и передать её специалисту.\n\n"
-            "Если хотите, нажмите \"Оставить заявку\" — это 1–2 минуты.",
-            reply_markup=markup
-        )
-
     elif call.data == "mode_dialog":
         state.mode = BotModes.DIALOG
         bot.send_message(
@@ -769,9 +750,6 @@ def mode_select_handler(call):
     elif call.data == "mode_quick":
         state.mode = BotModes.QUICK
         bot.send_message(user_id, f"{state.name}, напишите свой вопрос.")
-
-    elif call.data == "show_menu":
-        show_main_menu(user_id)
 
     # Выбор типа объекта в квизе
     elif call.data.startswith("obj_") and state.mode == BotModes.QUIZ:
