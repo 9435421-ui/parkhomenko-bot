@@ -159,9 +159,9 @@ def show_ai_disclaimer(chat_id: int):
 def show_main_menu(chat_id: int):
     markup = types.InlineKeyboardMarkup()
     markup.add(
-        types.InlineKeyboardButton(" Оставить заявку", callback_data="mode_quiz")
+        types.InlineKeyboardButton("📝 Оставить заявку", callback_data="mode_quiz")
     )
-    bot.send_message(chat_id, "Выберите, чем Антон может помочь:", reply_markup=markup)
+    bot.send_message(chat_id, "Чем Антон может вам помочь?", reply_markup=markup)
 
 
 # --------- Лиды ---------
