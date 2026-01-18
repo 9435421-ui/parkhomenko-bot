@@ -1450,7 +1450,7 @@ def generate_content_cmd(message):
             markup.add(types.InlineKeyboardButton("❌ Удалить", callback_data=f"delete_{post['id']}"))
 
             try:
-                bot.send_message(LEADS_GROUP_CHAT_ID, text, reply_markup=markup, parse_mode='Markdown', message_thread_id=thread_id)
+                bot.send_message(LEADS_GROUP_CHAT_ID, text, reply_markup=markup, message_thread_id=thread_id)
             except Exception as e:
                 logging.error(f"Failed to send draft to group: {e}")
 
@@ -1500,7 +1500,7 @@ def show_plan_cmd(message):
         markup.add(types.InlineKeyboardButton("❌ Удалить", callback_data=f"delete_{post['id']}"))
 
         try:
-            bot.send_message(LEADS_GROUP_CHAT_ID, text, reply_markup=markup, parse_mode='Markdown', message_thread_id=thread_id)
+            bot.send_message(LEADS_GROUP_CHAT_ID, text, reply_markup=markup, message_thread_id=thread_id)
         except Exception as e:
             logging.error(f"Failed to send draft to group: {e}")
 
