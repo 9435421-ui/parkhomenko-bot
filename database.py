@@ -67,6 +67,18 @@ class Database:
                     published_at TEXT
                 )
             """
+            subscribers_sql = """
+                CREATE TABLE IF NOT EXISTS subscribers (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    user_id INTEGER UNIQUE NOT NULL,
+                    username TEXT,
+                    first_name TEXT,
+                    last_name TEXT,
+                    birthday TEXT,  -- format: DD.MM or DD.MM.YYYY
+                    added_at TEXT NOT NULL,
+                    notes TEXT
+                )
+            """
         else:
             # PostgreSQL syntax
             leads_sql = """
@@ -95,10 +107,23 @@ class Database:
                     published_at TIMESTAMP
                 )
             """
+            subscribers_sql = """
+                CREATE TABLE IF NOT EXISTS subscribers (
+                    id SERIAL PRIMARY KEY,
+                    user_id INTEGER UNIQUE NOT NULL,
+                    username TEXT,
+                    first_name TEXT,
+                    last_name TEXT,
+                    birthday TEXT,  -- format: DD.MM or DD.MM.YYYY
+                    added_at TIMESTAMP NOT NULL,
+                    notes TEXT
+                )
+            """
 
         async with self.conn.cursor() as cur:
             await cur.execute(leads_sql)
             await cur.execute(content_sql)
+            await cur.execute(subscribers_sql)
         await self.conn.commit()
 
     # Функции для работы с лидами
@@ -185,6 +210,61 @@ class Database:
             await cur.execute(query)
             rows = await cur.fetchall()
             return [dict(row) for row in rows]
+
+    # Функции для работы с подписчиками (дни рождения и праздники)
+    async def add_subscriber(self, user_id, username=None, first_name=None, last_name=None,
+                           birthday=None, notes=None):
+        """Добавить подписчика"""
+        query = """
+            INSERT OR REPLACE INTO subscribers (user_id, username, first_name, last_name, birthday, added_at, notes)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+        """
+        async with self.conn.cursor() as cur:
+            await cur.execute(query, (user_id, username, first_name, last_name,
+                                    birthday, datetime.now().isoformat(), notes))
+        await self.conn.commit()
+
+    async def remove_subscriber(self, user_id):
+        """Удалить подписчика"""
+        query = "DELETE FROM subscribers WHERE user_id=?"
+        async with self.conn.cursor() as cur:
+            await cur.execute(query, (user_id,))
+        await self.conn.commit()
+
+    async def get_subscriber(self, user_id):
+        """Получить подписчика по user_id"""
+        query = "SELECT * FROM subscribers WHERE user_id=?"
+        async with self.conn.cursor() as cur:
+            await cur.execute(query, (user_id,))
+            row = await cur.fetchone()
+            return dict(row) if row else None
+
+    async def get_all_subscribers(self):
+        """Получить всех подписчиков"""
+        query = "SELECT * FROM subscribers ORDER BY added_at DESC"
+        async with self.conn.cursor() as cur:
+            await cur.execute(query)
+            rows = await cur.fetchall()
+            return [dict(row) for row in rows]
+
+    async def get_today_birthdays(self):
+        """Получить подписчиков с днем рождения сегодня"""
+        today = datetime.now().strftime("%d.%m")
+        query = """
+            SELECT * FROM subscribers
+            WHERE birthday LIKE ? OR birthday LIKE ?
+        """
+        async with self.conn.cursor() as cur:
+            await cur.execute(query, (f"{today}.%", f"{today}"))
+            rows = await cur.fetchall()
+            return [dict(row) for row in rows]
+
+    async def update_subscriber_birthday(self, user_id, birthday):
+        """Обновить день рождения подписчика"""
+        query = "UPDATE subscribers SET birthday=? WHERE user_id=?"
+        async with self.conn.cursor() as cur:
+            await cur.execute(query, (birthday, user_id))
+        await self.conn.commit()
 
 # Глобальный экземпляр базы данных
 db = Database()
