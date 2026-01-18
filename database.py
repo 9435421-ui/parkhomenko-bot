@@ -224,7 +224,7 @@ class Database:
                                     birthday, datetime.now().isoformat(), notes))
         await self.conn.commit()
 
-    async def remove_subscriber(self, user_id):
+    async def delete_subscriber(self, user_id):
         """Удалить подписчика"""
         query = "DELETE FROM subscribers WHERE user_id=?"
         async with self.conn.cursor() as cur:
@@ -258,6 +258,48 @@ class Database:
             await cur.execute(query, (f"{today}.%", f"{today}"))
             rows = await cur.fetchall()
             return [dict(row) for row in rows]
+
+    async def get_upcoming_birthdays(self, days_ahead=7):
+        """Получить подписчиков с днями рождения в ближайшие N дней"""
+        from datetime import timedelta
+
+        # Получить всех подписчиков с днями рождения
+        all_subscribers = await self.get_all_subscribers()
+        upcoming = []
+        today = datetime.now().date()
+
+        for subscriber in all_subscribers:
+            if not subscriber.get('birthday'):
+                continue
+
+            try:
+                # Парсим день рождения (DD.MM или DD.MM.YYYY)
+                birthday_str = subscriber['birthday']
+                if '.' in birthday_str:
+                    parts = birthday_str.split('.')
+                    day = int(parts[0])
+                    month = int(parts[1])
+
+                    # Определяем год (текущий или следующий)
+                    current_year = today.year
+                    birthday_this_year = datetime(current_year, month, day).date()
+
+                    if birthday_this_year < today:
+                        # День рождения уже прошел в этом году, берем следующий год
+                        birthday_this_year = datetime(current_year + 1, month, day).date()
+
+                    # Проверяем, попадает ли в диапазон
+                    days_until_birthday = (birthday_this_year - today).days
+                    if 0 <= days_until_birthday <= days_ahead:
+                        subscriber_copy = subscriber.copy()
+                        subscriber_copy['days_until_birthday'] = days_until_birthday
+                        upcoming.append(subscriber_copy)
+
+            except (ValueError, IndexError):
+                # Пропускаем некорректные даты
+                continue
+
+        return upcoming
 
     async def update_subscriber_birthday(self, user_id, birthday):
         """Обновить день рождения подписчика"""
