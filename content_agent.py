@@ -1,0 +1,195 @@
+import requests
+import os
+from datetime import datetime, timedelta
+import json
+
+class ContentAgent:
+    def __init__(self):
+        self.folder_id = os.getenv("YANDEX_FOLDER_ID")
+        self.api_key = os.getenv("YANDEX_API_KEY")
+        self.endpoint = "https://llm.api.cloud.yandex.net/foundationModels/v1/completion"
+        self.brief_content = self._load_brief()
+
+    def _load_brief(self):
+        """Загружает базу знаний"""
+        try:
+            with open("BRIEF_pereplanirovki.md", "r", encoding="utf-8") as f:
+                return f.read()
+        except FileNotFoundError:
+            return "База знаний не найдена. Используйте общие знания по перепланировкам."
+
+    def generate_posts(self, count=7, post_types=None):
+        """
+        Генерирует N постов
+        post_types: {'экспертиза': 5, 'живой': 1, 'новость': 1}
+        """
+        if post_types is None:
+            post_types = {'экспертиза': count - 1, 'живой': 1}
+
+        posts = []
+        start_date = datetime.now() + timedelta(days=1)
+        start_date = start_date.replace(hour=10, minute=0, second=0)
+
+        for post_type, num in post_types.items():
+            for i in range(num):
+                prompt = self._build_prompt(post_type)
+                text = self._call_yandex_gpt(prompt)
+
+                # Парсим ответ: заголовок (опционально), текст, CTA
+                title, body, cta = self._parse_response(text)
+
+                post = {
+                    'type': post_type,
+                    'title': title,
+                    'body': body,
+                    'cta': cta,
+                    'publish_date': start_date + timedelta(days=len(posts))
+                }
+                posts.append(post)
+
+        return posts
+
+    def _build_prompt(self, post_type):
+        """Формирует промпт для конкретного типа поста"""
+        season = self._get_season_context()
+
+        prompts = {
+            'экспертиза': f"""
+Создай экспертный пост для Telegram-канала по перепланировкам квартир в Москве.
+
+Контекст сезона: {season}
+
+Требования:
+- Разбор одной конкретной нормы, процедуры или типичной ошибки
+- 150–300 слов, экспертно, без воды
+- Конкретный пример или кейс из практики
+- Обязательный CTA к боту @Parkhovenko_i_kompaniya_bot
+
+Формат ответа:
+[Заголовок или вопрос] (опционально)
+
+[Основной текст поста]
+
+👉 [CTA с призывом к действию]
+""",
+            'живой': f"""
+Создай «живой» пост для Telegram-канала по перепланировкам.
+
+Контекст сезона: {season}
+
+Требования:
+- Привязка к текущим событиям (погода, отключения ЖКХ, сезонные проблемы жильцов)
+- 150–250 слов, по-человечески, с личной ноткой
+- Мягкий переход к теме перепланировок и рисков
+- CTA к боту @Parkhovenko_i_kompaniya_bot
+
+Формат ответа:
+[Сезонный зацеп или наблюдение]
+
+[Связка с темой перепланировок]
+
+👉 [CTA]
+""",
+            'новость': f"""
+ Создай новостной пост для Telegram-канала по перепланировкам.
+
+Требования:
+- Объявление об изменении норм, новом разъяснении или важном кейсе
+- 120–200 слов, кратко и чётко
+- Что изменилось и чем это чревато для жильцов
+- CTA к боту @Parkhovenko_i_kompaniya_bot для разбора конкретной ситуации
+
+Формат ответа:
+[Новость простыми словами]
+
+[Что это значит для жильцов]
+
+👉 [CTA]
+"""
+        }
+
+        return prompts.get(post_type, prompts['экспертиза'])
+
+    def _get_season_context(self):
+        """Определяет сезонный контекст"""
+        month = datetime.now().month
+
+        contexts = {
+            (12, 1, 2): "Зима: снег завалил Москву, промерзающие окна, отключения отопления, сосульки на козырьках, утепление",
+            (3, 4, 5): "Весна: отключение горячей воды, подготовка к ремонтному сезону, пора задуматься о перепланировке",
+            (6, 7, 8): "Лето: пик ремонтного сезона, активные перепланировки",
+            (9, 10, 11): "Осень: включение отопления, завершение ремонтов перед зимой"
+        }
+
+        for months, context in contexts.items():
+            if month in months:
+                return context
+        return contexts[(12, 1, 2)]
+
+    def _call_yandex_gpt(self, user_prompt):
+        """Вызов YandexGPT API"""
+        system_prompt = f"""
+Ты — контент-менеджер Telegram-канала по перепланировкам квартир в Москве.
+
+Задача: генерировать посты, которые прогревают к заявке в бота @Parkhovenko_i_kompaniya_bot.
+
+Стиль: экспертно, по-деловому, без воды, с понятными примерами и чёткими CTA.
+
+База знаний:
+{self.brief_content[:3000]}  # обрезаем до 3000 символов, чтобы уместиться в контекст
+
+Каждый пост должен вести читателя к следующему шагу: подписка, бот, заявка.
+"""
+
+        headers = {
+            "Content-Type": "application/json",
+            "Authorization": f"Api-Key {self.api_key}",
+            "x-folder-id": self.folder_id
+        }
+
+        payload = {
+            "modelUri": f"gpt://{self.folder_id}/yandexgpt/latest",
+            "completionOptions": {
+                "stream": False,
+                "temperature": 0.7,
+                "maxTokens": 2000
+            },
+            "messages": [
+                {"role": "system", "text": system_prompt},
+                {"role": "user", "text": user_prompt}
+            ]
+        }
+
+        response = requests.post(self.endpoint, headers=headers, json=payload, timeout=30)
+        response.raise_for_status()
+
+        result = response.json()
+        return result['result']['alternatives'][0]['message']['text']
+
+    def _parse_response(self, text):
+        """Парсит ответ LLM на title, body, cta"""
+        lines = text.strip().split('\n')
+
+        # Ищем CTA (строки с 👉 или "CTA:")
+        cta_line = None
+        for i, line in enumerate(lines):
+            if '👉' in line or 'CTA:' in line.upper():
+                cta_line = i
+                break
+
+        if cta_line:
+            cta = '\n'.join(lines[cta_line:]).strip()
+            body_lines = lines[:cta_line]
+        else:
+            cta = ""
+            body_lines = lines
+
+        # Первая строка может быть заголовком, если она короткая
+        title = ""
+        if body_lines and len(body_lines[0]) < 100:
+            title = body_lines[0].strip('#').strip()
+            body_lines = body_lines[1:]
+
+        body = '\n'.join(body_lines).strip()
+
+        return title, body, cta
