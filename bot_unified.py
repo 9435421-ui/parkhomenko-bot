@@ -1404,8 +1404,8 @@ def test_rag_handler(message):
 @bot.message_handler(commands=["generate_content"])
 def generate_content_cmd(message):
     """Генерация контент-плана на неделю"""
-    if message.from_user.id != ADMIN_ID:
-        bot.send_message(message.chat.id, "❌ Доступ запрещен")
+    if message.chat.id != LEADS_GROUP_CHAT_ID:
+        bot.send_message(message.chat.id, "❌ Команды доступны только в управляющей группе")
         return
 
     import asyncio
@@ -1434,6 +1434,10 @@ def generate_content_cmd(message):
 @bot.message_handler(commands=["show_plan"])
 def show_plan_cmd(message):
     """Показать контент-план"""
+    if message.chat.id != LEADS_GROUP_CHAT_ID:
+        bot.send_message(message.chat.id, "❌ Команды доступны только в управляющей группе")
+        return
+
     import asyncio
 
     # Получаем черновики
@@ -1454,6 +1458,9 @@ def show_plan_cmd(message):
 @bot.callback_query_handler(func=lambda call: call.data.startswith("approve_") or call.data.startswith("delete_"))
 def content_callback_handler(call):
     """Обработка кнопок approve/delete"""
+    if call.message.chat.id != LEADS_GROUP_CHAT_ID:
+        return
+
     post_id = int(call.data.split('_')[1])
 
     import asyncio
