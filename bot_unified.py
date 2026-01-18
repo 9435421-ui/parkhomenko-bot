@@ -1475,8 +1475,10 @@ import asyncio
 # Подключаемся к БД
 asyncio.run(db.connect())
 
-# Запускаем автопостер
-asyncio.create_task(run_auto_poster(bot, CHANNEL_ID))
+# Запускаем автопостер в отдельном потоке
+import threading
+poster_thread = threading.Thread(target=lambda: asyncio.run(run_auto_poster(bot, CHANNEL_ID)), daemon=True)
+poster_thread.start()
 
 print("🤖 Бот «Пархоменко и компания» запущен...")
 print(f"📁 База знаний: {KNOWLEDGE_DIR}")
