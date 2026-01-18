@@ -1642,6 +1642,63 @@ def generate_greetings_cmd(message):
         bot.send_message(message.chat.id, f"❌ Ошибка генерации поздравлений: {str(e)}")
 
 
+@bot.message_handler(commands=["generate_welcome"])
+def generate_welcome_cmd(message):
+    """Генерировать приветственное сообщение для потенциального клиента (только для ADMIN_ID)"""
+    if message.from_user.id != ADMIN_ID:
+        bot.send_message(message.chat.id, "❌ Доступ запрещен")
+        return
+
+    import asyncio
+    import datetime
+
+    # Парсим имя из команды: /generate_welcome Иван или просто /generate_welcome
+    parts = message.text.split()
+    person_name = None
+    if len(parts) > 1:
+        person_name = ' '.join(parts[1:])  # всё после команды как имя
+
+    try:
+        # Генерируем приветственное сообщение
+        agent = ContentAgent()
+        post = agent.generate_welcome_post(person_name=person_name)
+
+        # Сохраняем как черновик
+        publish_date = datetime.datetime.now() + datetime.timedelta(days=1)  # Завтра в 10:00
+        publish_date = publish_date.replace(hour=10, minute=0, second=0, microsecond=0)
+
+        post_id = asyncio.run(db.save_post(
+            post_type='приветствие',
+            title=post.get('title', f"Приветствие для {'нового подписчика' if not person_name else person_name}"),
+            body=post['body'],
+            cta=post['cta'],
+            publish_date=publish_date
+        ))
+
+        # Отправляем в топик черновиков
+        text = f"[Тип: приветствие]\n\n{post['body']}\n\n{post['cta']}"
+        markup = types.InlineKeyboardMarkup()
+        markup.add(types.InlineKeyboardButton("✅ Утвердить", callback_data=f"approve_{post_id}"))
+        markup.add(types.InlineKeyboardButton("❌ Удалить", callback_data=f"delete_{post_id}"))
+
+        try:
+            bot.send_message(LEADS_GROUP_CHAT_ID, text, reply_markup=markup, message_thread_id=THREAD_ID_DRAFTS)
+
+            # Логируем
+            log_text = f"✅ Приветствие сгенерировано\nТип: приветствие\nПубликация: {publish_date.strftime('%d.%m.%Y %H:%M')}\nВремя: {datetime.datetime.now()}"
+            try:
+                bot.send_message(LEADS_GROUP_CHAT_ID, log_text, message_thread_id=THREAD_ID_LOGS)
+            except Exception as e:
+                print(f"Failed to send welcome log: {e}")
+
+            bot.send_message(message.chat.id, f"✅ Приветственное сообщение сгенерировано! Черновик отправлен в топик 'Черновики и идеи'.")
+        except Exception as e:
+            bot.send_message(message.chat.id, f"❌ Ошибка отправки приветствия: {str(e)}")
+
+    except Exception as e:
+        bot.send_message(message.chat.id, f"❌ Ошибка генерации приветствия: {str(e)}")
+
+
 @bot.message_handler(commands=["show_plan"])
 def show_plan_cmd(message):
     """Показать контент-план"""
