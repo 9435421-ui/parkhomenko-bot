@@ -1481,6 +1481,166 @@ def generate_content_cmd(message):
         bot.send_message(message.chat.id, f"❌ Ошибка генерации: {str(e)}")
 
 
+@bot.message_handler(commands=["add_subscriber"])
+def add_subscriber_cmd(message):
+    """Добавить подписчика в систему поздравлений (только для ADMIN_ID)"""
+    if message.from_user.id != ADMIN_ID:
+        bot.send_message(message.chat.id, "❌ Доступ запрещен")
+        return
+
+    import asyncio
+
+    # Парсим команду: /add_subscriber @username 15.03.1990 Заметка о клиенте
+    parts = message.text.split()
+    if len(parts) < 3:
+        bot.send_message(message.chat.id, "❌ Формат: /add_subscriber @username DD.MM.YYYY [заметка]")
+        return
+
+    username = parts[1].lstrip('@')
+    birthday = parts[2]
+
+    # Проверяем формат даты
+    try:
+        day, month, year = birthday.split('.')
+        day, month, year = int(day), int(month), int(year)
+        if not (1 <= day <= 31 and 1 <= month <= 12 and 1900 <= year <= 2100):
+            raise ValueError
+    except:
+        bot.send_message(message.chat.id, "❌ Неверный формат даты. Используйте DD.MM.YYYY")
+        return
+
+    notes = ' '.join(parts[3:]) if len(parts) > 3 else None
+
+    # Получаем user_id по username (упрощенная версия)
+    # В реальности нужно использовать bot.get_chat_member() или кэшировать пользователей
+    user_id = None
+    try:
+        # Для упрощения используем ADMIN_ID как placeholder
+        # В реальной реализации нужно получить user_id из username
+        user_id = ADMIN_ID  # Временный placeholder
+        first_name = username
+        last_name = None
+    except:
+        bot.send_message(message.chat.id, f"❌ Не удалось найти пользователя @{username}")
+        return
+
+    # Добавляем в базу
+    try:
+        asyncio.run(db.add_subscriber(
+            user_id=user_id,
+            username=username,
+            first_name=first_name,
+            last_name=last_name,
+            birthday=birthday,
+            notes=notes
+        ))
+        bot.send_message(message.chat.id, f"✅ Подписчик @{username} добавлен с днем рождения {birthday}")
+    except Exception as e:
+        bot.send_message(message.chat.id, f"❌ Ошибка добавления: {str(e)}")
+
+
+@bot.message_handler(commands=["list_birthdays"])
+def list_birthdays_cmd(message):
+    """Показать предстоящие дни рождения (только для ADMIN_ID)"""
+    if message.from_user.id != ADMIN_ID:
+        bot.send_message(message.chat.id, "❌ Доступ запрещен")
+        return
+
+    import asyncio
+
+    try:
+        upcoming = asyncio.run(db.get_upcoming_birthdays(7))
+
+        if not upcoming:
+            bot.send_message(message.chat.id, "📅 Нет предстоящих дней рождения на следующей неделе")
+            return
+
+        response = "🎂 Предстоящие дни рождения (следующие 7 дней):\n\n"
+        for person in upcoming:
+            days = person['days_until_birthday']
+            if days == 0:
+                when = "🎉 СЕГОДНЯ!"
+            elif days == 1:
+                when = "завтра"
+            else:
+                when = f"через {days} дней"
+
+            name = person.get('first_name') or person.get('username') or f"ID:{person['user_id']}"
+            birthday = person['birthday']
+            response += f"• {name} - {birthday} ({when})\n"
+
+        bot.send_message(message.chat.id, response)
+
+    except Exception as e:
+        bot.send_message(message.chat.id, f"❌ Ошибка получения списка: {str(e)}")
+
+
+@bot.message_handler(commands=["generate_greetings"])
+def generate_greetings_cmd(message):
+    """Генерировать поздравления для предстоящих дней рождения (только для ADMIN_ID)"""
+    if message.from_user.id != ADMIN_ID:
+        bot.send_message(message.chat.id, "❌ Доступ запрещен")
+        return
+
+    import asyncio
+    import datetime
+
+    try:
+        upcoming = asyncio.run(db.get_upcoming_birthdays(7))
+
+        if not upcoming:
+            bot.send_message(message.chat.id, "📅 Нет предстоящих дней рождения для генерации поздравлений")
+            return
+
+        generated_count = 0
+
+        for person in upcoming:
+            # Генерируем персональное поздравление
+            agent = ContentAgent()
+            name = person.get('first_name') or person.get('username') or "друг"
+            birthday = person['birthday']
+
+            # Создаем пост поздравления
+            posts = agent.generate_posts(
+                count=1,
+                post_types={'поздравление': 1},
+                theme=f"День рождения {name}, дата рождения {birthday}"
+            )
+
+            if posts:
+                post = posts[0]
+                # Сохраняем как черновик
+                publish_date = datetime.datetime.now() + datetime.timedelta(days=person['days_until_birthday'])
+
+                post_id = asyncio.run(db.save_post(
+                    post_type='поздравление',
+                    title=post.get('title', f"Поздравление для {name}"),
+                    body=post['body'],
+                    cta=post['cta'],
+                    publish_date=publish_date
+                ))
+
+                # Отправляем в топик черновиков
+                text = f"[Тип: поздравление]\n\n🎂 {name}\n\n{post['body']}\n\n{post['cta']}"
+                markup = types.InlineKeyboardMarkup()
+                markup.add(types.InlineKeyboardButton("✅ Утвердить", callback_data=f"approve_{post_id}"))
+                markup.add(types.InlineKeyboardButton("❌ Удалить", callback_data=f"delete_{post_id}"))
+
+                try:
+                    bot.send_message(LEADS_GROUP_CHAT_ID, text, reply_markup=markup, message_thread_id=THREAD_ID_DRAFTS)
+                    generated_count += 1
+                except Exception as e:
+                    print(f"Failed to send greeting: {e}")
+
+        if generated_count > 0:
+            bot.send_message(message.chat.id, f"✅ Сгенерировано {generated_count} поздравлений! Черновики отправлены в топик 'Черновики и идеи'.")
+        else:
+            bot.send_message(message.chat.id, "❌ Не удалось сгенерировать поздравления")
+
+    except Exception as e:
+        bot.send_message(message.chat.id, f"❌ Ошибка генерации поздравлений: {str(e)}")
+
+
 @bot.message_handler(commands=["show_plan"])
 def show_plan_cmd(message):
     """Показать контент-план"""
