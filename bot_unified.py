@@ -18,6 +18,11 @@ THREAD_ID_KVARTIRY = int(os.getenv("THREAD_ID_KVARTIRY", "0"))
 THREAD_ID_KOMMERCIA = int(os.getenv("THREAD_ID_KOMMERCIA", "0"))
 THREAD_ID_DOMA = int(os.getenv("THREAD_ID_DOMA", "0"))
 
+# Content Agent Topics
+THREAD_ID_DRAFTS = int(os.getenv("THREAD_ID_DRAFTS", "85"))
+THREAD_ID_SEASONAL = int(os.getenv("THREAD_ID_SEASONAL", "87"))
+THREAD_ID_LOGS = int(os.getenv("THREAD_ID_LOGS", "88"))
+
 ADMIN_ID = int(os.getenv("ADMIN_ID", "0"))
 CHANNEL_ID = os.getenv("CHANNEL_ID")
 
@@ -1405,44 +1410,67 @@ def test_rag_handler(message):
 def generate_content_cmd(message):
     """Генерация контент-плана на неделю"""
     if message.from_user.id != ADMIN_ID:
-        bot.send_message(message.chat.id, "❌ Доступ запрещен")
+        bot.reply_to(message, "❌ Команда доступна только администратору")
         return
 
     import asyncio
     import logging
     logging.info(f"!!! /generate_content called by user_id={message.from_user.id}")
 
-    # Генерируем посты
-    agent = ContentAgent()
-    posts = agent.generate_posts(7)
+    # Отвечаем админу сразу
+    bot.reply_to(message, "🤖 Генерирую контент-план на неделю... Это займёт ~30-60 секунд.")
 
-    # Сохраняем в БД
-    async def save_posts():
-        for post in posts:
-            await db.save_post(
-                post['type'],
-                post.get('title', ''),
-                post['body'],
-                post['cta'],
-                post['publish_date']
-            )
+    try:
+        # Генерируем посты
+        agent = ContentAgent()
+        posts = agent.generate_posts(7)
 
-    asyncio.run(save_posts())
+        # Сохраняем в БД
+        async def save_posts():
+            for post in posts:
+                await db.save_post(
+                    post['type'],
+                    post.get('title', ''),
+                    post['body'],
+                    post['cta'],
+                    post['publish_date']
+                )
 
-    # Отправляем черновики в группу
-    drafts = asyncio.run(db.get_draft_posts())
-    for post in drafts:
-        text = f"**{post['post_type']}**\n{post['body'][:200]}...\n\n{post['cta']}"
-        markup = types.InlineKeyboardMarkup()
-        markup.add(types.InlineKeyboardButton("✅ Одобрить", callback_data=f"approve_{post['id']}"))
-        markup.add(types.InlineKeyboardButton("❌ Удалить", callback_data=f"delete_{post['id']}"))
+        asyncio.run(save_posts())
+
+        # Отправляем черновики в соответствующие топики
+        drafts = asyncio.run(db.get_draft_posts())
+        for post in drafts:
+            # Определяем топик по типу поста
+            thread_id = THREAD_ID_SEASONAL if post['post_type'] in ['seasonal', 'живой'] else THREAD_ID_DRAFTS
+
+            text = f"[Тип: {post['post_type']}]\n\n📌 {post.get('title', '')}\n\n{post['body']}\n\n👉 {post['cta']}"
+            markup = types.InlineKeyboardMarkup()
+            markup.add(types.InlineKeyboardButton("✅ Утвердить", callback_data=f"approve_{post['id']}"))
+            markup.add(types.InlineKeyboardButton("❌ Удалить", callback_data=f"delete_{post['id']}"))
+
+            try:
+                bot.send_message(LEADS_GROUP_CHAT_ID, text, reply_markup=markup, parse_mode='Markdown', message_thread_id=thread_id)
+            except Exception as e:
+                logging.error(f"Failed to send draft to group: {e}")
+
+        # Логируем в THREAD_ID_LOGS
+        log_text = f"✅ Сгенерировано 7 постов в БД\n📝 Черновики отправлены в топики группы\nВремя: {datetime.datetime.now()}"
         try:
-            bot.send_message(LEADS_GROUP_CHAT_ID, text, reply_markup=markup, parse_mode='Markdown')
+            bot.send_message(LEADS_GROUP_CHAT_ID, log_text, message_thread_id=THREAD_ID_LOGS)
         except Exception as e:
-            logging.error(f"Failed to send draft to group: {e}")
+            logging.error(f"Failed to send log: {e}")
 
-    # Отвечаем админу
-    bot.send_message(message.chat.id, f"✅ Сгенерировано {len(posts)} постов! Черновики отправлены в группу.")
+        # Отвечаем админу
+        bot.send_message(message.chat.id, f"✅ Сгенерировано {len(posts)} постов! Черновики отправлены в группу.")
+
+    except Exception as e:
+        error_log = f"❌ ОШИБКА\nГенерация контента\nДетали: {str(e)}\nВремя: {datetime.datetime.now()}"
+        try:
+            bot.send_message(LEADS_GROUP_CHAT_ID, error_log, message_thread_id=THREAD_ID_LOGS)
+        except:
+            pass
+        bot.send_message(message.chat.id, f"❌ Ошибка генерации: {str(e)}")
 
 
 @bot.message_handler(commands=["show_plan"])
@@ -1461,19 +1489,30 @@ def show_plan_cmd(message):
         bot.send_message(message.chat.id, "📭 Контент-план пуст. Используй /generate_content для генерации.")
         return
 
-    # Отправляем черновики в группу
+    # Отправляем черновики в соответствующие топики
     for post in drafts:
-        text = f"**{post['post_type']}**\n{post['body'][:200]}...\n\n{post['cta']}"
+        # Определяем топик по типу поста
+        thread_id = THREAD_ID_SEASONAL if post['post_type'] in ['seasonal', 'живой'] else THREAD_ID_DRAFTS
+
+        text = f"[Тип: {post['post_type']}]\n\n📌 {post.get('title', '')}\n\n{post['body']}\n\n👉 {post['cta']}"
         markup = types.InlineKeyboardMarkup()
-        markup.add(types.InlineKeyboardButton("✅ Одобрить", callback_data=f"approve_{post['id']}"))
+        markup.add(types.InlineKeyboardButton("✅ Утвердить", callback_data=f"approve_{post['id']}"))
         markup.add(types.InlineKeyboardButton("❌ Удалить", callback_data=f"delete_{post['id']}"))
+
         try:
-            bot.send_message(LEADS_GROUP_CHAT_ID, text, reply_markup=markup, parse_mode='Markdown')
+            bot.send_message(LEADS_GROUP_CHAT_ID, text, reply_markup=markup, parse_mode='Markdown', message_thread_id=thread_id)
         except Exception as e:
             logging.error(f"Failed to send draft to group: {e}")
 
+    # Логируем в THREAD_ID_LOGS
+    log_text = f"📋 Показаны черновики ({len(drafts)} шт.)\nВремя: {datetime.datetime.now()}"
+    try:
+        bot.send_message(LEADS_GROUP_CHAT_ID, log_text, message_thread_id=THREAD_ID_LOGS)
+    except Exception as e:
+        logging.error(f"Failed to send log: {e}")
+
     # Отвечаем админу
-    bot.send_message(message.chat.id, "✅ Черновики отправлены в группу.")
+    bot.send_message(message.chat.id, f"✅ Черновики ({len(drafts)} шт.) отправлены в группу.")
 
 
 @bot.callback_query_handler(func=lambda call: call.data.startswith("approve_") or call.data.startswith("delete_"))
@@ -1487,13 +1526,65 @@ def content_callback_handler(call):
     import asyncio
 
     if call.data.startswith("approve_"):
-        asyncio.run(db.approve_post(post_id))
-        bot.answer_callback_query(call.id, "✅ Пост утверждён")
-        bot.edit_message_text("✅ Пост утверждён", call.message.chat.id, call.message.message_id)
+        # Устанавливаем publish_date и статус
+        import datetime
+        publish_date = datetime.datetime.now() + datetime.timedelta(days=1)  # Завтра в 10:00
+        publish_date = publish_date.replace(hour=10, minute=0, second=0, microsecond=0)
+
+        # Получаем информацию о посте
+        drafts = asyncio.run(db.get_draft_posts())
+        post = next((p for p in drafts if p['id'] == post_id), None)
+
+        if post:
+            # Обновляем статус и дату публикации
+            async def approve_and_schedule():
+                # Сначала устанавливаем publish_date
+                await db.conn.execute("UPDATE content_plan SET publish_date=? WHERE id=?", (publish_date.isoformat(), post_id))
+                # Затем меняем статус на approved
+                await db.approve_post(post_id)
+                await db.conn.commit()
+
+            asyncio.run(approve_and_schedule())
+
+            # Редактируем сообщение
+            new_text = f"✅ УТВЕРЖДЁН\nПубликация: {publish_date.strftime('%d.%m.%Y %H:%M')}\n\n{call.message.text}"
+            bot.edit_message_text(new_text, call.message.chat.id, call.message.message_id)
+
+            # Логируем
+            log_text = f"✅ Пост #{post_id} утверждён\nТип: {post['post_type']}\nПубликация: {publish_date.strftime('%d.%m.%Y %H:%M')}\nВремя: {datetime.datetime.now()}"
+            try:
+                bot.send_message(LEADS_GROUP_CHAT_ID, log_text, message_thread_id=THREAD_ID_LOGS)
+            except Exception as e:
+                print(f"Failed to send approval log: {e}")
+
+            bot.answer_callback_query(call.id, "✅ Пост утверждён и запланирован к публикации")
+        else:
+            bot.answer_callback_query(call.id, "❌ Пост не найден")
+
     elif call.data.startswith("delete_"):
+        # Получаем информацию о посте перед удалением
+        drafts = asyncio.run(db.get_draft_posts())
+        post = next((p for p in drafts if p['id'] == post_id), None)
+
+        # Удаляем пост
         asyncio.run(db.delete_post(post_id))
+
+        # Редактируем сообщение
+        if post:
+            new_text = f"❌ УДАЛЁН\n(был: {post.get('title', 'Без заголовка')})"
+        else:
+            new_text = "❌ УДАЛЁН"
+        bot.edit_message_text(new_text, call.message.chat.id, call.message.message_id)
+
+        # Логируем
+        post_type = post['post_type'] if post else 'неизвестно'
+        log_text = f"❌ Пост #{post_id} удалён\nТип: {post_type}\nВремя: {datetime.datetime.now()}"
+        try:
+            bot.send_message(LEADS_GROUP_CHAT_ID, log_text, message_thread_id=THREAD_ID_LOGS)
+        except Exception as e:
+            print(f"Failed to send deletion log: {e}")
+
         bot.answer_callback_query(call.id, "❌ Пост удалён")
-        bot.edit_message_text("❌ Пост удалён", call.message.chat.id, call.message.message_id)
 
 
 # ========== ЗАПУСК ==========

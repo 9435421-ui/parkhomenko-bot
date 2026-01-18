@@ -1,5 +1,6 @@
 import asyncio
 import logging
+from datetime import datetime
 from database import db
 
 # Настройка логирования
@@ -50,11 +51,42 @@ class AutoPoster:
 
                     logger.info(f"✅ Пост #{post['id']} опубликован в канал")
 
+                    # Логируем публикацию в THREAD_ID_LOGS группы
+                    import os
+                    LEADS_GROUP_CHAT_ID = int(os.getenv("LEADS_GROUP_CHAT_ID", "0"))
+                    THREAD_ID_LOGS = int(os.getenv("THREAD_ID_LOGS", "88"))
+
+                    log_text = f"📤 Пост опубликован в канал\nID: {post['id']}\nТип: {post['post_type']}\nЗаголовок: {post.get('title', 'Без заголовка')}\nВремя: {datetime.now()}"
+                    try:
+                        await self.bot.send_message(
+                            chat_id=LEADS_GROUP_CHAT_ID,
+                            text=log_text,
+                            message_thread_id=THREAD_ID_LOGS
+                        )
+                    except Exception as e:
+                        logger.error(f"Failed to send publication log: {e}")
+
                     # Небольшая пауза между постами
                     await asyncio.sleep(2)
 
                 except Exception as e:
                     logger.error(f"❌ Ошибка публикации поста #{post['id']}: {e}")
+
+                    # Логируем ошибку публикации
+                    import os
+                    LEADS_GROUP_CHAT_ID = int(os.getenv("LEADS_GROUP_CHAT_ID", "0"))
+                    THREAD_ID_LOGS = int(os.getenv("THREAD_ID_LOGS", "88"))
+
+                    error_log = f"❌ ОШИБКА публикации\nID: {post['id']}\nДетали: {str(e)}\nВремя: {datetime.now()}"
+                    try:
+                        await self.bot.send_message(
+                            chat_id=LEADS_GROUP_CHAT_ID,
+                            text=error_log,
+                            message_thread_id=THREAD_ID_LOGS
+                        )
+                    except:
+                        pass
+
                     continue
 
         except Exception as e:
