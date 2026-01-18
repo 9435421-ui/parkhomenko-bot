@@ -1607,13 +1607,16 @@ def generate_greetings_cmd(message):
                 occasion='день рождения'
             )
 
+            # Добавляем подпись компании программно
+            full_body = f"{post['body']}\n\nС наилучшими пожеланиями,\nКоманда «Пархоменко и компания» ❤️"
+
             # Сохраняем как черновик
             publish_date = datetime.datetime.now() + datetime.timedelta(days=person['days_until_birthday'])
 
             post_id = asyncio.run(db.save_post(
                 post_type='поздравление',
                 title=post.get('title', f"Поздравление для {name}"),
-                body=post['body'],
+                body=full_body,
                 cta=post['cta'],
                 publish_date=publish_date
             ))
