@@ -5,7 +5,7 @@ import json
 
 class ContentAgent:
     def __init__(self):
-        self.folder_id = os.getenv("YANDEX_FOLDER_ID")
+        self.folder_id = os.getenv("FOLDER_ID")
         self.api_key = os.getenv("YANDEX_API_KEY")
         self.endpoint = "https://llm.api.cloud.yandex.net/foundationModels/v1/completion"
         self.brief_content = self._load_brief()
