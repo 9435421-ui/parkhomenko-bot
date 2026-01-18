@@ -1404,8 +1404,8 @@ def test_rag_handler(message):
 @bot.message_handler(commands=["generate_content"])
 def generate_content_cmd(message):
     """Генерация контент-плана на неделю"""
-    if message.chat.id != LEADS_GROUP_CHAT_ID:
-        bot.send_message(message.chat.id, "❌ Команды доступны только в управляющей группе")
+    if message.from_user.id != ADMIN_ID:
+        bot.send_message(message.chat.id, "❌ Доступ запрещен")
         return
 
     import asyncio
@@ -1428,14 +1428,28 @@ def generate_content_cmd(message):
             )
 
     asyncio.run(save_posts())
-    bot.send_message(message.chat.id, f"✅ Сгенерировано {len(posts)} постов и сохранено в БД")
+
+    # Отправляем черновики в группу
+    drafts = asyncio.run(db.get_draft_posts())
+    for post in drafts:
+        text = f"**{post['post_type']}**\n{post['body'][:200]}...\n\n{post['cta']}"
+        markup = types.InlineKeyboardMarkup()
+        markup.add(types.InlineKeyboardButton("✅ Одобрить", callback_data=f"approve_{post['id']}"))
+        markup.add(types.InlineKeyboardButton("❌ Удалить", callback_data=f"delete_{post['id']}"))
+        try:
+            bot.send_message(LEADS_GROUP_CHAT_ID, text, reply_markup=markup, parse_mode='Markdown')
+        except Exception as e:
+            logging.error(f"Failed to send draft to group: {e}")
+
+    # Отвечаем админу
+    bot.send_message(message.chat.id, f"✅ Сгенерировано {len(posts)} постов! Черновики отправлены в группу.")
 
 
 @bot.message_handler(commands=["show_plan"])
 def show_plan_cmd(message):
     """Показать контент-план"""
-    if message.chat.id != LEADS_GROUP_CHAT_ID:
-        bot.send_message(message.chat.id, "❌ Команды доступны только в управляющей группе")
+    if message.from_user.id != ADMIN_ID:
+        bot.send_message(message.chat.id, "❌ Доступ запрещен")
         return
 
     import asyncio
@@ -1447,12 +1461,19 @@ def show_plan_cmd(message):
         bot.send_message(message.chat.id, "📭 Контент-план пуст. Используй /generate_content для генерации.")
         return
 
+    # Отправляем черновики в группу
     for post in drafts:
         text = f"**{post['post_type']}**\n{post['body'][:200]}...\n\n{post['cta']}"
         markup = types.InlineKeyboardMarkup()
         markup.add(types.InlineKeyboardButton("✅ Одобрить", callback_data=f"approve_{post['id']}"))
         markup.add(types.InlineKeyboardButton("❌ Удалить", callback_data=f"delete_{post['id']}"))
-        bot.send_message(message.chat.id, text, reply_markup=markup, parse_mode='Markdown')
+        try:
+            bot.send_message(LEADS_GROUP_CHAT_ID, text, reply_markup=markup, parse_mode='Markdown')
+        except Exception as e:
+            logging.error(f"Failed to send draft to group: {e}")
+
+    # Отвечаем админу
+    bot.send_message(message.chat.id, "✅ Черновики отправлены в группу.")
 
 
 @bot.callback_query_handler(func=lambda call: call.data.startswith("approve_") or call.data.startswith("delete_"))
