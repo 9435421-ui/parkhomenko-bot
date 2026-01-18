@@ -37,6 +37,13 @@ if not YANDEX_API_KEY or not FOLDER_ID:
 
 bot = telebot.TeleBot(BOT_TOKEN)
 
+# --------- CONTENT AGENT ---------
+from content_agent import ContentAgent
+from database import db
+from auto_poster import run_auto_poster
+
+# Подключение к базе данных будет выполнено в async контексте
+
 # --------- RAG ---------
 try:
     from kb_rag import KnowledgeBaseRAG
@@ -1391,6 +1398,85 @@ def test_rag_handler(message):
     else:
         bot.send_message(chat_id, "RAG не инициализирован")
 
+
+# ========== CONTENT AGENT COMMANDS ==========
+
+@bot.message_handler(commands=["generate_content"])
+def generate_content_cmd(message):
+    """Генерация контент-плана на неделю"""
+    if message.from_user.id != ADMIN_ID:
+        bot.send_message(message.chat.id, "❌ Доступ запрещен")
+        return
+
+    import asyncio
+    import logging
+    logging.info(f"!!! /generate_content called by user_id={message.from_user.id}")
+
+    # Генерируем посты
+    agent = ContentAgent()
+    posts = agent.generate_posts(7)
+
+    # Сохраняем в БД
+    async def save_posts():
+        for post in posts:
+            await db.save_post(
+                post['type'],
+                post.get('title', ''),
+                post['body'],
+                post['cta'],
+                post['publish_date']
+            )
+
+    asyncio.run(save_posts())
+    bot.send_message(message.chat.id, f"✅ Сгенерировано {len(posts)} постов и сохранено в БД")
+
+
+@bot.message_handler(commands=["show_plan"])
+def show_plan_cmd(message):
+    """Показать контент-план"""
+    import asyncio
+
+    # Получаем черновики
+    drafts = asyncio.run(db.get_draft_posts())
+
+    if not drafts:
+        bot.send_message(message.chat.id, "📭 Контент-план пуст. Используй /generate_content для генерации.")
+        return
+
+    for post in drafts:
+        text = f"**{post['post_type']}**\n{post['body'][:200]}...\n\n{post['cta']}"
+        markup = types.InlineKeyboardMarkup()
+        markup.add(types.InlineKeyboardButton("✅ Одобрить", callback_data=f"approve_{post['id']}"))
+        markup.add(types.InlineKeyboardButton("❌ Удалить", callback_data=f"delete_{post['id']}"))
+        bot.send_message(message.chat.id, text, reply_markup=markup, parse_mode='Markdown')
+
+
+@bot.callback_query_handler(func=lambda call: call.data.startswith("approve_") or call.data.startswith("delete_"))
+def content_callback_handler(call):
+    """Обработка кнопок approve/delete"""
+    post_id = int(call.data.split('_')[1])
+
+    import asyncio
+
+    if call.data.startswith("approve_"):
+        asyncio.run(db.approve_post(post_id))
+        bot.answer_callback_query(call.id, "✅ Пост утверждён")
+        bot.edit_message_text("✅ Пост утверждён", call.message.chat.id, call.message.message_id)
+    elif call.data.startswith("delete_"):
+        asyncio.run(db.delete_post(post_id))
+        bot.answer_callback_query(call.id, "❌ Пост удалён")
+        bot.edit_message_text("❌ Пост удалён", call.message.chat.id, call.message.message_id)
+
+
+# ========== ЗАПУСК ==========
+
+import asyncio
+
+# Подключаемся к БД
+asyncio.run(db.connect())
+
+# Запускаем автопостер
+asyncio.create_task(run_auto_poster(bot, CHANNEL_ID))
 
 print("🤖 Бот «Пархоменко и компания» запущен...")
 print(f"📁 База знаний: {KNOWLEDGE_DIR}")
