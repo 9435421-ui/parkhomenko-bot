@@ -1417,13 +1417,21 @@ def generate_content_cmd(message):
     import logging
     logging.info(f"!!! /generate_content called by user_id={message.from_user.id}")
 
+    # Парсим тему из команды (формат: /generate_content Тема: новый год и зимние перепланировки)
+    theme = None
+    if len(message.text.split()) > 1:
+        text_after_command = message.text[len("/generate_content"):].strip()
+        if text_after_command.startswith("Тема:"):
+            theme = text_after_command[5:].strip()
+
     # Отвечаем админу сразу
-    bot.reply_to(message, "🤖 Генерирую контент-план на неделю... Это займёт ~30-60 секунд.")
+    theme_msg = f" с темой '{theme}'" if theme else ""
+    bot.reply_to(message, f"🤖 Генерирую контент-план на неделю{theme_msg}... Это займёт ~30-60 секунд.")
 
     try:
         # Генерируем посты
         agent = ContentAgent()
-        posts = agent.generate_posts(7)
+        posts = agent.generate_posts(7, theme=theme)
 
         # Сохраняем в БД
         async def save_posts():
