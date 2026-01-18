@@ -136,7 +136,8 @@ class Database:
         """
         async with self.conn.cursor() as cur:
             await cur.execute(query)
-            return await cur.fetchall()
+            rows = await cur.fetchall()
+            return [dict(row) for row in rows]
 
     async def approve_post(self, post_id):
         """Утвердить пост"""
@@ -162,7 +163,8 @@ class Database:
         """
         async with self.conn.cursor() as cur:
             await cur.execute(query)
-            return await cur.fetchall()
+            rows = await cur.fetchall()
+            return [dict(row) for row in rows]
 
     async def mark_as_published(self, post_id):
         """Отметить пост как опубликованный"""
@@ -181,7 +183,8 @@ class Database:
         """
         async with self.conn.cursor() as cur:
             await cur.execute(query)
-            return await cur.fetchall()
+            rows = await cur.fetchall()
+            return [dict(row) for row in rows]
 
 # Глобальный экземпляр базы данных
 db = Database()
