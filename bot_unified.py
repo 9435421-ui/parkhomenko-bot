@@ -1600,37 +1600,35 @@ def generate_greetings_cmd(message):
             name = person.get('first_name') or person.get('username') or "друг"
             birthday = person['birthday']
 
-            # Создаем пост поздравления
-            posts = agent.generate_posts(
-                count=1,
-                post_types={'поздравление': 1},
-                theme=f"День рождения {name}, дата рождения {birthday}"
+            # Используем специализированный метод для поздравлений
+            post = agent.generate_greeting_post(
+                person_name=name,
+                date=birthday,
+                occasion='день рождения'
             )
 
-            if posts:
-                post = posts[0]
-                # Сохраняем как черновик
-                publish_date = datetime.datetime.now() + datetime.timedelta(days=person['days_until_birthday'])
+            # Сохраняем как черновик
+            publish_date = datetime.datetime.now() + datetime.timedelta(days=person['days_until_birthday'])
 
-                post_id = asyncio.run(db.save_post(
-                    post_type='поздравление',
-                    title=post.get('title', f"Поздравление для {name}"),
-                    body=post['body'],
-                    cta=post['cta'],
-                    publish_date=publish_date
-                ))
+            post_id = asyncio.run(db.save_post(
+                post_type='поздравление',
+                title=post.get('title', f"Поздравление для {name}"),
+                body=post['body'],
+                cta=post['cta'],
+                publish_date=publish_date
+            ))
 
-                # Отправляем в топик черновиков
-                text = f"[Тип: поздравление]\n\n🎂 {name}\n\n{post['body']}\n\n{post['cta']}"
-                markup = types.InlineKeyboardMarkup()
-                markup.add(types.InlineKeyboardButton("✅ Утвердить", callback_data=f"approve_{post_id}"))
-                markup.add(types.InlineKeyboardButton("❌ Удалить", callback_data=f"delete_{post_id}"))
+            # Отправляем в топик черновиков
+            text = f"[Тип: поздравление]\n\n🎂 {name}\n\n{post['body']}\n\n{post['cta']}"
+            markup = types.InlineKeyboardMarkup()
+            markup.add(types.InlineKeyboardButton("✅ Утвердить", callback_data=f"approve_{post_id}"))
+            markup.add(types.InlineKeyboardButton("❌ Удалить", callback_data=f"delete_{post_id}"))
 
-                try:
-                    bot.send_message(LEADS_GROUP_CHAT_ID, text, reply_markup=markup, message_thread_id=THREAD_ID_DRAFTS)
-                    generated_count += 1
-                except Exception as e:
-                    print(f"Failed to send greeting: {e}")
+            try:
+                bot.send_message(LEADS_GROUP_CHAT_ID, text, reply_markup=markup, message_thread_id=THREAD_ID_DRAFTS)
+                generated_count += 1
+            except Exception as e:
+                print(f"Failed to send greeting: {e}")
 
         if generated_count > 0:
             bot.send_message(message.chat.id, f"✅ Сгенерировано {generated_count} поздравлений! Черновики отправлены в топик 'Черновики и идеи'.")
