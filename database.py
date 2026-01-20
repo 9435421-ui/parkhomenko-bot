@@ -57,7 +57,7 @@ class Database:
             content_sql = """
                 CREATE TABLE IF NOT EXISTS content_plan (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    post_type TEXT NOT NULL,
+                    type TEXT NOT NULL,
                     title TEXT,
                     body TEXT NOT NULL,
                     cta TEXT NOT NULL,
@@ -97,7 +97,7 @@ class Database:
             content_sql = """
                 CREATE TABLE IF NOT EXISTS content_plan (
                     id SERIAL PRIMARY KEY,
-                    post_type VARCHAR(20) NOT NULL,
+                    type VARCHAR(20) NOT NULL,
                     title TEXT,
                     body TEXT NOT NULL,
                     cta TEXT NOT NULL,
@@ -143,7 +143,7 @@ class Database:
     async def save_post(self, post_type, title, body, cta, publish_date, image_prompt=None, image_url=None):
         """Сохранить пост в контент-план"""
         query = """
-            INSERT INTO content_plan (post_type, title, body, cta, publish_date, status, image_prompt, image_url)
+            INSERT INTO content_plan (type, title, body, cta, publish_date, status, image_prompt, image_url)
             VALUES (?, ?, ?, ?, ?, 'draft', ?, ?)
         """
         async with self.conn.cursor() as cur:
@@ -154,7 +154,7 @@ class Database:
     async def get_draft_posts(self):
         """Получить все посты со статусом draft"""
         query = """
-            SELECT id, post_type, title, body, cta, publish_date, status, created_at, image_prompt, image_url
+            SELECT id, type, title, body, cta, publish_date, status, created_at, image_prompt, image_url
             FROM content_plan
             WHERE status='draft'
             ORDER BY created_at DESC
@@ -224,7 +224,7 @@ class Database:
     async def get_posts_to_publish(self):
         """Получить посты, готовые к публикации"""
         query = """
-            SELECT id, post_type, title, body, cta, publish_date, image_prompt, image_url
+            SELECT id, type, title, body, cta, publish_date, image_prompt, image_url
             FROM content_plan
             WHERE status='approved' AND publish_date <= datetime('now')
             ORDER BY publish_date
@@ -244,7 +244,7 @@ class Database:
     async def get_all_posts(self, limit=50):
         """Получить все посты для просмотра"""
         query = f"""
-            SELECT id, post_type, title, body, cta, publish_date, status, created_at, published_at, image_prompt, image_url
+            SELECT id, type, title, body, cta, publish_date, status, created_at, published_at, image_prompt, image_url
             FROM content_plan
             ORDER BY created_at DESC
             LIMIT {limit}
