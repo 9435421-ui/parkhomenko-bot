@@ -22,6 +22,22 @@ class ContentAgent:
             "С днем рождения! Желаем вам тепла от близких, радости от маленьких побед и исполнения мечтаний. Пусть этот день станет одним из самых счастливых в вашей жизни."
         ]
 
+    def build_image_prompt(self, post: dict) -> str | None:
+        """
+        Генерирует текстовый промпт для создания изображения к посту.
+        Пока работает только для типа 'живой'.
+        """
+        post_type = post.get('type')
+
+        if post_type != 'живой':
+            return None
+
+        # Базовый промпт для «живых» постов
+        return (
+            "уютная гостиная после ремонта, мягкий свет, современный интерьер, "
+            "без людей, без текста, соотношение сторон 16:9"
+        )
+
     def _load_brief(self):
         """Загружает базу знаний"""
         try:
@@ -56,7 +72,8 @@ class ContentAgent:
                     'title': title,
                     'body': body,
                     'cta': cta,
-                    'publish_date': start_date + timedelta(days=len(posts))
+                    'publish_date': start_date + timedelta(days=len(posts)),
+                    'image_prompt': self.build_image_prompt({'type': post_type})  # ← добавить
                 }
                 posts.append(post)
 
