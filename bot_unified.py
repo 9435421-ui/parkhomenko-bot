@@ -1748,10 +1748,19 @@ def content_callback_handler(call):
     import asyncio
 
     if call.data.startswith("approve_"):
-        # Устанавливаем publish_date и статус
+        # Устанавливаем publish_date и статус (инкрементальные даты)
         import datetime
-        publish_date = datetime.datetime.now() + datetime.timedelta(days=1)  # Завтра в 10:00
-        publish_date = publish_date.replace(hour=10, minute=0, second=0, microsecond=0)
+        from datetime import datetime, timedelta
+
+        # Получить максимальную дату среди approved постов
+        max_date = asyncio.run(db.get_max_publish_date(status='approved'))
+
+        if max_date is None:
+            # Первый approved пост → завтра в 10:00
+            next_date = (datetime.now() + timedelta(days=1)).replace(hour=10, minute=0, second=0, microsecond=0)
+        else:
+            # Следующий пост → +1 день от последнего
+            next_date = max_date + timedelta(days=1)
 
         # Получаем информацию о посте
         drafts = asyncio.run(db.get_draft_posts())
@@ -1761,7 +1770,7 @@ def content_callback_handler(call):
             # Обновляем статус и дату публикации
             async def approve_and_schedule():
                 # Сначала устанавливаем publish_date
-                await db.conn.execute("UPDATE content_plan SET publish_date=? WHERE id=?", (publish_date.isoformat(), post_id))
+                await db.conn.execute("UPDATE content_plan SET publish_date=? WHERE id=?", (next_date.isoformat(), post_id))
                 # Затем меняем статус на approved
                 await db.approve_post(post_id)
                 await db.conn.commit()
@@ -1769,11 +1778,11 @@ def content_callback_handler(call):
             asyncio.run(approve_and_schedule())
 
             # Редактируем сообщение
-            new_text = f"✅ УТВЕРЖДЁН\nПубликация: {publish_date.strftime('%d.%m.%Y %H:%M')}\n\n{call.message.text}"
+            new_text = f"✅ УТВЕРЖДЁН\nПубликация: {next_date.strftime('%d.%m.%Y %H:%M')}\n\n{call.message.text}"
             bot.edit_message_text(new_text, call.message.chat.id, call.message.message_id)
 
             # Логируем
-            log_text = f"✅ Пост #{post_id} утверждён\nТип: {post['post_type']}\nПубликация: {publish_date.strftime('%d.%m.%Y %H:%M')}\nВремя: {datetime.datetime.now()}"
+            log_text = f"✅ Пост #{post_id} утверждён\nТип: {post['post_type']}\nПубликация: {next_date.strftime('%d.%m.%Y %H:%M')}\nВремя: {datetime.datetime.now()}"
             try:
                 bot.send_message(LEADS_GROUP_CHAT_ID, log_text, message_thread_id=THREAD_ID_LOGS)
             except Exception as e:

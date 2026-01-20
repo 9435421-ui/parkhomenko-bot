@@ -199,6 +199,21 @@ class Database:
             await cur.execute(query, params)
         await self.conn.commit()
 
+    async def get_max_publish_date(self, status='approved'):
+        """Возвращает максимальную publish_date среди постов с указанным статусом"""
+        from datetime import datetime
+
+        async with self.conn.cursor() as cur:
+            await cur.execute(
+                "SELECT MAX(publish_date) FROM content_plan WHERE status = ?",
+                (status,)
+            )
+            result = await cur.fetchone()
+
+            if result and result[0]:
+                return datetime.strptime(result[0], '%Y-%m-%d %H:%M:%S')
+            return None
+
     async def delete_post(self, post_id):
         """Удалить пост"""
         query = "DELETE FROM content_plan WHERE id=?"
