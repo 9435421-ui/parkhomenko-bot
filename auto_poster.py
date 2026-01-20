@@ -60,7 +60,7 @@ class AutoPoster:
                     LEADS_GROUP_CHAT_ID = int(os.getenv("LEADS_GROUP_CHAT_ID", "0"))
                     THREAD_ID_LOGS = int(os.getenv("THREAD_ID_LOGS", "88"))
 
-                    log_text = f"📤 Пост опубликован в канал\nID: {post['id']}\nТип: {post['post_type']}\nЗаголовок: {post.get('title', 'Без заголовка')}\nВремя: {datetime.now()}"
+                    log_text = f"📤 Пост опубликован в канал\nID: {post['id']}\nТип: {post['type']}\nЗаголовок: {post.get('title', 'Без заголовка')}\nВремя: {datetime.now()}"
                     try:
                         self.bot.send_message(
                             chat_id=LEADS_GROUP_CHAT_ID,

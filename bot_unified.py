@@ -1450,9 +1450,9 @@ def generate_content_cmd(message):
         drafts = asyncio.run(db.get_draft_posts())
         for post in drafts:
             # Определяем топик по типу поста
-            thread_id = THREAD_ID_SEASONAL if post['post_type'] in ['seasonal', 'живой'] else THREAD_ID_DRAFTS
+            thread_id = THREAD_ID_SEASONAL if post['type'] in ['seasonal', 'живой'] else THREAD_ID_DRAFTS
 
-            text = f"[Тип: {post['post_type']}]\n\n📌 {post.get('title', '')}\n\n{post['body']}\n\n👉 {post['cta']}"
+            text = f"[Тип: {post['type']}]\n\n📌 {post.get('title', '')}\n\n{post['body']}\n\n👉 {post['cta']}"
             markup = types.InlineKeyboardMarkup()
             markup.add(types.InlineKeyboardButton("✅ Утвердить", callback_data=f"approve_{post['id']}"))
             markup.add(types.InlineKeyboardButton("❌ Удалить", callback_data=f"delete_{post['id']}"))
@@ -1714,9 +1714,9 @@ def show_plan_cmd(message):
     # Отправляем черновики в соответствующие топики
     for post in drafts:
         # Определяем топик по типу поста
-        thread_id = THREAD_ID_SEASONAL if post['post_type'] in ['seasonal', 'живой'] else THREAD_ID_DRAFTS
+        thread_id = THREAD_ID_SEASONAL if post['type'] in ['seasonal', 'живой'] else THREAD_ID_DRAFTS
 
-        text = f"[Тип: {post['post_type']}]\n\n📌 {post.get('title', '')}\n\n{post['body']}\n\n👉 {post['cta']}"
+        text = f"[Тип: {post['type']}]\n\n📌 {post.get('title', '')}\n\n{post['body']}\n\n👉 {post['cta']}"
         markup = types.InlineKeyboardMarkup()
         markup.add(types.InlineKeyboardButton("✅ Утвердить", callback_data=f"approve_{post['id']}"))
         markup.add(types.InlineKeyboardButton("❌ Удалить", callback_data=f"delete_{post['id']}"))
@@ -1779,7 +1779,7 @@ def content_callback_handler(call):
             bot.edit_message_text(new_text, call.message.chat.id, call.message.message_id)
 
             # Логируем
-            log_text = f"✅ Пост #{post_id} утверждён\nТип: {post['post_type']}\nПубликация: {next_date.strftime('%d.%m.%Y %H:%M')}\nВремя: {datetime.datetime.now()}"
+            log_text = f"✅ Пост #{post_id} утверждён\nТип: {post['type']}\nПубликация: {next_date.strftime('%d.%m.%Y %H:%M')}\nВремя: {datetime.datetime.now()}"
             try:
                 bot.send_message(LEADS_GROUP_CHAT_ID, log_text, message_thread_id=THREAD_ID_LOGS)
             except Exception as e:
@@ -1805,7 +1805,7 @@ def content_callback_handler(call):
         bot.edit_message_text(new_text, call.message.chat.id, call.message.message_id)
 
         # Логируем
-        post_type = post['post_type'] if post else 'неизвестно'
+        post_type = post['type'] if post else 'неизвестно'
         log_text = f"❌ Пост #{post_id} удалён\nТип: {post_type}\nВремя: {datetime.datetime.now()}"
         try:
             bot.send_message(LEADS_GROUP_CHAT_ID, log_text, message_thread_id=THREAD_ID_LOGS)
