@@ -1748,6 +1748,14 @@ def content_callback_handler(call):
     import asyncio
 
     if call.data.startswith("approve_"):
+        # СНАЧАЛА получаем информацию о посте
+        drafts = asyncio.run(db.get_draft_posts())
+        post = next((p for p in drafts if p['id'] == post_id), None)
+
+        if not post:
+            bot.answer_callback_query(call.id, "❌ Пост не найден")
+            return
+
         # Устанавливаем publish_date и статус (инкрементальные даты)
         import datetime
         from datetime import datetime, timedelta
@@ -1769,25 +1777,18 @@ def content_callback_handler(call):
             publish_date=next_date.strftime('%Y-%m-%d %H:%M:%S')
         ))
 
-        # Получаем информацию о посте для логов
-        drafts = asyncio.run(db.get_draft_posts())
-        post = next((p for p in drafts if p['id'] == post_id), None)
+        # Редактируем сообщение
+        new_text = f"✅ УТВЕРЖДЁН\nПубликация: {next_date.strftime('%d.%m.%Y %H:%M')}\n\n{call.message.text}"
+        bot.edit_message_text(new_text, call.message.chat.id, call.message.message_id)
 
-        if post:
-            # Редактируем сообщение
-            new_text = f"✅ УТВЕРЖДЁН\nПубликация: {next_date.strftime('%d.%m.%Y %H:%M')}\n\n{call.message.text}"
-            bot.edit_message_text(new_text, call.message.chat.id, call.message.message_id)
+        # Логируем
+        log_text = f"✅ Пост #{post_id} утверждён\nТип: {post['type']}\nПубликация: {next_date.strftime('%d.%m.%Y %H:%M')}\nВремя: {datetime.datetime.now()}"
+        try:
+            bot.send_message(LEADS_GROUP_CHAT_ID, log_text, message_thread_id=THREAD_ID_LOGS)
+        except Exception as e:
+            print(f"Failed to send approval log: {e}")
 
-            # Логируем
-            log_text = f"✅ Пост #{post_id} утверждён\nТип: {post['type']}\nПубликация: {next_date.strftime('%d.%m.%Y %H:%M')}\nВремя: {datetime.datetime.now()}"
-            try:
-                bot.send_message(LEADS_GROUP_CHAT_ID, log_text, message_thread_id=THREAD_ID_LOGS)
-            except Exception as e:
-                print(f"Failed to send approval log: {e}")
-
-            bot.answer_callback_query(call.id, "✅ Пост утверждён и запланирован к публикации")
-        else:
-            bot.answer_callback_query(call.id, "❌ Пост не найден")
+        bot.answer_callback_query(call.id, f"✅ Пост утверждён! Публикация: {next_date.strftime('%d.%m в %H:%M')}")
 
     elif call.data.startswith("delete_"):
         # Получаем информацию о посте перед удалением
