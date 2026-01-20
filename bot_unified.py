@@ -1762,21 +1762,18 @@ def content_callback_handler(call):
             # Следующий пост → +1 день от последнего
             next_date = max_date + timedelta(days=1)
 
-        # Получаем информацию о посте
+        # Обновить пост
+        asyncio.run(db.update_content_plan_entry(
+            post_id=post_id,
+            status='approved',
+            publish_date=next_date.strftime('%Y-%m-%d %H:%M:%S')
+        ))
+
+        # Получаем информацию о посте для логов
         drafts = asyncio.run(db.get_draft_posts())
         post = next((p for p in drafts if p['id'] == post_id), None)
 
         if post:
-            # Обновляем статус и дату публикации
-            async def approve_and_schedule():
-                # Сначала устанавливаем publish_date
-                await db.conn.execute("UPDATE content_plan SET publish_date=? WHERE id=?", (next_date.isoformat(), post_id))
-                # Затем меняем статус на approved
-                await db.approve_post(post_id)
-                await db.conn.commit()
-
-            asyncio.run(approve_and_schedule())
-
             # Редактируем сообщение
             new_text = f"✅ УТВЕРЖДЁН\nПубликация: {next_date.strftime('%d.%m.%Y %H:%M')}\n\n{call.message.text}"
             bot.edit_message_text(new_text, call.message.chat.id, call.message.message_id)
