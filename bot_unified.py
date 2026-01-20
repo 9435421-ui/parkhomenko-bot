@@ -350,7 +350,7 @@ def call_yandex_gpt(
             "https://llm.api.cloud.yandex.net/foundationModels/v1/completion",
             headers=headers,
             json=data,
-            timeout=30,
+            timeout=60,
         )
 
         if response.status_code == 200:
