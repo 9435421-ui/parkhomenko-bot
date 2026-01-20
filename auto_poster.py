@@ -1,26 +1,33 @@
 import asyncio
 import logging
+import os
 from datetime import datetime
+from html import escape
 from database import db
+
+def safe_html(text: str) -> str:
+    """Экранирует HTML-спецсимволы для безопасной отправки с parse_mode='HTML'"""
+    return escape(text)
 
 # Настройка логирования
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
+CONTENT_CHANNEL_ID = int(os.getenv("CONTENT_CHANNEL_ID"))
+
 
 class AutoPoster:
     """Класс для автоматической публикации контента в канал"""
 
-    def __init__(self, bot, channel_id: str):
+    def __init__(self, bot):
         """
         Инициализация AutoPoster
 
         Args:
             bot: Экземпляр телеграм-бота
-            channel_id: ID канала для публикации
         """
         self.bot = bot
-        self.channel_id = channel_id
+        self.channel_id = CONTENT_CHANNEL_ID
 
     async def check_and_publish(self):
         """Проверяет и публикует готовые посты"""
@@ -40,10 +47,11 @@ class AutoPoster:
                     formatted_post = self._format_post(post)
 
                     # Отправляем в канал
+                    logging.info(f"[AutoPoster] Отправляю пост ID={post['id']} в chat_id={CONTENT_CHANNEL_ID} (type={type(CONTENT_CHANNEL_ID)}), длина текста={len(formatted_post)} символов")
                     await self.bot.send_message(
-                        chat_id=self.channel_id,
+                        chat_id=CONTENT_CHANNEL_ID,
                         text=formatted_post,
-                        parse_mode='Markdown'
+                        parse_mode='HTML'  # возвращаем обратно
                     )
 
                     # Отмечаем как опубликованный
@@ -102,15 +110,15 @@ class AutoPoster:
         Returns:
             str: Отформатированный текст поста
         """
-        title = post.get('title', '').strip()
-        body = post.get('body', '').strip()
-        cta = post.get('cta', '').strip()
+        title = escape(post.get('title', '').strip())
+        body = escape(post.get('body', '').strip())
+        cta = escape(post.get('cta', '').strip())
 
         # Формируем текст
         parts = []
 
         if title:
-            parts.append(f"*{title}*")
+            parts.append(f"<b>{title}</b>")
             parts.append("")  # Пустая строка
 
         if body:
@@ -118,20 +126,19 @@ class AutoPoster:
             parts.append("")  # Пустая строка
 
         if cta:
-            parts.append(f"*{cta}*")
+            parts.append(f"<b>{cta}</b>")
 
         return "\n".join(parts).strip()
 
 
-async def run_auto_poster(bot, channel_id: str):
+async def run_auto_poster(bot):
     """
     Запускает автоматическую публикацию в фоне
 
     Args:
         bot: Экземпляр телеграм-бота
-        channel_id: ID канала для публикации
     """
-    poster = AutoPoster(bot, channel_id)
+    poster = AutoPoster(bot)
     logger.info("🚀 AutoPoster запущен. Проверка каждые 10 минут.")
 
     while True:

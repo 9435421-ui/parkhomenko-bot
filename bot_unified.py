@@ -1600,12 +1600,8 @@ def generate_greetings_cmd(message):
             name = person.get('first_name') or person.get('username') or "друг"
             birthday = person['birthday']
 
-            # Используем специализированный метод для поздравлений
-            post = agent.generate_greeting_post(
-                person_name=name,
-                date=birthday,
-                occasion='день рождения'
-            )
+            # Используем шаблонный метод для поздравлений
+            post = agent.generate_birthday_congrats_template(person_name=name, date=birthday)
 
             # Добавляем подпись компании программно
             full_body = f"{post['body']}\n\nС наилучшими пожеланиями,\nКоманда «Пархоменко и компания» ❤️"
@@ -1822,7 +1818,7 @@ asyncio.run(db.connect())
 
 # Запускаем автопостер в отдельном потоке
 import threading
-poster_thread = threading.Thread(target=lambda: asyncio.run(run_auto_poster(bot, CHANNEL_ID)), daemon=True)
+poster_thread = threading.Thread(target=lambda: asyncio.run(run_auto_poster(bot)), daemon=True)
 poster_thread.start()
 
 print("🤖 Бот «Пархоменко и компания» запущен...")

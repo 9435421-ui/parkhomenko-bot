@@ -140,21 +140,21 @@ class Database:
         await self.conn.commit()
 
     # Функции для работы с контент-планом
-    async def save_post(self, post_type, title, body, cta, publish_date):
+    async def save_post(self, post_type, title, body, cta, publish_date, image_prompt=None, image_url=None):
         """Сохранить пост в контент-план"""
         query = """
-            INSERT INTO content_plan (post_type, title, body, cta, publish_date, status)
-            VALUES (?, ?, ?, ?, ?, 'draft')
+            INSERT INTO content_plan (post_type, title, body, cta, publish_date, status, image_prompt, image_url)
+            VALUES (?, ?, ?, ?, ?, 'draft', ?, ?)
         """
         async with self.conn.cursor() as cur:
-            await cur.execute(query, (post_type, title, body, cta, publish_date.isoformat()))
+            await cur.execute(query, (post_type, title, body, cta, publish_date.isoformat(), image_prompt, image_url))
             return cur.lastrowid
         await self.conn.commit()
 
     async def get_draft_posts(self):
         """Получить все посты со статусом draft"""
         query = """
-            SELECT id, post_type, title, body, cta, publish_date, status, created_at
+            SELECT id, post_type, title, body, cta, publish_date, status, created_at, image_prompt, image_url
             FROM content_plan
             WHERE status='draft'
             ORDER BY created_at DESC
@@ -171,6 +171,34 @@ class Database:
             await cur.execute(query, (post_id,))
         await self.conn.commit()
 
+    async def update_content_plan_entry(self, post_id: int, status: str = None, publish_date: str = None, image_prompt: str = None, image_url: str = None):
+        """Обновить запись в контент-плане"""
+        updates = []
+        params = []
+
+        if status:
+            updates.append("status = ?")
+            params.append(status)
+        if publish_date:
+            updates.append("publish_date = ?")
+            params.append(publish_date)
+        if image_prompt is not None:
+            updates.append("image_prompt = ?")
+            params.append(image_prompt)
+        if image_url is not None:
+            updates.append("image_url = ?")
+            params.append(image_url)
+
+        if not updates:
+            return  # Nothing to update
+
+        params.append(post_id)
+
+        query = f"UPDATE content_plan SET {', '.join(updates)} WHERE id = ?"
+        async with self.conn.cursor() as cur:
+            await cur.execute(query, params)
+        await self.conn.commit()
+
     async def delete_post(self, post_id):
         """Удалить пост"""
         query = "DELETE FROM content_plan WHERE id=?"
@@ -181,7 +209,7 @@ class Database:
     async def get_posts_to_publish(self):
         """Получить посты, готовые к публикации"""
         query = """
-            SELECT id, post_type, title, body, cta, publish_date
+            SELECT id, post_type, title, body, cta, publish_date, image_prompt, image_url
             FROM content_plan
             WHERE status='approved' AND publish_date <= datetime('now')
             ORDER BY publish_date
@@ -201,7 +229,7 @@ class Database:
     async def get_all_posts(self, limit=50):
         """Получить все посты для просмотра"""
         query = f"""
-            SELECT id, post_type, title, body, cta, publish_date, status, created_at, published_at
+            SELECT id, post_type, title, body, cta, publish_date, status, created_at, published_at, image_prompt, image_url
             FROM content_plan
             ORDER BY created_at DESC
             LIMIT {limit}
