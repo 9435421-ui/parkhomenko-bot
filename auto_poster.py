@@ -48,7 +48,7 @@ class AutoPoster:
 
                     # Отправляем в канал
                     logging.info(f"[AutoPoster] Отправляю пост ID={post['id']} в chat_id={CONTENT_CHANNEL_ID} (type={type(CONTENT_CHANNEL_ID)}), длина текста={len(formatted_post)} символов")
-                    await self.bot.send_message(
+                    self.bot.send_message(
                         chat_id=CONTENT_CHANNEL_ID,
                         text=formatted_post,
                         parse_mode='HTML'  # возвращаем обратно
@@ -66,7 +66,7 @@ class AutoPoster:
 
                     log_text = f"📤 Пост опубликован в канал\nID: {post['id']}\nТип: {post['post_type']}\nЗаголовок: {post.get('title', 'Без заголовка')}\nВремя: {datetime.now()}"
                     try:
-                        await self.bot.send_message(
+                        self.bot.send_message(
                             chat_id=LEADS_GROUP_CHAT_ID,
                             text=log_text,
                             message_thread_id=THREAD_ID_LOGS
@@ -87,7 +87,7 @@ class AutoPoster:
 
                     error_log = f"❌ ОШИБКА публикации\nID: {post['id']}\nДетали: {str(e)}\nВремя: {datetime.now()}"
                     try:
-                        await self.bot.send_message(
+                        self.bot.send_message(
                             chat_id=LEADS_GROUP_CHAT_ID,
                             text=error_log,
                             message_thread_id=THREAD_ID_LOGS
