@@ -176,7 +176,7 @@ class ContentAgent:
             "Последствие: пауза до первой сделки, проверка банка или отказ в ипотеке."
         )
 
-    def _call_yandex_gpt(self, user_prompt, mode="default"):
+    def _call_yandex_gpt(self, user_prompt, mode="default", context=""):
         """Вызов YandexGPT API"""
 
         if mode == "greeting":
@@ -192,6 +192,7 @@ class ContentAgent:
         else:
             system_prompt = f"""
 Ты — Юлия Пархоменко и её команда. Твой фокус — сложные кейсы по перепланировкам и согласованию, где на кону деньги, сделки и репутация.
+Даже если где-то в контексте встречаются рассказы про зиму, балконы, утепление и погоду — игнорируй их. Пиши только про деньги, сделки, инвест‑логику и репутацию.
 
 ТВОИ КЛИЕНТЫ:
 - инвесторы, которые делят объект на лоты / студии, делают антресоли, меняют функционал помещений;
@@ -259,6 +260,12 @@ class ContentAgent:
             "x-folder-id": self.folder_id
         }
 
+        # Build messages with optional context
+        messages = [{"role": "system", "text": system_prompt}]
+        if context:
+            messages.append({"role": "user", "text": context})
+        messages.append({"role": "user", "text": user_prompt})
+
         payload = {
             "modelUri": f"gpt://{self.folder_id}/yandexgpt/latest",
             "completionOptions": {
@@ -266,10 +273,7 @@ class ContentAgent:
                 "temperature": 0.7,
                 "maxTokens": 2000
             },
-            "messages": [
-                {"role": "system", "text": system_prompt},
-                {"role": "user", "text": user_prompt}
-            ]
+            "messages": messages
         }
 
         response = requests.post(self.endpoint, headers=headers, json=payload, timeout=30)
