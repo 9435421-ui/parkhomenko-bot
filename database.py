@@ -128,15 +128,16 @@ class Database:
 
     # Функции для работы с лидами
     async def save_lead(self, name, phone, extra_contact=None, object_type=None,
-                       city=None, change_plan=None, bti_status=None):
+                       city=None, change_plan=None, bti_status=None,
+                       house_material=None, commercial_purpose=None):
         """Сохранить лид"""
         query = """
-            INSERT INTO leads (name, phone, extra_contact, object_type, city, change_plan, bti_status)
-            VALUES (?, ?, ?, ?, ?, ?, ?)
+            INSERT INTO leads (name, phone, extra_contact, object_type, city, change_plan, bti_status, house_material, commercial_purpose)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
         """
         async with self.conn.cursor() as cur:
             await cur.execute(query, (name, phone, extra_contact, object_type,
-                                    city, change_plan, bti_status))
+                                    city, change_plan, bti_status, house_material, commercial_purpose))
         await self.conn.commit()
 
     # Функции для работы с контент-планом
@@ -350,6 +351,65 @@ class Database:
         async with self.conn.cursor() as cur:
             await cur.execute(query, (birthday, user_id))
         await self.conn.commit()
+
+    # ==========================================
+    # USER STATES - сохранение состояний
+    # ==========================================
+
+    async def save_user_state(self, user_id: int, state: dict, consent: dict = None):
+        """
+        Сохранить состояние пользователя в БД
+
+        Args:
+            user_id: Telegram ID пользователя
+            state: Словарь с данными UserState
+            consent: Словарь с данными UserConsent (опционально)
+        """
+        import json
+
+        state_json = json.dumps(state, ensure_ascii=False)
+        consent_json = json.dumps(consent, ensure_ascii=False) if consent else None
+
+        await self.db.execute("""
+            INSERT INTO user_states (user_id, state_data, consent_data, updated_at)
+            VALUES (?, ?, ?, datetime('now'))
+            ON CONFLICT(user_id) DO UPDATE SET
+                state_data = excluded.state_data,
+                consent_data = excluded.consent_data,
+                updated_at = datetime('now')
+        """, (user_id, state_json, consent_json))
+
+        await self.db.commit()
+
+    async def load_user_state(self, user_id: int) -> tuple:
+        """
+        Загрузить состояние пользователя из БД
+
+        Returns:
+            tuple: (state_dict, consent_dict) или (None, None) если не найдено
+        """
+        import json
+
+        row = await self.db.execute_fetchone(
+            "SELECT state_data, consent_data FROM user_states WHERE user_id = ?",
+            (user_id,)
+        )
+
+        if not row:
+            return None, None
+
+        state = json.loads(row[0]) if row[0] else None
+        consent = json.loads(row[1]) if row[1] else None
+
+        return state, consent
+
+    async def clear_user_state(self, user_id: int):
+        """Удалить состояние пользователя (при завершении/сбросе)"""
+        await self.db.execute(
+            "DELETE FROM user_states WHERE user_id = ?",
+            (user_id,)
+        )
+        await self.db.commit()
 
 # Глобальный экземпляр базы данных
 db = Database()
