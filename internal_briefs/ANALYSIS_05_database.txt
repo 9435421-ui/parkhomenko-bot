@@ -1,0 +1,86 @@
+АНАЛИЗ БАЗЫ ДАННЫХ
+===================
+
+1. НАЛИЧИЕ ФАЙЛА database.py:
+   ✅ ФАЙЛ database.py ПРИСУТСТВУЕТ
+
+2. ТАБЛИЦЫ/КОЛЛЕКЦИИ В database.py:
+   Основные таблицы, упоминаемые в CREATE TABLE:
+
+   - leads (лиды/заявки)
+     * id, name, phone, extra_contact, object_type, city, change_plan, bti_status
+     * created_at (автоматически)
+     * Недавно добавлены: house_material, commercial_purpose
+
+   - content_plan (контент-план для постов)
+     * id, type, title, body, cta, publish_date, status, created_at, published_at
+     * image_prompt, image_url (добавлены миграцией)
+
+   - subscribers (подписчики для поздравлений)
+     * id, user_id, username, first_name, last_name, birthday, added_at, notes
+
+3. ОСНОВНЫЕ МЕТОДЫ В database.py:
+   - save_lead() - сохранение заявки/лида
+   - save_post() - сохранение поста в контент-план
+   - get_draft_posts() - получение черновиков постов
+   - approve_post() - утверждение поста
+   - update_content_plan_entry() - обновление записи контент-плана
+   - get_max_publish_date() - получение максимальной даты публикации
+   - delete_post() - удаление поста
+   - get_posts_to_publish() - получение постов для публикации
+   - mark_as_published() - отметка поста как опубликованного
+   - add_subscriber() - добавление подписчика
+   - delete_subscriber() - удаление подписчика
+   - get_subscriber() - получение подписчика
+   - get_all_subscribers() - получение всех подписчиков
+   - get_today_birthdays() - получение именинников сегодня
+   - get_upcoming_birthdays() - получение предстоящих дней рождения
+   - update_subscriber_birthday() - обновление дня рождения
+
+4. ИМПОРТЫ ИЗ database В bot_unified.py:
+   - from database import db
+   - Импортируется глобальный экземпляр db (Database)
+
+5. ASYNC ФУНКЦИИ СВЯЗАННЫЕ С БД (asyncio.run(db.)):
+   Всего 14 вызовов asyncio.run(db.*) в bot_unified.py:
+
+   В save_lead_and_notify():
+   - db.save_lead() - сохранение заявки
+
+   В generate_content_cmd():
+   - db.get_draft_posts() - получение черновиков
+   - db.save_post() - сохранение постов (7 раз в цикле)
+
+   В add_subscriber_cmd():
+   - db.add_subscriber() - добавление подписчика
+
+   В list_birthdays_cmd():
+   - db.get_upcoming_birthdays(7) - предстоящие дни рождения
+
+   В generate_greetings_cmd():
+   - db.get_upcoming_birthdays(7) - предстоящие дни рождения
+   - db.save_post() - сохранение поздравления
+
+   В generate_welcome_cmd():
+   - db.save_post() - сохранение приветствия
+
+   В show_plan_cmd():
+   - db.get_draft_posts() - получение черновиков
+
+   В content_callback_handler():
+   - db.get_draft_posts() - получение черновиков
+   - db.get_max_publish_date() - максимальная дата публикации
+   - db.update_content_plan_entry() - обновление поста
+   - db.get_draft_posts() - получение черновиков
+   - db.delete_post() - удаление поста
+
+   В основной части (при запуске):
+   - db.connect() - подключение к базе данных
+
+6. ТЕХНИЧЕСКИЕ ДЕТАЛИ:
+   - Используется aiosqlite для асинхронных операций
+   - Поддержка SQLite (только SQLite, PostgreSQL закомментирован)
+   - Автоматическое создание таблиц при подключении (_create_tables)
+   - Row factory для dict-like доступа к результатам
+   - PRAGMA foreign_keys = ON для SQLite
+   - Все методы async, вызываются через asyncio.run()
