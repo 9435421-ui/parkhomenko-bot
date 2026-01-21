@@ -100,6 +100,9 @@ class UserState:
         self.total_floors = None
         self.remodeling_status = None  # выполнена или планируется
 
+        self.house_material = None  # Для домов
+        self.commercial_purpose = None  # Для коммерции
+
         self.dialog_history = []
         self.has_plan = False
         self.plan_path = None
@@ -138,15 +141,64 @@ AI_INTRO_TEXT = (
 
 
 def get_user_state(user_id: int) -> UserState:
+    """Получить состояние пользователя (с загрузкой из БД если нужно)"""
     if user_id not in user_states:
-        user_states[user_id] = UserState()
+        import asyncio
+        try:
+            state_dict, _ = asyncio.run(db.load_user_state(user_id))
+            if state_dict:
+                state = UserState()
+                for key, value in state_dict.items():
+                    if hasattr(state, key):
+                        setattr(state, key, value)
+                user_states[user_id] = state
+                print(f"✅ Состояние user {user_id} восстановлено из БД")
+            else:
+                user_states[user_id] = UserState()
+        except Exception as e:
+            print(f"⚠️ Ошибка загрузки состояния user {user_id}: {e}")
+            user_states[user_id] = UserState()
+
     return user_states[user_id]
 
 
 def get_user_consent(user_id: int) -> UserConsent:
+    """Получить согласия пользователя (с загрузкой из БД если нужно)"""
     if user_id not in user_consents:
-        user_consents[user_id] = UserConsent()
+        import asyncio
+        try:
+            _, consent_dict = asyncio.run(db.load_user_state(user_id))
+            if consent_dict:
+                consent = UserConsent()
+                for key, value in consent_dict.items():
+                    if hasattr(consent, key):
+                        setattr(consent, key, value)
+                user_consents[user_id] = consent
+                print(f"✅ Согласия user {user_id} восстановлены из БД")
+            else:
+                user_consents[user_id] = UserConsent()
+        except Exception as e:
+            print(f"⚠️ Ошибка загрузки согласий user {user_id}: {e}")
+            user_consents[user_id] = UserConsent()
+
     return user_consents[user_id]
+
+
+def save_user_state_to_db(user_id: int):
+    """Сохранить текущее состояние пользователя в БД"""
+    import asyncio
+    try:
+        state = user_states.get(user_id)
+        consent = user_consents.get(user_id)
+
+        if state:
+            state_dict = {k: v for k, v in state.__dict__.items()}
+            consent_dict = {k: v for k, v in consent.__dict__.items()} if consent else None
+
+            asyncio.run(db.save_user_state(user_id, state_dict, consent_dict))
+            print(f"💾 Состояние user {user_id} сохранено в БД")
+    except Exception as e:
+        print(f"⚠️ Ошибка сохранения состояния user {user_id}: {e}")
 
 
 def add_legal_disclaimer(text: str) -> str:
@@ -182,6 +234,24 @@ def show_main_menu(chat_id: int):
 def save_lead_and_notify(user_id: int):
     state = get_user_state(user_id)
 
+    # Сохраняем в базу данных
+    try:
+        import asyncio
+        asyncio.run(db.save_lead(
+            name=state.name,
+            phone=state.phone,
+            extra_contact=state.extra_contact,
+            object_type=state.object_type,
+            city=state.city,
+            change_plan=state.change_plan,
+            bti_status=state.bti_status,
+            house_material=state.house_material,
+            commercial_purpose=state.commercial_purpose
+        ))
+        print(f"✅ Лид сохранен в БД: {state.name}, {state.phone}")
+    except Exception as e:
+        print(f"❌ Ошибка сохранения лида в БД: {e}")
+
     lead_info = f"""
 📋 Новая заявка на перепланировку
 
@@ -192,9 +262,15 @@ def save_lead_and_notify(user_id: int):
 🏙️ Город: {state.city or 'не указан'}
 🛠️ Что хочет изменить: {state.change_plan or 'не указано'}
 📄 Статус БТИ: {state.bti_status or 'не указан'}
-🕐 Время: {datetime.datetime.now().strftime("%d.%m.%Y %H:%M")}
-👤 User ID: {user_id}
     """.strip()
+
+    # Добавляем специфические поля для домов и коммерции
+    if state.object_type == "Дом" and state.house_material:
+        lead_info += f"\n🏗️ Материал дома: {state.house_material}"
+    elif state.object_type == "Коммерция" and state.commercial_purpose:
+        lead_info += f"\n🏢 Назначение помещения: {state.commercial_purpose}"
+
+    lead_info += f"\n🕐 Время: {datetime.datetime.now().strftime('%d.%m.%Y %H:%M')}\n👤 User ID: {user_id}"
 
     if state.object_type == "Квартира":
         thread_id = THREAD_ID_KVARTIRY
@@ -767,14 +843,47 @@ def mode_select_handler(call):
     elif call.data.startswith("obj_") and state.mode == BotModes.QUIZ:
         if call.data == "obj_kvartira":
             state.object_type = "Квартира"
+            state.quiz_step = 4  # Пропускаем специфические вопросы для домов/коммерции
+            bot.send_message(user_id, "Укажите город/регион:")
         elif call.data == "obj_kommertsia":
             state.object_type = "Коммерция"
+            # Добавляем шаг для назначения помещения
+            markup = types.InlineKeyboardMarkup()
+            markup.add(types.InlineKeyboardButton("🍽️ Общепит", callback_data="purpose_общепит"))
+            markup.add(types.InlineKeyboardButton("🛍️ Торговля", callback_data="purpose_торговля"))
+            markup.add(types.InlineKeyboardButton("💼 Офис", callback_data="purpose_офис"))
+            markup.add(types.InlineKeyboardButton("🏥 Медицина", callback_data="purpose_медицина"))
+            markup.add(types.InlineKeyboardButton("✏️ Другое", callback_data="purpose_другое"))
+            state.quiz_step = 3.5
+            bot.send_message(user_id, "Укажите назначение помещения:", reply_markup=markup)
         elif call.data == "obj_dom":
             state.object_type = "Дом"
+            # Добавляем шаг для материала дома
+            markup = types.InlineKeyboardMarkup()
+            markup.add(types.InlineKeyboardButton("🧱 Кирпич", callback_data="material_кирпич"))
+            markup.add(types.InlineKeyboardButton("🪵 Брус", callback_data="material_брус"))
+            markup.add(types.InlineKeyboardButton("🏗️ Каркас", callback_data="material_каркас"))
+            markup.add(types.InlineKeyboardButton("🧱 Пеноблок", callback_data="material_пеноблок"))
+            markup.add(types.InlineKeyboardButton("✏️ Другое", callback_data="material_другое"))
+            state.quiz_step = 3.5
+            bot.send_message(user_id, "Укажите материал дома:", reply_markup=markup)
         else:
             state.object_type = "Неизвестно"
+            state.quiz_step = 4
+            bot.send_message(user_id, "Укажите город/регион:")
 
-        state.quiz_step = 4
+    # Выбор материала дома
+    elif call.data.startswith("material_") and state.mode == BotModes.QUIZ:
+        material = call.data.replace("material_", "")
+        state.house_material = material
+        state.quiz_step = 4  # Переходим к следующему шагу
+        bot.send_message(user_id, "Укажите город/регион:")
+
+    # Выбор назначения коммерческого помещения
+    elif call.data.startswith("purpose_") and state.mode == BotModes.QUIZ:
+        purpose = call.data.replace("purpose_", "")
+        state.commercial_purpose = purpose
+        state.quiz_step = 4  # Переходим к следующему шагу
         bot.send_message(user_id, "Укажите город/регион:")
 
 
@@ -792,7 +901,8 @@ def quiz_handler(message):
     # Шаг 2: дополнительный контакт (опционально)
     if state.quiz_step == 2:
         text = message.text.strip()
-        state.extra_contact = None if text.lower() == "нет" else text
+        state.extra_contact = None if text.lower() in ["нет", "да"] else text
+        save_user_state_to_db(chat_id)
         state.quiz_step = 3
 
         markup = types.InlineKeyboardMarkup()
@@ -808,6 +918,7 @@ def quiz_handler(message):
     # Шаг 4: город/регион (после выбора объекта через callback)
     if state.quiz_step == 4:
         state.city = message.text.strip()
+        save_user_state_to_db(chat_id)
         state.quiz_step = 5
         bot.send_message(
             chat_id, "Укажите этаж и этажность дома (например: 5/9 или просто 5):"
@@ -824,6 +935,7 @@ def quiz_handler(message):
             state.floor = message.text.strip()
             state.total_floors = None
 
+        save_user_state_to_db(chat_id)
         state.quiz_step = 6
         bot.send_message(
             chat_id,
@@ -834,6 +946,7 @@ def quiz_handler(message):
     # Шаг 6: статус перепланировки
     if state.quiz_step == 6:
         state.remodeling_status = message.text.strip()
+        save_user_state_to_db(chat_id)
         state.quiz_step = 7
         bot.send_message(
             chat_id,
@@ -844,6 +957,7 @@ def quiz_handler(message):
     # Шаг 7: описание изменений
     if state.quiz_step == 7:
         state.change_plan = message.text.strip()
+        save_user_state_to_db(chat_id)
         state.quiz_step = 8
         bot.send_message(
             chat_id,
@@ -851,15 +965,57 @@ def quiz_handler(message):
         )
         return
 
-    # Шаг 8: статус документов БТИ + завершение квиза
+    # Шаг 8: статус документов БТИ
     if state.quiz_step == 8:
         state.bti_status = message.text.strip()
+        save_user_state_to_db(chat_id)
+        state.quiz_step = 9
+        bot.send_message(
+            chat_id,
+            "Как вы оцениваете удобство интерфейса бота? (отлично/хорошо/удовлетворительно/плохо)"
+        )
+        return
+
+    # Шаг 11: полезность базы знаний
+    if state.quiz_step == 11:
+        state.knowledge_helpful = message.text.strip()
+        state.quiz_step = 12
+        bot.send_message(
+            chat_id,
+            "Как быстро бот отвечал на ваши вопросы? (мгновенно/быстро/нормально/медленно)"
+        )
+        return
+
+    # Шаг 12: скорость ответа
+    if state.quiz_step == 12:
+        state.response_speed = message.text.strip()
+        state.quiz_step = 13
+        bot.send_message(
+            chat_id,
+            "Будете ли вы рекомендовать этого бота друзьям? (да/нет/возможно)"
+        )
+        return
+
+    # Шаг 13: рекомендация друзьям
+    if state.quiz_step == 13:
+        state.recommendation = message.text.strip()
+        state.quiz_step = 14
+        bot.send_message(
+            chat_id,
+            "Есть ли пожелания по улучшению бота? (напишите кратко или 'нет')"
+        )
+        return
+
+    # Шаг 14: пожелания по улучшению + завершение квиза
+    if state.quiz_step == 14:
+        state.improvement_suggestions = message.text.strip()
         save_lead_and_notify(chat_id)
         bot.send_message(
             chat_id,
             f"✅ Спасибо, {state.name}! Ваша заявка принята.\n\n"
             f"Команда «Пархоменко и компания» свяжется с вами по номеру {state.phone} "
-            f"ежедневно с 10:00 до 20:00 по Москве для обсуждения деталей и предварительного расчёта.",
+            f"ежедневно с 10:00 до 20:00 по Москве для обсуждения деталей и предварительного расчёта.\n\n"
+            f"Спасибо за обратную связь по работе бота!",
         )
         # Сброс состояния БЕЗ показа меню
         state.mode = None
