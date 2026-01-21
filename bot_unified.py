@@ -590,7 +590,19 @@ def initial_contact_handler(message):
     state = get_user_state(user_id)
     consent = get_user_consent(user_id)
 
-    state.phone = message.contact.phone_number
+    # Валидация номера телефона
+    phone = message.contact.phone_number
+    clean_phone = phone.replace('+', '').replace(' ', '').replace('-', '')
+
+    if not clean_phone.isdigit() or len(clean_phone) not in [10, 11, 12]:
+        bot.send_message(
+            user_id,
+            "⚠️ Номер телефона некорректен. Используйте кнопку «Поделиться контактом»."
+        )
+        return
+
+    state.phone = phone
+    save_user_state_to_db(user_id)
     consent.contact_received = True
 
     # МИНИМАЛЬНЫЙ ЛИД после получения контакта
@@ -902,6 +914,13 @@ def quiz_handler(message):
     if state.quiz_step == 2:
         text = message.text.strip()
         state.extra_contact = None if text.lower() in ["нет", "да"] else text
+
+        # Подтверждение сохранения контакта
+        if text.lower() in ["нет", "да"]:
+            bot.send_message(chat_id, "✅ Хорошо, продолжим без дополнительного контакта.")
+        else:
+            bot.send_message(chat_id, f"✅ Дополнительный контакт сохранён: {text}")
+
         save_user_state_to_db(chat_id)
         state.quiz_step = 3
 
@@ -934,6 +953,36 @@ def quiz_handler(message):
         else:
             state.floor = message.text.strip()
             state.total_floors = None
+
+        save_user_state_to_db(chat_id)
+
+        # Дополнительные вопросы в зависимости от типа объекта
+        if state.object_type == "Дом" and not state.house_material:
+            state.quiz_step = 5.1
+            bot.send_message(
+                chat_id,
+                "Укажите материал дома (кирпич, дерево, пеноблок и т.п.) или напишите 'другое' для уточнения:"
+            )
+        elif state.object_type == "Коммерция" and not state.commercial_purpose:
+            state.quiz_step = 5.1
+            bot.send_message(
+                chat_id,
+                "Укажите назначение помещения (офис, магазин, склад, производство и т.п.):"
+            )
+        else:
+            state.quiz_step = 6
+            bot.send_message(
+                chat_id,
+                "Перепланировка уже выполнена или только планируете? Напишите 'выполнена' или 'планируется'.",
+            )
+        return
+
+    # Шаг 5.1: материал дома или назначение коммерции
+    if state.quiz_step == 5.1:
+        if state.object_type == "Дом":
+            state.house_material = message.text.strip()
+        elif state.object_type == "Коммерция":
+            state.commercial_purpose = message.text.strip()
 
         save_user_state_to_db(chat_id)
         state.quiz_step = 6
@@ -1586,7 +1635,7 @@ def generate_content_cmd(message):
 
     try:
         # Генерируем посты
-        agent = ContentAgent()
+        agent = ContentAgent(api_key=YANDEX_API_KEY, model_uri=f"gpt://{FOLDER_ID}/yandexgpt/latest")
         posts = agent.generate_posts(7, theme=theme)
 
         # Сохраняем в БД
@@ -1752,7 +1801,7 @@ def generate_greetings_cmd(message):
 
         for person in upcoming:
             # Генерируем персональное поздравление
-            agent = ContentAgent()
+            agent = ContentAgent(api_key=YANDEX_API_KEY, model_uri=f"gpt://{FOLDER_ID}/yandexgpt/latest")
             name = person.get('first_name') or person.get('username') or "друг"
             birthday = person['birthday']
 
@@ -1812,7 +1861,7 @@ def generate_welcome_cmd(message):
 
     try:
         # Генерируем приветственное сообщение
-        agent = ContentAgent()
+        agent = ContentAgent(api_key=YANDEX_API_KEY, model_uri=f"gpt://{FOLDER_ID}/yandexgpt/latest")
         post = agent.generate_welcome_post(person_name=person_name)
 
         # Сохраняем как черновик
