@@ -14,7 +14,7 @@ class ContentAgent:
         self.brief_content = self._load_brief()
 
         # Единый список типов постов
-        self.post_types = ['news', 'fact', 'seasonal', 'case', 'offer']
+        self.post_types = ['news', 'fact', 'case', 'offer']
 
         # Шаблоны поздравлений с днем рождения (без упоминания услуг/перепланировок)
         self.birthday_templates = [
@@ -88,8 +88,13 @@ class ContentAgent:
         theme: опциональная тема недели (например: "новый год и зимние перепланировки")
         """
         if post_types is None:
-            # Дефолтное распределение по новым типам
-            post_types = {'fact': count - 2, 'news': 1, 'seasonal': 1}
+            # Новое распределение без seasonal: 3 fact, 2 case, 1 news, 1 offer
+            post_types = {
+                'fact': 3,
+                'case': 2,
+                'news': 1,
+                'offer': 1,
+            }
 
         posts = []
         start_date = datetime.now() + timedelta(days=1)
