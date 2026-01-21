@@ -372,7 +372,7 @@ class Database:
         state_json = json.dumps(state, ensure_ascii=False)
         consent_json = json.dumps(consent, ensure_ascii=False) if consent else None
 
-        await self.db.execute("""
+        await self.conn.execute("""
             INSERT INTO user_states (user_id, state_data, consent_data, updated_at)
             VALUES (?, ?, ?, datetime('now'))
             ON CONFLICT(user_id) DO UPDATE SET
@@ -381,7 +381,7 @@ class Database:
                 updated_at = datetime('now')
         """, (user_id, state_json, consent_json))
 
-        await self.db.commit()
+        await self.conn.commit()
 
     async def load_user_state(self, user_id: int) -> tuple:
         """
@@ -392,7 +392,7 @@ class Database:
         """
         import json
 
-        row = await self.db.execute_fetchone(
+        row = await self.conn.execute_fetchone(
             "SELECT state_data, consent_data FROM user_states WHERE user_id = ?",
             (user_id,)
         )
@@ -407,11 +407,11 @@ class Database:
 
     async def clear_user_state(self, user_id: int):
         """Удалить состояние пользователя (при завершении/сбросе)"""
-        await self.db.execute(
+        await self.conn.execute(
             "DELETE FROM user_states WHERE user_id = ?",
             (user_id,)
         )
-        await self.db.commit()
+        await self.conn.commit()
 
     # ==========================================
     # HOLIDAYS - праздничный календарь
@@ -428,7 +428,7 @@ class Database:
 
         today = datetime.now().strftime("%Y-%m-%d")
 
-        rows = await self.db.execute_fetchall(
+        rows = await self.conn.execute_fetchall(
             "SELECT id, date, name, message_template FROM holidays WHERE date = ?",
             (today,)
         )
@@ -442,7 +442,7 @@ class Database:
         Returns:
             list: Список всех праздников
         """
-        rows = await self.db.execute_fetchall(
+        rows = await self.conn.execute_fetchall(
             "SELECT id, date, name, message_template, created_at FROM holidays ORDER BY date"
         )
 
@@ -457,11 +457,11 @@ class Database:
             name: Название праздника
             message_template: Шаблон поздравительного сообщения
         """
-        await self.db.execute(
+        await self.conn.execute(
             "INSERT INTO holidays (date, name, message_template) VALUES (?, ?, ?)",
             (date, name, message_template)
         )
-        await self.db.commit()
+        await self.conn.commit()
 
 # Глобальный экземпляр базы данных
 db = Database()
