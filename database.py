@@ -138,7 +138,9 @@ class Database:
         async with self.conn.cursor() as cur:
             await cur.execute(query, (name, phone, extra_contact, object_type,
                                     city, change_plan, bti_status, house_material, commercial_purpose))
+            lead_id = cur.lastrowid
         await self.conn.commit()
+        return lead_id
 
     # Функции для работы с контент-планом
     async def save_post(self, post_type, title, body, cta, publish_date, image_prompt=None, image_url=None):
@@ -408,6 +410,56 @@ class Database:
         await self.db.execute(
             "DELETE FROM user_states WHERE user_id = ?",
             (user_id,)
+        )
+        await self.db.commit()
+
+    # ==========================================
+    # HOLIDAYS - праздничный календарь
+    # ==========================================
+
+    async def get_today_holidays(self) -> list:
+        """
+        Получить все праздники на сегодняшнюю дату
+
+        Returns:
+            list: Список словарей с полями id, date, name, message_template
+        """
+        from datetime import datetime
+
+        today = datetime.now().strftime("%Y-%m-%d")
+
+        rows = await self.db.execute_fetchall(
+            "SELECT id, date, name, message_template FROM holidays WHERE date = ?",
+            (today,)
+        )
+
+        return [dict(row) for row in rows]
+
+    async def get_all_holidays(self) -> list:
+        """
+        Получить все праздники
+
+        Returns:
+            list: Список всех праздников
+        """
+        rows = await self.db.execute_fetchall(
+            "SELECT id, date, name, message_template, created_at FROM holidays ORDER BY date"
+        )
+
+        return [dict(row) for row in rows]
+
+    async def add_holiday(self, date: str, name: str, message_template: str):
+        """
+        Добавить новый праздник
+
+        Args:
+            date: Дата в формате YYYY-MM-DD
+            name: Название праздника
+            message_template: Шаблон поздравительного сообщения
+        """
+        await self.db.execute(
+            "INSERT INTO holidays (date, name, message_template) VALUES (?, ?, ?)",
+            (date, name, message_template)
         )
         await self.db.commit()
 
