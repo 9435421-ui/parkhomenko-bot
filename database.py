@@ -13,15 +13,16 @@ class Database:
 
     async def connect(self):
         """Подключение к базе данных"""
-        db_url = os.getenv("DATABASE_URL", "sqlite:///parkhomenko_bot.db")
-        if not db_url:
-            raise RuntimeError("DATABASE_URL must be set in .env")
+        db_path = os.getenv("DB_PATH", "data/parkhomenko_bot.db")
+        if not db_path:
+            raise RuntimeError("DB_PATH must be set in .env")
 
-        if not db_url.startswith('sqlite:///'):
-            raise RuntimeError("Only SQLite is supported for now")
+        # Автоматическое создание папки для БД
+        DB_DIR = os.path.dirname(db_path)
+        if DB_DIR and not os.path.exists(DB_DIR):
+            os.makedirs(DB_DIR)
 
         import aiosqlite
-        db_path = db_url.replace('sqlite:///', '')
         logger.info(f"🔄 Using SQLite database: {db_path}")
         self.conn = await aiosqlite.connect(db_path)
         # Enable foreign keys for SQLite

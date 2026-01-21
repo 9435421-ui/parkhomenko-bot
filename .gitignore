@@ -1,7 +1,12 @@
+venv/
 __pycache__/
 *.pyc
+
+# Базы данных
+data/*.db
+
+# Логи
+logs/*.log
+
+# Локальные env
 .env
-*.log
-nohup.out
-uploads/
-uploads_plans/
