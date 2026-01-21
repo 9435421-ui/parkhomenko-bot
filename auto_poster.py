@@ -203,7 +203,7 @@ class AutoPoster:
         try:
             from content_agent import ContentAgent
 
-            agent = ContentAgent()
+            agent = ContentAgent(api_key='dummy', model_uri='dummy')
             plan_item = {
                 'type': post.get('type', 'fact'),
                 'theme': getattr(post, 'theme', None)  # Если есть поле theme
