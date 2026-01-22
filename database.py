@@ -80,6 +80,24 @@ class Database:
                     notes TEXT
                 )
             """
+            user_states_sql = """
+                CREATE TABLE IF NOT EXISTS user_states (
+                    user_id INTEGER PRIMARY KEY,
+                    state_data TEXT NOT NULL,
+                    consent_data TEXT,
+                    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+                )
+            """
+            holidays_sql = """
+                CREATE TABLE IF NOT EXISTS holidays (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    date TEXT NOT NULL,  -- Format: YYYY-MM-DD
+                    name TEXT NOT NULL,
+                    message_template TEXT NOT NULL,
+                    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+                )
+            """
         else:
             # PostgreSQL syntax
             leads_sql = """
@@ -125,6 +143,8 @@ class Database:
             await cur.execute(leads_sql)
             await cur.execute(content_sql)
             await cur.execute(subscribers_sql)
+            await cur.execute(user_states_sql)
+            await cur.execute(holidays_sql)
         await self.conn.commit()
 
     # Функции для работы с лидами
