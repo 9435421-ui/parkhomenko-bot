@@ -545,13 +545,16 @@ def start_handler(message):
     consent = get_user_consent(user_id)
 
     # Extract start parameter from deep link
-    start_param = None
+    start_param = 'organic'  # Значение по умолчанию для органического трафика
     if len(message.text.split()) > 1:
         # Format: /start <parameter>
-        start_param = message.text.split()[1].strip()
-        state.source = start_param
-        save_user_state_to_db(user_id)
-        print(f"📊 User {user_id} came from source: {start_param}")
+        param_text = message.text.split()[1].strip()
+        if param_text:  # Проверяем, что параметр не пустой
+            start_param = param_text
+
+    state.source = start_param
+    save_user_state_to_db(user_id)
+    print(f"📊 User {user_id} came from source: {start_param}")
 
     if not consent.privacy_accepted:
         show_privacy_consent(user_id)
