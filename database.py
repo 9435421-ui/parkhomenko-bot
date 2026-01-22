@@ -13,7 +13,7 @@ class Database:
 
     async def connect(self):
         """Подключение к базе данных"""
-        db_path = os.getenv("DB_PATH", "data/parkhomenko_bot.db")
+        db_path = os.getenv("DB_PATH", "db/parkhomenko_bot.db")
         if not db_path:
             raise RuntimeError("DB_PATH must be set in .env")
 
