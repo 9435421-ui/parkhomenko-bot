@@ -2,3 +2,4 @@ requests
 telebot
 python-dotenv
 aiosqlite
+pytz
