@@ -111,6 +111,7 @@ class UserState:
         self.change_plan = None
         self.voice_used = False
         self.preferred_time = None  # Для хранения удобного времени звонка
+        self.source = None  # Источник трафика (из start параметра)
 
 
 user_states: dict[int, UserState] = {}
@@ -239,9 +240,10 @@ def save_lead_and_notify(user_id: int):
             change_plan=state.change_plan,
             bti_status=state.bti_status,
             house_material=state.house_material,
-            commercial_purpose=state.commercial_purpose
+            commercial_purpose=state.commercial_purpose,
+            source=state.source
         ))
-        print(f"✅ Лид сохранен в БД: {state.name}, {state.phone}")
+        print(f"✅ Лид сохранен в БД: {state.name}, {state.phone}, источник: {state.source or 'не указан'}")
     except Exception as e:
         print(f"❌ Ошибка сохранения лида в БД: {e}")
 
@@ -255,6 +257,7 @@ def save_lead_and_notify(user_id: int):
 🏙️ Город: {state.city or 'не указан'}
 🛠️ Что хочет изменить: {state.change_plan or 'не указано'}
 📄 Статус БТИ: {state.bti_status or 'не указан'}
+🔗 Источник: {state.source or 'не указан'}
     """.strip()
 
     # Добавляем специфические поля для домов и коммерции
@@ -538,7 +541,17 @@ def transcribe_audio(file_path: str) -> str:
 @bot.message_handler(commands=["start"])
 def start_handler(message):
     user_id = message.chat.id
+    state = get_user_state(user_id)
     consent = get_user_consent(user_id)
+
+    # Extract start parameter from deep link
+    start_param = None
+    if len(message.text.split()) > 1:
+        # Format: /start <parameter>
+        start_param = message.text.split()[1].strip()
+        state.source = start_param
+        save_user_state_to_db(user_id)
+        print(f"📊 User {user_id} came from source: {start_param}")
 
     if not consent.privacy_accepted:
         show_privacy_consent(user_id)
@@ -851,9 +864,13 @@ def mode_select_handler(call):
             # Пропускаем шаг дополнительного контакта, сразу переходим к выбору типа объекта
             state.quiz_step = 3
             markup = types.InlineKeyboardMarkup()
-            markup.add(types.InlineKeyboardButton("Квартира", callback_data="obj_kvartira"))
-            markup.add(types.InlineKeyboardButton("Дом", callback_data="obj_dom"))
-            markup.add(types.InlineKeyboardButton("Нежилое помещение (офис, магазин и т.п.)", callback_data="obj_kommertsia"))
+            markup.row(
+                types.InlineKeyboardButton("Квартира", callback_data="obj_kvartira"),
+                types.InlineKeyboardButton("Дом", callback_data="obj_dom")
+            )
+            markup.row(
+                types.InlineKeyboardButton("Нежилое помещение (офис, магазин и т.п.)", callback_data="obj_kommertsia")
+            )
 
             bot.send_message(user_id, "Выберите тип объекта:\n- квартира\n- дом\n- нежилое помещение (офис, магазин и т.п.).", reply_markup=markup)
         elif state.quiz_step == 5:
@@ -954,7 +971,7 @@ def quiz_handler(message):
         save_user_state_to_db(chat_id)
         state.quiz_step = 5
         bot.send_message(
-            chat_id, "В каком городе или регионе находится квартира?"
+            chat_id, "Укажите город или регион, где находится объект."
         )
         return
 
@@ -1008,12 +1025,20 @@ def quiz_handler(message):
 
     # Шаг 6: статус перепланировки
     if state.quiz_step == 6:
-        state.remodeling_status = message.text.strip()
+        # Нормализуем ответ
+        text_lower = message.text.strip().lower()
+        if text_lower in ['выполнена', 'выполнено', 'уже выполнена', 'уже выполнено']:
+            state.remodeling_status = 'выполнена'
+        elif text_lower in ['планируется', 'планирую', 'будет выполнена', 'будет выполнено']:
+            state.remodeling_status = 'планируется'
+        else:
+            state.remodeling_status = text_lower  # Сохраняем как есть для неизвестных ответов
+
         save_user_state_to_db(chat_id)
         state.quiz_step = 7
         bot.send_message(
             chat_id,
-            "Перепланировка уже выполнена или только планируется? Напишите: „выполнена“ или „планируется“.",
+            "Кратко опишите, что хотите изменить в перепланировке (объединить комнаты, перенести санузел, расширить кухню и т.п.).",
         )
         return
 

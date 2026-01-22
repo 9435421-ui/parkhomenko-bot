@@ -150,15 +150,15 @@ class Database:
     # Функции для работы с лидами
     async def save_lead(self, name, phone, extra_contact=None, object_type=None,
                        city=None, change_plan=None, bti_status=None,
-                       house_material=None, commercial_purpose=None):
+                       house_material=None, commercial_purpose=None, source=None):
         """Сохранить лид"""
         query = """
-            INSERT INTO leads (name, phone, extra_contact, object_type, city, change_plan, bti_status, house_material, commercial_purpose)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            INSERT INTO leads (name, phone, extra_contact, object_type, city, change_plan, bti_status, house_material, commercial_purpose, source)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """
         async with self.conn.cursor() as cur:
             await cur.execute(query, (name, phone, extra_contact, object_type,
-                                    city, change_plan, bti_status, house_material, commercial_purpose))
+                                    city, change_plan, bti_status, house_material, commercial_purpose, source))
             lead_id = cur.lastrowid
         await self.conn.commit()
         return lead_id
@@ -413,10 +413,11 @@ class Database:
         """
         import json
 
-        row = await self.conn.execute_fetchone(
+        cursor = await self.conn.execute(
             "SELECT state_data, consent_data FROM user_states WHERE user_id = ?",
             (user_id,)
         )
+        row = await cursor.fetchone()
 
         if not row:
             return None, None
@@ -449,10 +450,11 @@ class Database:
 
         today = datetime.now().strftime("%Y-%m-%d")
 
-        rows = await self.conn.execute_fetchall(
+        cursor = await self.conn.execute(
             "SELECT id, date, name, message_template FROM holidays WHERE date = ?",
             (today,)
         )
+        rows = await cursor.fetchall()
 
         return [dict(row) for row in rows]
 
@@ -463,9 +465,10 @@ class Database:
         Returns:
             list: Список всех праздников
         """
-        rows = await self.conn.execute_fetchall(
+        cursor = await self.conn.execute(
             "SELECT id, date, name, message_template, created_at FROM holidays ORDER BY date"
         )
+        rows = await cursor.fetchall()
 
         return [dict(row) for row in rows]
 
