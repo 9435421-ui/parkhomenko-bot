@@ -30,7 +30,7 @@ CHANNEL_ID = os.getenv("CHANNEL_ID")
 # Пути для файлов
 UPLOAD_PLANS_DIR = os.getenv("UPLOAD_PLANS_DIR", "uploads_plans")
 UPLOAD_DIR = os.getenv("UPLOAD_DIR", "uploads")
-KNOWLEDGE_DIR = "knowledge_base"
+KNOWLEDGE_DIR = "data/knowledge_base"
 
 os.makedirs(UPLOAD_PLANS_DIR, exist_ok=True)
 os.makedirs(UPLOAD_DIR, exist_ok=True)
@@ -2057,8 +2057,17 @@ def content_callback_handler(call):
 
 import asyncio
 
-# Подключаемся к БД
-asyncio.run(db.connect())
+# Подключаемся к БД в синхронном контексте
+try:
+    import nest_asyncio
+    nest_asyncio.apply()
+    asyncio.run(db.connect())
+except ImportError:
+    # Если nest_asyncio не установлен, создаём новый event loop
+    import asyncio
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+    loop.run_until_complete(db.connect())
 
 # Запускаем автопостер в отдельном потоке
 import threading
