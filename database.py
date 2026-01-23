@@ -402,18 +402,25 @@ class Database:
             consent: Словарь с данными UserConsent (опционально)
         """
         import json
+        from datetime import datetime, date
 
-        state_json = json.dumps(state, ensure_ascii=False)
-        consent_json = json.dumps(consent, ensure_ascii=False) if consent else None
+        def json_serial(obj):
+            if isinstance(obj, (datetime, date)):
+                return obj.isoformat()
+            raise TypeError(f"Type {type(obj)} not serializable")
 
-        await self.conn.execute("""
-            INSERT INTO user_states (user_id, state_data, consent_data, updated_at)
-            VALUES (?, ?, ?, datetime('now'))
-            ON CONFLICT(user_id) DO UPDATE SET
-                state_data = excluded.state_data,
-                consent_data = excluded.consent_data,
-                updated_at = datetime('now')
-        """, (user_id, state_json, consent_json))
+        state_json = json.dumps(state, ensure_ascii=False, default=json_serial)
+        consent_json = json.dumps(consent, ensure_ascii=False, default=json_serial) if consent else None
+
+        async with self.conn.cursor() as cur:
+            await cur.execute("""
+                INSERT INTO user_states (user_id, state_data, consent_data, updated_at)
+                VALUES (?, ?, ?, datetime('now'))
+                ON CONFLICT(user_id) DO UPDATE SET
+                    state_data = excluded.state_data,
+                    consent_data = excluded.consent_data,
+                    updated_at = datetime('now')
+            """, (user_id, state_json, consent_json))
 
         await self.conn.commit()
 
@@ -426,11 +433,12 @@ class Database:
         """
         import json
 
-        cursor = await self.conn.execute(
-            "SELECT state_data, consent_data FROM user_states WHERE user_id = ?",
-            (user_id,)
-        )
-        row = await cursor.fetchone()
+        async with self.conn.cursor() as cur:
+            await cur.execute(
+                "SELECT state_data, consent_data FROM user_states WHERE user_id = ?",
+                (user_id,)
+            )
+            row = await cur.fetchone()
 
         if not row:
             return None, None
@@ -442,10 +450,11 @@ class Database:
 
     async def clear_user_state(self, user_id: int):
         """Удалить состояние пользователя (при завершении/сбросе)"""
-        await self.conn.execute(
-            "DELETE FROM user_states WHERE user_id = ?",
-            (user_id,)
-        )
+        async with self.conn.cursor() as cur:
+            await cur.execute(
+                "DELETE FROM user_states WHERE user_id = ?",
+                (user_id,)
+            )
         await self.conn.commit()
 
     # ==========================================
@@ -463,11 +472,12 @@ class Database:
 
         today = datetime.now().strftime("%Y-%m-%d")
 
-        cursor = await self.conn.execute(
-            "SELECT id, date, name, message_template FROM holidays WHERE date = ?",
-            (today,)
-        )
-        rows = await cursor.fetchall()
+        async with self.conn.cursor() as cur:
+            await cur.execute(
+                "SELECT id, date, name, message_template FROM holidays WHERE date = ?",
+                (today,)
+            )
+            rows = await cur.fetchall()
 
         return [dict(row) for row in rows]
 
@@ -478,10 +488,11 @@ class Database:
         Returns:
             list: Список всех праздников
         """
-        cursor = await self.conn.execute(
-            "SELECT id, date, name, message_template, created_at FROM holidays ORDER BY date"
-        )
-        rows = await cursor.fetchall()
+        async with self.conn.cursor() as cur:
+            await cur.execute(
+                "SELECT id, date, name, message_template, created_at FROM holidays ORDER BY date"
+            )
+            rows = await cur.fetchall()
 
         return [dict(row) for row in rows]
 
@@ -494,10 +505,11 @@ class Database:
             name: Название праздника
             message_template: Шаблон поздравительного сообщения
         """
-        await self.conn.execute(
-            "INSERT INTO holidays (date, name, message_template) VALUES (?, ?, ?)",
-            (date, name, message_template)
-        )
+        async with self.conn.cursor() as cur:
+            await cur.execute(
+                "INSERT INTO holidays (date, name, message_template) VALUES (?, ?, ?)",
+                (date, name, message_template)
+            )
         await self.conn.commit()
 
     # ==========================================
