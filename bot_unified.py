@@ -556,39 +556,17 @@ def start_handler(message):
     save_user_state_to_db(user_id)
     print(f"📊 User {user_id} came from source: {start_param}")
 
-    if not consent.privacy_accepted:
-        show_privacy_consent(user_id)
-        return
+    # Всегда начинаем с начала, независимо от сохраненного состояния
+    # Сбрасываем состояние для нового старта
+    state.mode = None
+    state.quiz_step = 0
+    consent.privacy_accepted = False
+    consent.ai_disclaimer_seen = False
+    consent.contact_received = False
+    consent.name_confirmed = False
+    save_user_state_to_db(user_id)
 
-    if not consent.ai_disclaimer_seen:
-        show_ai_disclaimer(user_id)
-        consent.ai_disclaimer_seen = True
-        consent.consent_timestamp = datetime.datetime.now()
-
-        markup = types.ReplyKeyboardMarkup(resize_keyboard=True, one_time_keyboard=True)
-        markup.add(
-            types.KeyboardButton("📱 Поделиться контактом", request_contact=True)
-        )
-        bot.send_message(
-            user_id,
-            "Для продолжения работы поделитесь своим контактом Telegram — это защитит нас от спама и поможет быстрее связаться.",
-            reply_markup=markup,
-        )
-        return
-
-    if not consent.contact_received:
-        markup = types.ReplyKeyboardMarkup(resize_keyboard=True, one_time_keyboard=True)
-        markup.add(
-            types.KeyboardButton("📱 Поделиться контактом", request_contact=True)
-        )
-        bot.send_message(
-            user_id,
-            "Для продолжения работы поделитесь своим контактом Telegram.",
-            reply_markup=markup,
-        )
-        return
-
-    show_main_menu(user_id)
+    show_privacy_consent(user_id)
 
 
 @bot.message_handler(commands=["privacy"])
@@ -911,8 +889,7 @@ def mode_select_handler(call):
     elif call.data.startswith("obj_") and state.mode == BotModes.QUIZ:
         if call.data == "obj_kvartira":
             state.object_type = "Квартира"
-            state.quiz_step = 4  # Пропускаем специфические вопросы для домов/коммерции
-            bot.send_message(user_id, "Укажите город/регион:")
+            state.quiz_step = 4  # Переходим к городу
         elif call.data == "obj_kommertsia":
             state.object_type = "Коммерция"
             # Добавляем шаг для назначения помещения
@@ -926,12 +903,10 @@ def mode_select_handler(call):
             bot.send_message(user_id, "Укажите назначение помещения:", reply_markup=markup)
         elif call.data == "obj_dom":
             state.object_type = "Дом"
-            state.quiz_step = 4  # Пропускаем шаг материала дома, сразу к городу
-            bot.send_message(user_id, "Укажите город/регион:")
+            state.quiz_step = 4  # Переходим к городу
         else:
             state.object_type = "Неизвестно"
             state.quiz_step = 4
-            bot.send_message(user_id, "Укажите город/регион:")
 
     # Выбор материала дома (больше не используется - ветка упрощена)
     # elif call.data.startswith("material_") and state.mode == BotModes.QUIZ:
@@ -984,13 +959,7 @@ def quiz_handler(message):
         save_user_state_to_db(chat_id)
 
         # Дополнительные вопросы в зависимости от типа объекта
-        if state.object_type == "Дом" and not state.house_material:
-            state.quiz_step = 5.1
-            bot.send_message(
-                chat_id,
-                "Укажите материал дома (кирпич, дерево, пеноблок и т.п.) или напишите 'другое' для уточнения:"
-            )
-        elif state.object_type == "Коммерция" and not state.commercial_purpose:
+        if state.object_type == "Коммерция" and not state.commercial_purpose:
             state.quiz_step = 5.1
             bot.send_message(
                 chat_id,
