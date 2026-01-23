@@ -926,26 +926,19 @@ def mode_select_handler(call):
             bot.send_message(user_id, "Укажите назначение помещения:", reply_markup=markup)
         elif call.data == "obj_dom":
             state.object_type = "Дом"
-            # Добавляем шаг для материала дома
-            markup = types.InlineKeyboardMarkup()
-            markup.add(types.InlineKeyboardButton("🧱 Кирпич", callback_data="material_кирпич"))
-            markup.add(types.InlineKeyboardButton("🪵 Брус", callback_data="material_брус"))
-            markup.add(types.InlineKeyboardButton("🏗️ Каркас", callback_data="material_каркас"))
-            markup.add(types.InlineKeyboardButton("🧱 Пеноблок", callback_data="material_пеноблок"))
-            markup.add(types.InlineKeyboardButton("✏️ Другое", callback_data="material_другое"))
-            state.quiz_step = 3.5
-            bot.send_message(user_id, "Укажите материал дома:", reply_markup=markup)
+            state.quiz_step = 4  # Пропускаем шаг материала дома, сразу к городу
+            bot.send_message(user_id, "Укажите город/регион:")
         else:
             state.object_type = "Неизвестно"
             state.quiz_step = 4
             bot.send_message(user_id, "Укажите город/регион:")
 
-    # Выбор материала дома
-    elif call.data.startswith("material_") and state.mode == BotModes.QUIZ:
-        material = call.data.replace("material_", "")
-        state.house_material = material
-        state.quiz_step = 4  # Переходим к следующему шагу
-        bot.send_message(user_id, "Укажите город/регион:")
+    # Выбор материала дома (больше не используется - ветка упрощена)
+    # elif call.data.startswith("material_") and state.mode == BotModes.QUIZ:
+    #     material = call.data.replace("material_", "")
+    #     state.house_material = material
+    #     state.quiz_step = 4  # Переходим к следующему шагу
+    #     bot.send_message(user_id, "Укажите город/регион:")
 
     # Выбор назначения коммерческого помещения
     elif call.data.startswith("purpose_") and state.mode == BotModes.QUIZ:
