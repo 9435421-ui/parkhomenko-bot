@@ -98,6 +98,18 @@ class Database:
                     created_at DATETIME DEFAULT CURRENT_TIMESTAMP
                 )
             """
+            scheduled_posts_sql = """
+                CREATE TABLE IF NOT EXISTS scheduled_posts (
+                    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+                    channel_id   TEXT NOT NULL,
+                    text         TEXT NOT NULL,
+                    image_path   TEXT,
+                    scheduled_at TEXT NOT NULL,
+                    status       TEXT NOT NULL,
+                    created_at   TEXT NOT NULL,
+                    sent_at      TEXT
+                )
+            """
         else:
             # PostgreSQL syntax
             leads_sql = """
@@ -145,6 +157,7 @@ class Database:
             await cur.execute(subscribers_sql)
             await cur.execute(user_states_sql)
             await cur.execute(holidays_sql)
+            await cur.execute(scheduled_posts_sql)
         await self.conn.commit()
 
     # Функции для работы с лидами
@@ -485,6 +498,48 @@ class Database:
             "INSERT INTO holidays (date, name, message_template) VALUES (?, ?, ?)",
             (date, name, message_template)
         )
+        await self.conn.commit()
+
+    # ==========================================
+    # SCHEDULED POSTS - автопостинг
+    # ==========================================
+
+    async def get_scheduled_posts_to_send(self):
+        """
+        Получить запланированные посты, которые нужно отправить
+
+        Returns:
+            list: Список словарей с записями scheduled_posts
+        """
+        import pytz
+        moscow_tz = pytz.timezone('Europe/Moscow')
+        now_moscow = datetime.now(moscow_tz).isoformat()
+
+        query = """
+            SELECT id, channel_id, text, image_path, scheduled_at, status, created_at, sent_at
+            FROM scheduled_posts
+            WHERE status = 'planned' AND scheduled_at <= ?
+            ORDER BY scheduled_at
+        """
+        async with self.conn.cursor() as cur:
+            await cur.execute(query, (now_moscow,))
+            rows = await cur.fetchall()
+            return [dict(row) for row in rows]
+
+    async def mark_scheduled_post_as_sent(self, post_id: int):
+        """
+        Отметить запланированный пост как отправленный
+
+        Args:
+            post_id: ID поста
+        """
+        import pytz
+        moscow_tz = pytz.timezone('Europe/Moscow')
+        now_moscow = datetime.now(moscow_tz).isoformat()
+
+        query = "UPDATE scheduled_posts SET status='sent', sent_at=? WHERE id=?"
+        async with self.conn.cursor() as cur:
+            await cur.execute(query, (now_moscow, post_id))
         await self.conn.commit()
 
 # Глобальный экземпляр базы данных
