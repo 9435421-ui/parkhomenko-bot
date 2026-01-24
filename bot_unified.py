@@ -556,27 +556,18 @@ def start_handler(message):
     save_user_state_to_db(user_id)
     print(f"📊 User {user_id} came from source: {start_param}")
 
-    # Check if privacy consent is not accepted
-    if not consent.privacy_accepted:
-        # Send privacy/AI message with inline button
-        privacy_text = (
-            "Мы используем ваши данные для консультации по перепланировке и применяем ИИ для анализа вопросов и подготовки ответов.\n\n"
-            "Нажмите «Продолжить», если согласны."
-        )
-        
-        markup = types.InlineKeyboardMarkup()
-        markup.add(types.InlineKeyboardButton("Продолжить", callback_data="consent_accept"))
-        
-        bot.send_message(user_id, privacy_text, reply_markup=markup)
-        return
-
-    # Normal start for users who already accepted consent
-    # Всегда начинаем с начала, независимо от сохраненного состояния
-    # Сбрасываем состояние для нового старта
+    # Сбросим состояние для нового старта
     state.mode = None
     state.quiz_step = 0
     save_user_state_to_db(user_id)
-    
+
+    # Check if privacy consent is not accepted
+    if not consent.privacy_accepted:
+        # Показываем текст согласия через show_privacy_consent
+        show_privacy_consent(user_id)
+        return
+
+    # Если согласие уже есть, показываем главное меню
     show_main_menu(user_id)
 
 
@@ -704,13 +695,16 @@ def name_confirmation_handler(call):
         consent.privacy_accepted = True
         save_user_state_to_db(user_id)
         
-        # Вызываем нормальную ветку старта
-        state.mode = None
-        state.quiz_step = 0
-        save_user_state_to_db(user_id)
-        show_main_menu(user_id)
+        # Запрашиваем контакт после согласия
+        markup = types.ReplyKeyboardMarkup(resize_keyboard=True, one_time_keyboard=True)
+        markup.add(types.KeyboardButton("📱 Поделиться контактом", request_contact=True))
+        bot.send_message(
+            user_id,
+            "Для продолжения работы поделитесь своим контактом Telegram — это защитит нас от спама и поможет быстрее связаться.",
+            reply_markup=markup,
+        )
         
-        bot.answer_callback_query(call.id, "✅ Спасибо за согласие! Добро пожаловать.")
+        bot.answer_callback_query(call.id, "✅ Спасибо за согласие! Теперь поделитесь контактом.")
 
     elif call.data.startswith("confirm_name_"):
         # Подтверждение имени
@@ -804,10 +798,23 @@ def time_handler(message):
 def mode_select_handler(call):
     user_id = call.message.chat.id
     consent = get_user_consent(user_id)
+    
+    # Проверка согласия на обработку персональных данных
     if not consent.privacy_accepted:
         show_privacy_consent(user_id)
         return
-
+    
+    # Проверка наличия контакта
+    if not consent.contact_received:
+        markup = types.ReplyKeyboardMarkup(resize_keyboard=True, one_time_keyboard=True)
+        markup.add(types.KeyboardButton("📱 Поделиться контактом", request_contact=True))
+        bot.send_message(
+            user_id,
+            "Пожалуйста, сначала отправьте контакт, чтобы мы могли с вами связаться.",
+            reply_markup=markup,
+        )
+        return
+    
     state = get_user_state(user_id)
 
     # Логируем вход в хендлер
