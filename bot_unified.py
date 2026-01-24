@@ -810,6 +810,9 @@ def mode_select_handler(call):
 
     state = get_user_state(user_id)
 
+    # Логируем вход в хендлер
+    print(f"[mode_select_handler] call.data: {call.data}, state.mode: {state.mode}, state.quiz_step: {state.quiz_step}")
+
     # Выбор режима работы
     if call.data == "mode_quiz":
         state.mode = BotModes.QUIZ
@@ -913,6 +916,7 @@ def mode_select_handler(call):
 
     # Выбор типа объекта в квизе
     elif call.data.startswith("obj_") and state.mode == BotModes.QUIZ:
+        print(f"[mode_select_handler] Обработка obj_: call.data: {call.data}, state.mode: {state.mode}, state.quiz_step: {state.quiz_step}")
         if call.data == "obj_kvartira":
             state.object_type = "Квартира"
             state.quiz_step = 4  # Переходим к городу
@@ -943,6 +947,7 @@ def mode_select_handler(call):
 
     # Выбор назначения коммерческого помещения
     elif call.data.startswith("purpose_") and state.mode == BotModes.QUIZ:
+        print(f"[mode_select_handler] Обработка purpose_: call.data: {call.data}, state.mode: {state.mode}, state.quiz_step: {state.quiz_step}")
         purpose = call.data.replace("purpose_", "")
         state.commercial_purpose = purpose
         state.quiz_step = 4  # Переходим к следующему шагу
@@ -968,7 +973,7 @@ def quiz_handler(message):
         save_user_state_to_db(chat_id)
         state.quiz_step = 5
         bot.send_message(
-            chat_id, "Укажите город или регион, где находится объект."
+            chat_id, "Укажите этаж и этажность дома в формате этаж/этажность (например: 5/17). Если не знаете точную этажность — напишите только этаж."
         )
         return
 
