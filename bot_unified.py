@@ -556,17 +556,28 @@ def start_handler(message):
     save_user_state_to_db(user_id)
     print(f"📊 User {user_id} came from source: {start_param}")
 
+    # Check if privacy consent is not accepted
+    if not consent.privacy_accepted:
+        # Send privacy/AI message with inline button
+        privacy_text = (
+            "Мы используем ваши данные для консультации по перепланировке и применяем ИИ для анализа вопросов и подготовки ответов.\n\n"
+            "Нажмите «Продолжить», если согласны."
+        )
+        
+        markup = types.InlineKeyboardMarkup()
+        markup.add(types.InlineKeyboardButton("Продолжить", callback_data="consent_accept"))
+        
+        bot.send_message(user_id, privacy_text, reply_markup=markup)
+        return
+
+    # Normal start for users who already accepted consent
     # Всегда начинаем с начала, независимо от сохраненного состояния
     # Сбрасываем состояние для нового старта
     state.mode = None
     state.quiz_step = 0
-    consent.privacy_accepted = False
-    consent.ai_disclaimer_seen = False
-    consent.contact_received = False
-    consent.name_confirmed = False
     save_user_state_to_db(user_id)
-
-    show_privacy_consent(user_id)
+    
+    show_main_menu(user_id)
 
 
 @bot.message_handler(commands=["privacy"])
@@ -681,12 +692,27 @@ def initial_contact_handler(message):
 @bot.callback_query_handler(
     func=lambda call: call.data.startswith("confirm_name_")
     or call.data == "change_name"
+    or call.data == "consent_accept"
 )
 def name_confirmation_handler(call):
     user_id = call.message.chat.id
     state = get_user_state(user_id)
+    consent = get_user_consent(user_id)
 
-    if call.data.startswith("confirm_name_"):
+    if call.data == "consent_accept":
+        # Обработка согласия на приватность
+        consent.privacy_accepted = True
+        save_user_state_to_db(user_id)
+        
+        # Вызываем нормальную ветку старта
+        state.mode = None
+        state.quiz_step = 0
+        save_user_state_to_db(user_id)
+        show_main_menu(user_id)
+        
+        bot.answer_callback_query(call.id, "✅ Спасибо за согласие! Добро пожаловать.")
+
+    elif call.data.startswith("confirm_name_"):
         # Подтверждение имени
         name = call.data.replace("confirm_name_", "")
         state.name = name
@@ -1792,7 +1818,6 @@ def generate_greetings_cmd(message):
         return
 
     import asyncio
-    import datetime
 
     try:
         upcoming = asyncio.run(db.get_upcoming_birthdays(7))
@@ -1855,7 +1880,6 @@ def generate_welcome_cmd(message):
         return
 
     import asyncio
-    import datetime
 
     # Парсим имя из команды: /generate_welcome Иван или просто /generate_welcome
     parts = message.text.split()
