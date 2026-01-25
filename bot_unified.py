@@ -482,6 +482,7 @@ def privacy_info(message):
 def privacy_consent_handler(message):
     user_id = message.chat.id
     consent = get_user_consent(user_id)
+    state = get_user_state(user_id)
 
     if "Отказаться" in message.text:
         bot.send_message(
@@ -489,19 +490,39 @@ def privacy_consent_handler(message):
         )
         return
 
+    # 1. Ставим True и обновляем время
     consent.privacy_accepted = True
     consent.notifications_accepted = True
     consent.consent_timestamp = datetime.datetime.now()
-    show_ai_disclaimer(user_id)
-    consent.ai_disclaimer_seen = True
 
-    markup = types.ReplyKeyboardMarkup(resize_keyboard=True, one_time_keyboard=True)
-    markup.add(types.KeyboardButton("📱 Поделиться контактом", request_contact=True))
-    bot.send_message(
-        user_id,
-        "Для продолжения работы поделитесь своим контактом Telegram — это защитит нас от спама и поможет быстрее связаться.",
-        reply_markup=markup,
-    )
+    # 2. Сбрасываем стейты (сохраняя имя и телефон)
+    saved_name = state.name
+    saved_phone = state.phone
+    user_states[user_id] = UserState()
+    state = user_states[user_id]
+    state.name = saved_name
+    state.phone = saved_phone
+
+    # 3. Проверяем, знаем ли мы пользователя
+    if consent.contact_received and state.name:
+        # Если знаем имя и телефон — сразу в главное меню
+        show_main_menu(user_id)
+    else:
+        # Если не знаем — по стандартному пути (Дисклеймер -> Контакт -> Имя)
+        show_ai_disclaimer(user_id)
+        consent.ai_disclaimer_seen = True
+
+        if not consent.contact_received:
+            markup = types.ReplyKeyboardMarkup(resize_keyboard=True, one_time_keyboard=True)
+            markup.add(types.KeyboardButton("📱 Поделиться контактом", request_contact=True))
+            bot.send_message(
+                user_id,
+                "Для продолжения работы поделитесь своим контактом Telegram — это защитит нас от спама и поможет быстрее связаться.",
+                reply_markup=markup,
+            )
+        else:
+            # Контакт есть, но имени нет
+            bot.send_message(user_id, "Как к вам обращаться?")
 
 
 @bot.message_handler(
