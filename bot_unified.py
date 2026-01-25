@@ -1,6 +1,7 @@
 import os
 import time
 import datetime
+import json
 import requests
 import telebot
 from telebot import types
@@ -118,13 +119,13 @@ PRIVACY_POLICY_TEXT = (
     "Перед началом работы необходимо:\n"
     "✅ Согласие на обработку персональных данных\n"
     "✅ Согласие на получение уведомлений\n\n"
-    "Наш AI-консультант Антон поможет вам, но помните:\n"
+    "Наш ИИ-помощник Антон поможет вам, но помните:\n"
     "• Консультации носят информационный характер\n"
     "• Мы соблюдаем законодательство РФ"
 )
 
 AI_INTRO_TEXT = (
-    "🤖 Вас приветствует Антон, AI‑консультант по перепланировкам "
+    "🤖 Вас приветствует Антон, ИИ‑помощник по перепланировкам "
     "в команде «Пархоменко и компания».\n\n"
     "Я могу:\n"
     "• Ответить на вопросы по нормам и требованиям\n"
@@ -147,6 +148,35 @@ def get_user_consent(user_id: int) -> UserConsent:
     if user_id not in user_consents:
         user_consents[user_id] = UserConsent()
     return user_consents[user_id]
+
+
+def save_contact_to_json(user_id: int, first_name: str, last_name: str, phone: str):
+    contact_data = {
+        "user_id": user_id,
+        "first_name": first_name,
+        "last_name": last_name,
+        "phone": phone,
+        "timestamp": datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    }
+
+    file_path = "contacts.json"
+    contacts = []
+
+    if os.path.exists(file_path):
+        try:
+            with open(file_path, "r", encoding="utf-8") as f:
+                contacts = json.load(f)
+        except Exception as e:
+            print(f"Ошибка чтения contacts.json: {e}")
+            contacts = []
+
+    contacts.append(contact_data)
+
+    try:
+        with open(file_path, "w", encoding="utf-8") as f:
+            json.dump(contacts, f, ensure_ascii=False, indent=4)
+    except Exception as e:
+        print(f"Ошибка записи в contacts.json: {e}")
 
 
 def add_legal_disclaimer(text: str) -> str:
@@ -324,7 +354,7 @@ def call_yandex_gpt(
                 {
                     "role": "system",
                     "text": (
-                        "Ты - Антон, AI-консультант по перепланировкам в компании «Пархоменко и компания». "
+                        "Ты - Антон, ИИ-помощник по перепланировкам в компании «Пархоменко и компания». "
                         "\n\nКРИТИЧЕСКИ ВАЖНО:\n\n"
                         "1. РАБОТА С БАЗОЙ ЗНАНИЙ:\n"
                         "- ИСПОЛЬЗУЙ ТОЛЬКО информацию из базы знаний (контекст в промпте)\n"
@@ -511,104 +541,49 @@ def privacy_consent_handler(message):
 )
 def initial_contact_handler(message):
     user_id = message.chat.id
-    state = get_user_state(user_id)
     consent = get_user_consent(user_id)
 
-    state.phone = message.contact.phone_number
+    # Извлекаем данные
+    phone = message.contact.phone_number
+    first_name = message.contact.first_name or ""
+    last_name = message.contact.last_name or ""
+
+    # Сохраняем контакт
     consent.contact_received = True
+    save_contact_to_json(user_id, first_name, last_name, phone)
+
+    # Сброс стейта
+    user_states.pop(user_id, None)
+    # Создаем новый чистый стейт и записываем туда имя/телефон на будущее
+    state = get_user_state(user_id)
+    state.phone = phone
+    state.name = first_name
 
     # МИНИМАЛЬНЫЙ ЛИД после получения контакта
     contact_lead = f"""
-🆕 НОВЫЙ КОНТАКТ: {message.contact.first_name} {message.contact.last_name or ''}
-📞 Телефон: {state.phone}
+🆕 НОВЫЙ КОНТАКТ: {first_name} {last_name}
+📞 Телефон: {phone}
 👤 User ID: {user_id}
 🕐 Время: {datetime.datetime.now().strftime("%d.%m.%Y %H:%M")}
-ℹ️ Статус: контакт получен, тип объекта и заявка ещё не оформлены
+ℹ️ Статус: контакт получен, регистрация завершена
     """.strip()
 
     try:
         bot.send_message(LEADS_GROUP_CHAT_ID, contact_lead)
-        print(
-            f"✅ Минимальный лид отправлен: {message.contact.first_name}, {state.phone}"
-        )
+        print(f"✅ Минимальный лид отправлен: {first_name}, {phone}")
     except Exception as e:
         print(f"❌ Ошибка отправки минимального лида: {e}")
 
-    # Извлекаем имя из контакта
-    contact_name = message.contact.first_name or ""
+    bot.send_message(
+        user_id,
+        f"Приятно познакомиться, {first_name}! Теперь вы можете воспользоваться функциями нашего сервиса.",
+        reply_markup=types.ReplyKeyboardRemove()
+    )
 
-    hide_kb = types.ReplyKeyboardRemove()
-
-    if contact_name:
-        # Если имя есть — предлагаем подтвердить
-        markup = types.InlineKeyboardMarkup()
-        markup.add(
-            types.InlineKeyboardButton(
-                f"✅ Да, {contact_name}", callback_data=f"confirm_name_{contact_name}"
-            )
-        )
-        markup.add(
-            types.InlineKeyboardButton(
-                "✏️ Нет, указать другое", callback_data="change_name"
-            )
-        )
-
-        bot.send_message(
-            user_id,
-            f"Спасибо! Ваш контакт {state.phone} сохранён.\n\n"
-            f"Могу к вам обращаться «{contact_name}»?",
-            reply_markup=markup,
-        )
-    else:
-        # Если имени нет — спрашиваем
-        bot.send_message(
-            user_id,
-            f"Спасибо! Ваш контакт {state.phone} сохранён.\n\nКак к вам обращаться?",
-            reply_markup=hide_kb,
-        )
-
-
-@bot.callback_query_handler(
-    func=lambda call: call.data.startswith("confirm_name_")
-    or call.data == "change_name"
-)
-def name_confirmation_handler(call):
-    user_id = call.message.chat.id
-    state = get_user_state(user_id)
-
-    if call.data.startswith("confirm_name_"):
-        # Подтверждение имени
-        name = call.data.replace("confirm_name_", "")
-        state.name = name
-        bot.edit_message_text(
-            f"Приятно познакомиться, {name}!",
-            chat_id=user_id,
-            message_id=call.message.message_id,
-        )
-        show_main_menu(user_id)
-
-    elif call.data == "change_name":
-        # Запрос нового имени
-        bot.edit_message_text(
-            "Хорошо, напишите, как к вам обращаться:",
-            chat_id=user_id,
-            message_id=call.message.message_id,
-        )
-
-
-@bot.message_handler(
-    func=lambda m: get_user_consent(m.chat.id).contact_received
-    and get_user_state(m.chat.id).name is None
-    and get_user_state(m.chat.id).mode is None,
-    content_types=["text"],
-)
-def initial_name_handler(message):
-    user_id = message.chat.id
-    state = get_user_state(user_id)
-
-    state.name = message.text.strip()
-    bot.send_message(user_id, f"Приятно познакомиться, {state.name}!")
+    # Прямой вход в меню
     show_main_menu(user_id)
+
+
 
 
 @bot.message_handler(
@@ -979,7 +954,7 @@ def dialog_handler(message):
         )
 
     system_prompt = """
-Ты — Антон, ИИ-консультант «Пархоменко и компания» (Москва/МО, согласование перепланировок под ключ, 10+ лет).
+Ты — Антон, ИИ-помощник «Пархоменко и компания» (Москва/МО, согласование перепланировок под ключ, 10+ лет).
 
 ЖЕЛЕЗНЫЕ ПРАВИЛА:
 1. Читай историю — НЕ задавай вопросы, на которые клиент УЖЕ ответил
@@ -1069,7 +1044,7 @@ def dialog_handler(message):
 def build_system_prompt():
     """Общий system_prompt для dialog_handler и quick_handler"""
     return """
-Ты — Антон, ИИ-консультант «Пархоменко и компания» (Москва/МО, согласование перепланировок под ключ, 10+ лет).
+Ты — Антон, ИИ-помощник «Пархоменко и компания» (Москва/МО, согласование перепланировок под ключ, 10+ лет).
 
 ЖЕЛЕЗНЫЕ ПРАВИЛА:
 1. Читай историю — НЕ задавай вопросы, на которые клиент УЖЕ ответил
