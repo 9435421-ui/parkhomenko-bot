@@ -50,19 +50,8 @@ from auto_poster import run_auto_poster
 
 # Подключение к базе данных будет выполнено в async контексте
 
-# --------- RAG ---------
-try:
-    from kb_rag import KnowledgeBaseRAG
-
-    kb = KnowledgeBaseRAG(KNOWLEDGE_DIR)
-    kb.index_markdown_files()
-    print(f"✅ База знаний загружена из: {KNOWLEDGE_DIR}")
-except ImportError:
-    print("⚠️ Модуль kb_rag не найден, RAG отключен")
-    kb = None
-except Exception as e:
-    print(f"❌ Ошибка загрузки базы знаний: {e}")
-    kb = None
+# --------- RAG (Отключено для режима Ассистента) ---------
+kb = None
 
 # --------- Состояния ---------
 
@@ -125,15 +114,12 @@ PRIVACY_POLICY_TEXT = (
 )
 
 AI_INTRO_TEXT = (
-    "🤖 Вас приветствует Антон, ИИ‑помощник по перепланировкам "
-    "в команде «ЛАД В КВАРТИРЕ».\n\n"
-    "Я могу:\n"
-    "• Ответить на вопросы по нормам и требованиям\n"
-    "• Рассчитать примерную стоимость работ\n"
-    "• Помочь с оформлением заявки\n"
-    "• Проанализировать план помещения\n\n"
-    "⚠️ Важно: мои рекомендации носят информационный характер. "
-    "Наш специалист даст вам полную информацию по документации."
+    "🤖 Вас приветствует Антон, ИИ‑помощник команды «ЛАД В КВАРТИРЕ».\n\n"
+    "Я помогу вам:\n"
+    "• Правильно оформить заявку на перепланировку\n"
+    "• Собрать первичную информацию о вашем объекте\n"
+    "• Передать данные эксперту для детального разбора\n\n"
+    "⚠️ Для получения ответов на вопросы по нормам и расчёта стоимости, пожалуйста, оставьте заявку — наш эксперт свяжется с вами для бесплатной консультации."
 )
 
 # --------- Утилиты ---------
@@ -203,10 +189,6 @@ def show_main_menu(chat_id: int):
     markup = types.InlineKeyboardMarkup()
     markup.row(
         types.InlineKeyboardButton("📝 Оставить заявку", callback_data="mode_quiz")
-    )
-    markup.row(
-        types.InlineKeyboardButton("💬 Задать вопрос эксперту", callback_data="mode_dialog"),
-        types.InlineKeyboardButton("❓ Быстрый вопрос", callback_data="mode_quick")
     )
     markup.row(
         types.InlineKeyboardButton("🌐 Наш сайт", url="https://9435421-ui.github.io/soglasovanie-landing/"),
@@ -862,6 +844,18 @@ def quiz_handler(message):
 def dialog_handler(message):
     chat_id = message.chat.id
     state = get_user_state(chat_id)
+
+    bot.send_message(
+        chat_id,
+        f"{state.name}, сейчас я работаю в режиме ассистента и помогаю в оформлении заявок. Для получения подробной консультации эксперта, пожалуйста, воспользуйтесь кнопкой «📝 Оставить заявку» в главном меню или дождитесь звонка нашего специалиста."
+    )
+    show_main_menu(chat_id)
+    state.mode = None
+    return
+
+def original_dialog_handler(message):
+    chat_id = message.chat.id
+    state = get_user_state(chat_id)
     consent = get_user_consent(chat_id)
     if not consent.privacy_accepted:
         show_privacy_consent(chat_id)
@@ -1134,6 +1128,18 @@ def should_prevent_repeat(state, current_prompt):
     content_types=["text"],
 )
 def quick_handler(message):
+    chat_id = message.chat.id
+    state = get_user_state(chat_id)
+
+    bot.send_message(
+        chat_id,
+        f"{state.name}, для быстрого ответа на ваш вопрос лучше всего оставить заявку. Наши специалисты свяжутся с вами и дадут максимально точную информацию."
+    )
+    show_main_menu(chat_id)
+    state.mode = None
+    return
+
+def original_quick_handler(message):
     chat_id = message.chat.id
     state = get_user_state(chat_id)
     consent = get_user_consent(chat_id)
@@ -1426,7 +1432,8 @@ def generate_content_cmd(message):
                     post.get('title', ''),
                     post['body'],
                     post['cta'],
-                    post['publish_date']
+                    post['publish_date'],
+                    image_prompt=post.get('image_prompt')
                 )
 
         asyncio.run(save_posts())
@@ -1438,8 +1445,15 @@ def generate_content_cmd(message):
             thread_id = THREAD_ID_SEASONAL if post['type'] in ['seasonal', 'живой'] else THREAD_ID_DRAFTS
 
             text = f"[Тип: {post['type']}]\n\n📌 {post.get('title', '')}\n\n{post['body']}\n\n👉 {post['cta']}"
+            if post.get('image_prompt'):
+                text += f"\n\n🎨 Промпт: {post['image_prompt']}"
+            if post.get('image_url'):
+                text += f"\n\n🖼 Изображение готово"
+
             markup = types.InlineKeyboardMarkup()
             markup.add(types.InlineKeyboardButton("✅ Утвердить", callback_data=f"approve_{post['id']}"))
+            if post.get('image_prompt') and not post.get('image_url'):
+                markup.add(types.InlineKeyboardButton("🎨 Генерировать фото", callback_data=f"genimg_{post['id']}"))
             markup.add(types.InlineKeyboardButton("❌ Удалить", callback_data=f"delete_{post['id']}"))
 
             try:
@@ -1599,7 +1613,8 @@ def generate_greetings_cmd(message):
                 title=post.get('title', f"Поздравление для {name}"),
                 body=full_body,
                 cta=post['cta'],
-                publish_date=publish_date
+                publish_date=publish_date,
+                image_prompt=agent.build_image_prompt({'type': 'поздравление'})
             ))
 
             # Отправляем в топик черновиков
@@ -1653,7 +1668,8 @@ def generate_welcome_cmd(message):
             title=post.get('title', f"Приветствие для {'нового подписчика' if not person_name else person_name}"),
             body=post['body'],
             cta=post['cta'],
-            publish_date=publish_date
+            publish_date=publish_date,
+            image_prompt=agent.build_image_prompt({'type': 'приветствие'})
         ))
 
         # Отправляем в топик черновиков
@@ -1702,8 +1718,13 @@ def show_plan_cmd(message):
         thread_id = THREAD_ID_SEASONAL if post['type'] in ['seasonal', 'живой'] else THREAD_ID_DRAFTS
 
         text = f"[Тип: {post['type']}]\n\n📌 {post.get('title', '')}\n\n{post['body']}\n\n👉 {post['cta']}"
+        if post.get('image_prompt'):
+            text += f"\n\n🎨 Промпт: {post['image_prompt']}"
+
         markup = types.InlineKeyboardMarkup()
         markup.add(types.InlineKeyboardButton("✅ Утвердить", callback_data=f"approve_{post['id']}"))
+        if post.get('image_prompt') and not post.get('image_url'):
+            markup.add(types.InlineKeyboardButton("🎨 Генерировать фото", callback_data=f"genimg_{post['id']}"))
         markup.add(types.InlineKeyboardButton("❌ Удалить", callback_data=f"delete_{post['id']}"))
 
         try:
@@ -1722,13 +1743,14 @@ def show_plan_cmd(message):
     bot.send_message(message.chat.id, f"✅ Черновики ({len(drafts)} шт.) отправлены в группу.")
 
 
-@bot.callback_query_handler(func=lambda call: call.data.startswith("approve_") or call.data.startswith("delete_"))
+@bot.callback_query_handler(func=lambda call: call.data.startswith("approve_") or call.data.startswith("delete_") or call.data.startswith("genimg_"))
 def content_callback_handler(call):
-    """Обработка кнопок approve/delete"""
+    """Обработка кнопок approve/delete/genimg"""
     if call.message.chat.id != LEADS_GROUP_CHAT_ID:
         return
 
-    post_id = int(call.data.split('_')[1])
+    action, post_id_str = call.data.split('_')
+    post_id = int(post_id_str)
 
     import asyncio
 
@@ -1799,6 +1821,42 @@ def content_callback_handler(call):
             print(f"Failed to send deletion log: {e}")
 
         bot.answer_callback_query(call.id, "❌ Пост удалён")
+
+    elif action == "genimg":
+        bot.answer_callback_query(call.id, "🎨 Начинаю генерацию изображения...")
+
+        # Получаем данные поста
+        import asyncio
+        posts = asyncio.run(db.get_all_posts())
+        post = next((p for p in posts if p['id'] == post_id), None)
+
+        if not post or not post.get('image_prompt'):
+            bot.send_message(call.message.chat.id, "❌ Промпт для изображения не найден", message_thread_id=call.message.message_thread_id)
+            return
+
+        from agents.image_agent import generate_image
+        image_data = generate_image(post['image_prompt'])
+
+        if image_data:
+            # Сохраняем локально или загружаем куда-то. Для примера - сохраним в uploads.
+            img_path = f"uploads/post_{post_id}.png"
+            with open(img_path, "wb") as f:
+                f.write(image_data)
+
+            # Обновляем в БД (используем абсолютный путь или URL)
+            asyncio.run(db.update_content_plan_entry(post_id, image_url=img_path))
+
+            # Отправляем превью
+            bot.send_photo(call.message.chat.id, image_data, caption=f"✅ Изображение для поста #{post_id} готово!", message_thread_id=call.message.message_thread_id)
+
+            # Обновляем кнопки в исходном сообщении
+            new_text = call.message.text + "\n\n🖼 Изображение готово"
+            markup = types.InlineKeyboardMarkup()
+            markup.add(types.InlineKeyboardButton("✅ Утвердить", callback_data=f"approve_{post_id}"))
+            markup.add(types.InlineKeyboardButton("❌ Удалить", callback_data=f"delete_{post_id}"))
+            bot.edit_message_text(new_text, call.message.chat.id, call.message.message_id, reply_markup=markup)
+        else:
+            bot.send_message(call.message.chat.id, "❌ Ошибка при генерации изображения", message_thread_id=call.message.message_thread_id)
 
 
 # ========== ЗАПУСК ==========

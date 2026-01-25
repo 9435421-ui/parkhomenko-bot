@@ -45,10 +45,25 @@ class AutoPoster:
                 try:
                     # Форматируем пост
                     formatted_post = self._format_post(post)
+                    image_url = post.get('image_url')
 
                     # Отправляем в канал
-                    logging.info(f"Publishing post {post['id']}: len={len(formatted_post)}")
-                    self.bot.send_message(chat_id=CONTENT_CHANNEL_ID, text=formatted_post)  # parse_mode убран
+                    logging.info(f"Publishing post {post['id']}: len={len(formatted_post)}, has_image={bool(image_url)}")
+
+                    if image_url:
+                        try:
+                            # Если есть изображение, отправляем как фото с подписью
+                            self.bot.send_photo(
+                                chat_id=CONTENT_CHANNEL_ID,
+                                photo=image_url,
+                                caption=formatted_post[:1024] # Лимит подписи в TG
+                            )
+                        except Exception as e:
+                            logger.error(f"Ошибка отправки фото для поста #{post['id']}: {e}. Отправляю только текст.")
+                            self.bot.send_message(chat_id=CONTENT_CHANNEL_ID, text=formatted_post)
+                    else:
+                        # Если нет изображения, отправляем просто текст
+                        self.bot.send_message(chat_id=CONTENT_CHANNEL_ID, text=formatted_post)
 
                     # Отмечаем как опубликованный
                     await db.mark_as_published(post['id'])

@@ -63,6 +63,8 @@ class Database:
                     cta TEXT NOT NULL,
                     publish_date TEXT NOT NULL,
                     status TEXT DEFAULT 'draft',
+                    image_prompt TEXT,
+                    image_url TEXT,
                     created_at TEXT DEFAULT (datetime('now')),
                     published_at TEXT
                 )
@@ -103,6 +105,8 @@ class Database:
                     cta TEXT NOT NULL,
                     publish_date TIMESTAMP NOT NULL,
                     status VARCHAR(20) DEFAULT 'draft',
+                    image_prompt TEXT,
+                    image_url TEXT,
                     created_at TIMESTAMP DEFAULT NOW(),
                     published_at TIMESTAMP
                 )
