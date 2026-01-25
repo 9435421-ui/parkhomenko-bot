@@ -53,11 +53,20 @@ class AutoPoster:
                     if image_url:
                         try:
                             # Если есть изображение, отправляем как фото с подписью
-                            self.bot.send_photo(
-                                chat_id=CONTENT_CHANNEL_ID,
-                                photo=image_url,
-                                caption=formatted_post[:1024] # Лимит подписи в TG
-                            )
+                            if os.path.exists(image_url):
+                                with open(image_url, 'rb') as photo:
+                                    self.bot.send_photo(
+                                        chat_id=CONTENT_CHANNEL_ID,
+                                        photo=photo,
+                                        caption=formatted_post[:1024] # Лимит подписи в TG
+                                    )
+                            else:
+                                # Если это URL или file_id
+                                self.bot.send_photo(
+                                    chat_id=CONTENT_CHANNEL_ID,
+                                    photo=image_url,
+                                    caption=formatted_post[:1024]
+                                )
                         except Exception as e:
                             logger.error(f"Ошибка отправки фото для поста #{post['id']}: {e}. Отправляю только текст.")
                             self.bot.send_message(chat_id=CONTENT_CHANNEL_ID, text=formatted_post)

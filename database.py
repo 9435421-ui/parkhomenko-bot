@@ -128,6 +128,18 @@ class Database:
             await cur.execute(leads_sql)
             await cur.execute(content_sql)
             await cur.execute(subscribers_sql)
+
+            # Миграция: Добавление колонок для изображений, если их нет
+            try:
+                await cur.execute("ALTER TABLE content_plan ADD COLUMN image_prompt TEXT")
+            except:
+                pass # Колонка уже есть
+
+            try:
+                await cur.execute("ALTER TABLE content_plan ADD COLUMN image_url TEXT")
+            except:
+                pass # Колонка уже есть
+
         await self.conn.commit()
 
     # Функции для работы с лидами
