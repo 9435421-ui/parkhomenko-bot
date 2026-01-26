@@ -1,6 +1,7 @@
 import os
 import time
 import datetime
+import threading
 import json
 import requests
 import telebot
@@ -743,6 +744,19 @@ def mode_select_handler(call):
         state.quiz_step = 4
         bot.send_message(user_id, "Укажите город/регион:")
 
+    # Выбор статуса перепланировки (выполнена/планируется)
+    elif call.data.startswith("status_") and state.mode == BotModes.QUIZ:
+        if call.data == "status_done":
+            state.remodeling_status = "Уже выполнена"
+        else:
+            state.remodeling_status = "Только планируется"
+
+        state.quiz_step = 7
+        bot.send_message(
+            user_id,
+            "Кратко опишите, что хотите изменить в перепланировке (объединить комнаты, перенести санузел, расширить кухню и т.п.).",
+        )
+
 
 # ========== КВИЗ: Сбор заявки ==========
 
@@ -791,13 +805,18 @@ def quiz_handler(message):
             state.total_floors = None
 
         state.quiz_step = 6
+        markup = types.InlineKeyboardMarkup()
+        markup.add(types.InlineKeyboardButton("✅ Уже выполнена", callback_data="status_done"))
+        markup.add(types.InlineKeyboardButton("🕒 Только планируется", callback_data="status_planned"))
+
         bot.send_message(
             chat_id,
-            "Перепланировка уже выполнена или только планируете? Напишите 'выполнена' или 'планируется'.",
+            "Перепланировка уже выполнена или только планируете?",
+            reply_markup=markup
         )
         return
 
-    # Шаг 6: статус перепланировки
+    # Шаг 6 (текстовый) - на случай если пользователь проигнорировал кнопки
     if state.quiz_step == 6:
         state.remodeling_status = message.text.strip()
         state.quiz_step = 7
@@ -828,10 +847,47 @@ def quiz_handler(message):
             f"ежедневно с 10:00 до 20:00 по Москве для обсуждения деталей и предварительного расчёта.\n\n"
             "Вы также можете прислать фото плана или написать любую дополнительную информацию прямо здесь в чате — я передам её специалисту.",
         )
-        # Сброс состояния БЕЗ показа меню
+        # Сброс состояния
         state.mode = None
         state.quiz_step = 0
+
+        # Через небольшую паузу возвращаем меню
+        threading.Timer(2.0, lambda: show_main_menu(chat_id)).start()
         return
+
+
+# ========== ОБРАБОТКА ФОТО (Планы БТИ и др.) ==========
+
+
+@bot.message_handler(content_types=["photo"])
+def photo_handler(message):
+    chat_id = message.chat.id
+    state = get_user_state(chat_id)
+
+    # Текст для админов
+    caption = f"🖼 Дополнение к заявке от {state.name} (@{message.from_user.username or 'no_username'})\n"
+    caption += f"📞 Тел: {state.phone or 'не указан'}\n"
+    caption += f"🏠 Объект: {state.object_type or 'не указан'}"
+
+    # Определяем топик (по умолчанию Квартиры, если не выбран другой)
+    thread_id = THREAD_ID_KVARTIRY
+    if state.object_type == "Коммерция":
+        thread_id = THREAD_ID_KOMMERCIA
+    elif state.object_type == "Дом":
+        thread_id = THREAD_ID_DOMA
+
+    try:
+        # Пересылаем фото в группу лидов
+        bot.send_photo(
+            LEADS_GROUP_CHAT_ID,
+            message.photo[-1].file_id,
+            caption=caption,
+            message_thread_id=thread_id
+        )
+        bot.send_message(chat_id, "✅ Фото получил и передал специалисту! Спасибо.")
+    except Exception as e:
+        print(f"❌ Ошибка пересылки фото: {e}")
+        bot.send_message(chat_id, "Получил ваше фото. Передам его коллегам.")
 
 
 # ========== ДИАЛОГОВЫЙ РЕЖИМ ==========
