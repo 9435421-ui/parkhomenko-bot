@@ -1,0 +1,263 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Лад в квартире - Инвест-калькулятор</title>
+    <script src="https://telegram.org/js/telegram-web-app.js"></script>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+            background: var(--tg-theme-bg-color, #ffffff);
+            color: var(--tg-theme-text-color, #000000);
+            padding: 20px;
+            overflow-x: hidden;
+        }
+
+        .container {
+            max-width: 600px;
+            margin: 0 auto;
+        }
+
+        .header {
+            text-align: center;
+            margin-bottom: 30px;
+        }
+
+        .header h1 {
+            font-size: 24px;
+            font-weight: 600;
+            margin-bottom: 10px;
+            color: var(--tg-theme-text-color, #000000);
+        }
+
+        .header p {
+            font-size: 14px;
+            color: var(--tg-theme-hint-color, #999);
+        }
+
+        .card {
+            background: var(--tg-theme-secondary-bg-color, #f4f4f5);
+            border-radius: 12px;
+            padding: 20px;
+            margin-bottom: 16px;
+        }
+
+        .card-title {
+            font-size: 18px;
+            font-weight: 600;
+            margin-bottom: 15px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .input-group {
+            margin-bottom: 16px;
+        }
+
+        .input-group label {
+            display: block;
+            font-size: 14px;
+            margin-bottom: 8px;
+            color: var(--tg-theme-hint-color, #999);
+        }
+
+        .input-group input,
+        .input-group select {
+            width: 100%;
+            padding: 12px;
+            border: 1px solid var(--tg-theme-hint-color, #ddd);
+            border-radius: 8px;
+            font-size: 16px;
+            background: var(--tg-theme-bg-color, #fff);
+            color: var(--tg-theme-text-color, #000);
+        }
+
+        .result-card {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 24px;
+            border-radius: 12px;
+            margin-top: 20px;
+        }
+
+        .result-value {
+            font-size: 36px;
+            font-weight: 700;
+            margin: 10px 0;
+        }
+
+        .result-label {
+            font-size: 14px;
+            opacity: 0.9;
+        }
+
+        .button {
+            width: 100%;
+            padding: 14px;
+            background: var(--tg-theme-button-color, #3390ec);
+            color: var(--tg-theme-button-text-color, #ffffff);
+            border: none;
+            border-radius: 8px;
+            font-size: 16px;
+            font-weight: 600;
+            cursor: pointer;
+            margin-top: 20px;
+        }
+
+        .button:active {
+            opacity: 0.8;
+        }
+
+        .info-text {
+            font-size: 12px;
+            color: var(--tg-theme-hint-color, #999);
+            text-align: center;
+            margin-top: 16px;
+            line-height: 1.5;
+        }
+
+        .emoji {
+            font-size: 24px;
+        }
+
+        .loading {
+            text-align: center;
+            padding: 40px;
+            color: var(--tg-theme-hint-color, #999);
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>💰 Инвест-калькулятор</h1>
+            <p>Оценка потенциала квартиры под перепланировку</p>
+        </div>
+
+        <div class="card">
+            <div class="card-title">
+                <span class="emoji">🏠</span>
+                Данные о квартире
+            </div>
+            
+            <div class="input-group">
+                <label>Город</label>
+                <input type="text" id="city" placeholder="Москва" value="Москва">
+            </div>
+
+            <div class="input-group">
+                <label>Площадь квартиры (м²)</label>
+                <input type="number" id="area" placeholder="50" value="50">
+            </div>
+
+            <div class="input-group">
+                <label>Тип дома</label>
+                <select id="houseType">
+                    <option value="panel">Панель</option>
+                    <option value="monolith">Монолит</option>
+                    <option value="brick">Кирпич</option>
+                </select>
+            </div>
+
+            <div class="input-group">
+                <label>Этаж / Этажность</label>
+                <input type="text" id="floor" placeholder="5/9" value="5/9">
+            </div>
+        </div>
+
+        <div class="card">
+            <div class="card-title">
+                <span class="emoji">🔧</span>
+                Планируемые изменения
+            </div>
+            
+            <div class="input-group">
+                <label>Что планируете изменить?</label>
+                <input type="text" id="changes" placeholder="Объединить кухню с комнатой">
+            </div>
+
+            <div class="input-group">
+                <label>Бюджет на перепланировку (₽)</label>
+                <input type="number" id="budget" placeholder="500000" value="500000">
+            </div>
+        </div>
+
+        <button class="button" onclick="calculateInvestment()">
+            Рассчитать потенциал
+        </button>
+
+        <div id="result" style="display: none;">
+            <div class="result-card">
+                <div class="result-label">Прогнозируемый прирост стоимости</div>
+                <div class="result-value" id="resultValue">+ 2 500 000 ₽</div>
+                <div class="result-label">ROI: <span id="roi">250%</span></div>
+            </div>
+        </div>
+
+        <div class="info-text">
+            ⚠️ Это предварительная оценка. Точный расчёт сделает наш специалист с учётом всех нюансов вашей квартиры.
+        </div>
+    </div>
+
+    <script>
+        // Инициализация Telegram WebApp
+        let tg = window.Telegram.WebApp;
+        tg.expand();
+        tg.MainButton.setText("Связаться со специалистом");
+        tg.MainButton.show();
+
+        tg.MainButton.onClick(function() {
+            const data = {
+                city: document.getElementById('city').value,
+                area: document.getElementById('area').value,
+                houseType: document.getElementById('houseType').value,
+                floor: document.getElementById('floor').value,
+                changes: document.getElementById('changes').value,
+                budget: document.getElementById('budget').value
+            };
+            
+            tg.sendData(JSON.stringify(data));
+            tg.close();
+        });
+
+        function calculateInvestment() {
+            // Простая формула для демонстрации
+            const area = parseFloat(document.getElementById('area').value) || 50;
+            const budget = parseFloat(document.getElementById('budget').value) || 500000;
+            const city = document.getElementById('city').value;
+            
+            // Коэффициент для города
+            let cityCoef = 1.0;
+            if (city.toLowerCase().includes('москв')) {
+                cityCoef = 1.5;
+            } else if (city.toLowerCase().includes('санкт') || city.toLowerCase().includes('петербург')) {
+                cityCoef = 1.3;
+            }
+            
+            // Примерный расчёт прироста стоимости
+            const priceIncrease = Math.round((area * 50000 * cityCoef + budget * 1.5) / 1000) * 1000;
+            const roi = Math.round((priceIncrease / budget) * 100);
+            
+            // Показываем результат
+            document.getElementById('resultValue').textContent = `+ ${priceIncrease.toLocaleString('ru-RU')} ₽`;
+            document.getElementById('roi').textContent = `${roi}%`;
+            document.getElementById('result').style.display = 'block';
+            
+            // Скроллим к результату
+            document.getElementById('result').scrollIntoView({ behavior: 'smooth' });
+        }
+
+        // Применяем тему Telegram
+        document.body.style.backgroundColor = tg.themeParams.bg_color || '#ffffff';
+        document.body.style.color = tg.themeParams.text_color || '#000000';
+    </script>
+</body>
+</html>
