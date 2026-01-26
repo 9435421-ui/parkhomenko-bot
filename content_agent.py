@@ -52,6 +52,22 @@ class ContentAgent:
         except FileNotFoundError:
             return "База знаний не найдена. Используйте общие знания по перепланировкам."
 
+    def get_russian_holidays(self):
+        """Возвращает список официальных и значимых праздников РФ"""
+        return {
+            "01.01": "Новый год",
+            "07.01": "Рождество Христово",
+            "23.02": "День защитника Отечества",
+            "08.03": "Международный женский день",
+            "01.05": "Праздник Весны и Труда",
+            "09.05": "День Победы",
+            "12.06": "День России",
+            "04.11": "День народного единства",
+            # Дополнительные значимые даты (февраль)
+            "08.02": "День российской науки",
+            "10.02": "День дипломатического работника"
+        }
+
     def generate_posts(self, count=7, post_types=None, theme=None):
         """
         Генерирует N постов
@@ -329,6 +345,42 @@ class ContentAgent:
             'body': body,
             'cta': cta
         }
+
+    def monitor_legal_news(self):
+        """Мониторинг новостей законодательства (MJI, mos.ru)"""
+        import requests
+        from bs4 import BeautifulSoup
+
+        urls = [
+            "https://www.mos.ru/mgi/news/",
+            "https://www.mos.ru/news/"
+        ]
+
+        found_news = []
+
+        for url in urls:
+            try:
+                response = requests.get(url, timeout=10)
+                if response.status_code == 200:
+                    soup = BeautifulSoup(response.text, 'html.parser')
+                    # Ищем заголовки новостей
+                    items = soup.find_all('a', href=True)
+                    for item in items:
+                        text = item.get_text().strip()
+                        # Фильтруем по ключевым словам
+                        keywords = ["перепланиров", "жилинспекц", "БТИ", "ремонт", "согласован"]
+                        if any(kw in text.lower() for kw in keywords):
+                            link = item['href']
+                            if not link.startswith('http'):
+                                link = "https://www.mos.ru" + link
+                            found_news.append({
+                                'title': text,
+                                'url': link
+                            })
+            except Exception as e:
+                print(f"❌ Ошибка мониторинга {url}: {e}")
+
+        return found_news
 
     def generate_birthday_congrats_template(self, person_name: str | None, date: str):
         """

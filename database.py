@@ -1,4 +1,7 @@
 import os
+import sqlite3
+import psycopg2
+from psycopg2.extras import RealDictCursor
 from datetime import datetime
 import logging
 
@@ -8,364 +11,285 @@ logger = logging.getLogger(__name__)
 
 class Database:
     def __init__(self):
-        self.conn = None  # aiosqlite.Connection
-        self.db_type = 'sqlite'  # Only SQLite for now
+        self.db_url = os.getenv("DATABASE_URL", "parkhomenko_bot.db")
+        self.is_postgres = self.db_url.startswith("postgres://") or self.db_url.startswith("postgresql://")
 
-    async def connect(self):
-        """Подключение к базе данных"""
-        db_url = os.getenv("DATABASE_URL", "sqlite:///parkhomenko_bot.db")
-        if not db_url:
-            raise RuntimeError("DATABASE_URL must be set in .env")
-
-        if not db_url.startswith('sqlite:///'):
-            raise RuntimeError("Only SQLite is supported for now")
-
-        import aiosqlite
-        db_path = db_url.replace('sqlite:///', '')
-        logger.info(f"🔄 Using SQLite database: {db_path}")
-        self.conn = await aiosqlite.connect(db_path)
-        # Enable foreign keys for SQLite
-        await self.conn.execute("PRAGMA foreign_keys = ON")
-        # Set row factory for dict-like access
-        self.conn.row_factory = aiosqlite.Row
-
-        # Создаём таблицы при подключении
-        await self._create_tables()
-
-    async def disconnect(self):
-        """Отключение от базы данных"""
-        if self.conn:
-            await self.conn.close()
-
-    async def _create_tables(self):
-        """Создание таблиц"""
-        if self.db_type == 'sqlite':
-            # SQLite syntax
-            leads_sql = """
-                CREATE TABLE IF NOT EXISTS leads (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    name TEXT,
-                    phone TEXT,
-                    extra_contact TEXT,
-                    object_type TEXT,
-                    city TEXT,
-                    change_plan TEXT,
-                    bti_status TEXT,
-                    created_at TEXT DEFAULT (datetime('now'))
-                )
-            """
-            content_sql = """
-                CREATE TABLE IF NOT EXISTS content_plan (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    type TEXT NOT NULL,
-                    title TEXT,
-                    body TEXT NOT NULL,
-                    cta TEXT NOT NULL,
-                    publish_date TEXT NOT NULL,
-                    status TEXT DEFAULT 'draft',
-                    image_prompt TEXT,
-                    image_url TEXT,
-                    created_at TEXT DEFAULT (datetime('now')),
-                    published_at TEXT
-                )
-            """
-            subscribers_sql = """
-                CREATE TABLE IF NOT EXISTS subscribers (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    user_id INTEGER UNIQUE NOT NULL,
-                    username TEXT,
-                    first_name TEXT,
-                    last_name TEXT,
-                    birthday TEXT,  -- format: DD.MM or DD.MM.YYYY
-                    added_at TEXT NOT NULL,
-                    notes TEXT
-                )
-            """
+    def _get_connection(self):
+        """Создает и возвращает подключение к БД"""
+        if self.is_postgres:
+            conn = psycopg2.connect(self.db_url, cursor_factory=RealDictCursor)
+            conn.autocommit = True
+            return conn
         else:
-            # PostgreSQL syntax
-            leads_sql = """
+            db_path = self.db_url.replace('sqlite:///', '')
+            conn = sqlite3.connect(db_path)
+            conn.row_factory = sqlite3.Row
+            return conn
+
+    def connect(self):
+        """Инициализация базы данных (создание таблиц)"""
+        if self.is_postgres:
+            logger.info("🔄 Initializing PostgreSQL database")
+        else:
+            logger.info(f"🔄 Initializing SQLite database: {self.db_url}")
+        self._create_tables()
+
+    def _create_tables(self):
+        """Создание таблиц"""
+        with self._get_connection() as conn:
+            cur = conn.cursor()
+
+            # Use SERIAL for Postgres, AUTOINCREMENT for SQLite
+            id_type = "SERIAL PRIMARY KEY" if self.is_postgres else "INTEGER PRIMARY KEY AUTOINCREMENT"
+            text_type = "TEXT"
+            timestamp_default = "CURRENT_TIMESTAMP" if self.is_postgres else "(datetime('now'))"
+
+            leads_sql = f"""
                 CREATE TABLE IF NOT EXISTS leads (
-                    id SERIAL PRIMARY KEY,
-                    name TEXT,
-                    phone TEXT,
-                    extra_contact TEXT,
-                    object_type TEXT,
-                    city TEXT,
-                    change_plan TEXT,
-                    bti_status TEXT,
-                    created_at TIMESTAMP DEFAULT NOW()
+                    id {id_type},
+                    name {text_type},
+                    phone {text_type},
+                    extra_contact {text_type},
+                    object_type {text_type},
+                    city {text_type},
+                    change_plan {text_type},
+                    bti_status {text_type},
+                    created_at TIMESTAMP DEFAULT {timestamp_default}
                 )
             """
-            content_sql = """
+            content_sql = f"""
                 CREATE TABLE IF NOT EXISTS content_plan (
-                    id SERIAL PRIMARY KEY,
-                    type VARCHAR(20) NOT NULL,
-                    title TEXT,
-                    body TEXT NOT NULL,
-                    cta TEXT NOT NULL,
-                    publish_date TIMESTAMP NOT NULL,
-                    status VARCHAR(20) DEFAULT 'draft',
-                    image_prompt TEXT,
-                    image_url TEXT,
-                    created_at TIMESTAMP DEFAULT NOW(),
-                    published_at TIMESTAMP
+                    id {id_type},
+                    type {text_type} NOT NULL,
+                    title {text_type},
+                    body {text_type} NOT NULL,
+                    cta {text_type} NOT NULL,
+                    publish_date {text_type} NOT NULL,
+                    status {text_type} DEFAULT 'draft',
+                    image_prompt {text_type},
+                    image_url {text_type},
+                    created_at TIMESTAMP DEFAULT {timestamp_default},
+                    published_at {text_type}
                 )
             """
-            subscribers_sql = """
+            subscribers_sql = f"""
                 CREATE TABLE IF NOT EXISTS subscribers (
-                    id SERIAL PRIMARY KEY,
-                    user_id INTEGER UNIQUE NOT NULL,
-                    username TEXT,
-                    first_name TEXT,
-                    last_name TEXT,
-                    birthday TEXT,  -- format: DD.MM or DD.MM.YYYY
-                    added_at TIMESTAMP NOT NULL,
-                    notes TEXT
+                    id {id_type},
+                    user_id BIGINT UNIQUE NOT NULL,
+                    username {text_type},
+                    first_name {text_type},
+                    last_name {text_type},
+                    birthday {text_type},
+                    added_at {text_type} NOT NULL,
+                    notes {text_type}
+                )
+            """
+            news_sql = f"""
+                CREATE TABLE IF NOT EXISTS news (
+                    id {id_type},
+                    title {text_type} UNIQUE NOT NULL,
+                    url {text_type},
+                    summary {text_type},
+                    published_at {text_type},
+                    notified INTEGER DEFAULT 0,
+                    created_at TIMESTAMP DEFAULT {timestamp_default}
                 )
             """
 
-        async with self.conn.cursor() as cur:
-            await cur.execute(leads_sql)
-            await cur.execute(content_sql)
-            await cur.execute(subscribers_sql)
+            cur.execute(leads_sql)
+            cur.execute(content_sql)
+            cur.execute(subscribers_sql)
+            cur.execute(news_sql)
 
-            # Миграция: Добавление колонок для изображений, если их нет
-            try:
-                await cur.execute("ALTER TABLE content_plan ADD COLUMN image_prompt TEXT")
-            except:
-                pass # Колонка уже есть
+            if not self.is_postgres:
+                conn.commit()
 
-            try:
-                await cur.execute("ALTER TABLE content_plan ADD COLUMN image_url TEXT")
-            except:
-                pass # Колонка уже есть
-
-        await self.conn.commit()
-
-    # Функции для работы с лидами
-    async def save_lead(self, name, phone, extra_contact=None, object_type=None,
+    def save_lead(self, name, phone, extra_contact=None, object_type=None,
                        city=None, change_plan=None, bti_status=None):
-        """Сохранить лид"""
         query = """
+            INSERT INTO leads (name, phone, extra_contact, object_type, city, change_plan, bti_status)
+            VALUES (%s, %s, %s, %s, %s, %s, %s)
+        """ if self.is_postgres else """
             INSERT INTO leads (name, phone, extra_contact, object_type, city, change_plan, bti_status)
             VALUES (?, ?, ?, ?, ?, ?, ?)
         """
-        async with self.conn.cursor() as cur:
-            await cur.execute(query, (name, phone, extra_contact, object_type,
-                                    city, change_plan, bti_status))
-        await self.conn.commit()
+        with self._get_connection() as conn:
+            cur = conn.cursor()
+            cur.execute(query, (name, phone, extra_contact, object_type,
+                                city, change_plan, bti_status))
+            if not self.is_postgres: conn.commit()
 
-    # Функции для работы с контент-планом
-    async def save_post(self, post_type, title, body, cta, publish_date, image_prompt=None, image_url=None):
-        """Сохранить пост в контент-план"""
-        query = """
+    def save_post(self, post_type, title, body, cta, publish_date, image_prompt=None, image_url=None):
+        placeholder = "%s" if self.is_postgres else "?"
+        query = f"""
             INSERT INTO content_plan (type, title, body, cta, publish_date, status, image_prompt, image_url)
-            VALUES (?, ?, ?, ?, ?, 'draft', ?, ?)
+            VALUES ({placeholder}, {placeholder}, {placeholder}, {placeholder}, {placeholder}, 'draft', {placeholder}, {placeholder})
         """
-        async with self.conn.cursor() as cur:
-            await cur.execute(query, (post_type, title, body, cta, publish_date.isoformat(), image_prompt, image_url))
-            return cur.lastrowid
-        await self.conn.commit()
+        with self._get_connection() as conn:
+            cur = conn.cursor()
+            cur.execute(query, (post_type, title, body, cta, publish_date.isoformat(), image_prompt, image_url))
+            if self.is_postgres:
+                # In postgres RealDictCursor doesn't have lastrowid easily
+                cur.execute("SELECT LASTVAL()")
+                last_id = cur.fetchone()['lastval']
+            else:
+                conn.commit()
+                last_id = cur.lastrowid
+            return last_id
 
-    async def get_draft_posts(self):
-        """Получить все посты со статусом draft"""
-        query = """
-            SELECT id, type, title, body, cta, publish_date, status, created_at, image_prompt, image_url
-            FROM content_plan
-            WHERE status='draft'
-            ORDER BY created_at DESC
-        """
-        async with self.conn.cursor() as cur:
-            await cur.execute(query)
-            rows = await cur.fetchall()
+    def get_draft_posts(self):
+        query = "SELECT * FROM content_plan WHERE status='draft' ORDER BY created_at DESC"
+        with self._get_connection() as conn:
+            cur = conn.cursor()
+            cur.execute(query)
+            rows = cur.fetchall()
             return [dict(row) for row in rows]
 
-    async def approve_post(self, post_id):
-        """Утвердить пост"""
-        query = "UPDATE content_plan SET status='approved' WHERE id=?"
-        async with self.conn.cursor() as cur:
-            await cur.execute(query, (post_id,))
-        await self.conn.commit()
-
-    async def update_content_plan_entry(self, post_id: int, status: str = None, publish_date: str = None, image_prompt: str = None, image_url: str = None):
-        """Обновить запись в контент-плане"""
+    def update_content_plan_entry(self, post_id: int, status: str = None, publish_date: str = None, image_prompt: str = None, image_url: str = None):
         updates = []
         params = []
+        placeholder = "%s" if self.is_postgres else "?"
 
         if status:
-            updates.append("status = ?")
+            updates.append(f"status = {placeholder}")
             params.append(status)
         if publish_date:
-            updates.append("publish_date = ?")
+            updates.append(f"publish_date = {placeholder}")
             params.append(publish_date)
         if image_prompt is not None:
-            updates.append("image_prompt = ?")
+            updates.append(f"image_prompt = {placeholder}")
             params.append(image_prompt)
         if image_url is not None:
-            updates.append("image_url = ?")
+            updates.append(f"image_url = {placeholder}")
             params.append(image_url)
 
-        if not updates:
-            return  # Nothing to update
-
+        if not updates: return
         params.append(post_id)
 
-        query = f"UPDATE content_plan SET {', '.join(updates)} WHERE id = ?"
-        async with self.conn.cursor() as cur:
-            await cur.execute(query, params)
-        await self.conn.commit()
+        query = f"UPDATE content_plan SET {', '.join(updates)} WHERE id = {placeholder}"
+        with self._get_connection() as conn:
+            cur = conn.cursor()
+            cur.execute(query, params)
+            if not self.is_postgres: conn.commit()
 
-    async def get_max_publish_date(self, status='approved'):
-        """Возвращает максимальную publish_date среди постов с указанным статусом"""
-        from datetime import datetime
-
-        async with self.conn.cursor() as cur:
-            await cur.execute(
-                "SELECT MAX(publish_date) FROM content_plan WHERE status = ?",
-                (status,)
-            )
-            result = await cur.fetchone()
-
-            if result and result[0]:
-                return datetime.strptime(result[0], '%Y-%m-%d %H:%M:%S')
+    def get_max_publish_date(self, status='approved'):
+        placeholder = "%s" if self.is_postgres else "?"
+        query = f"SELECT MAX(publish_date) FROM content_plan WHERE status = {placeholder}"
+        with self._get_connection() as conn:
+            cur = conn.cursor()
+            cur.execute(query, (status,))
+            row = cur.fetchone()
+            val = row['max'] if self.is_postgres else row[0]
+            if val:
+                try:
+                    return datetime.strptime(val, '%Y-%m-%d %H:%M:%S')
+                except:
+                    return datetime.fromisoformat(val)
             return None
 
-    async def delete_post(self, post_id):
-        """Удалить пост"""
-        query = "DELETE FROM content_plan WHERE id=?"
-        async with self.conn.cursor() as cur:
-            await cur.execute(query, (post_id,))
-        await self.conn.commit()
+    def delete_post(self, post_id):
+        placeholder = "%s" if self.is_postgres else "?"
+        query = f"DELETE FROM content_plan WHERE id={placeholder}"
+        with self._get_connection() as conn:
+            cur = conn.cursor()
+            cur.execute(query, (post_id,))
+            if not self.is_postgres: conn.commit()
 
-    async def get_posts_to_publish(self):
-        """Получить посты, готовые к публикации"""
-        query = """
-            SELECT id, type, title, body, cta, publish_date, image_prompt, image_url
-            FROM content_plan
-            WHERE status='approved' AND publish_date <= datetime('now')
+    def get_posts_to_publish(self):
+        now_func = "NOW()" if self.is_postgres else "datetime('now')"
+        query = f"""
+            SELECT * FROM content_plan
+            WHERE status='approved' AND publish_date <= {now_func}
             ORDER BY publish_date
         """
-        async with self.conn.cursor() as cur:
-            await cur.execute(query)
-            rows = await cur.fetchall()
-            return [dict(row) for row in rows]
+        with self._get_connection() as conn:
+            cur = conn.cursor()
+            cur.execute(query)
+            return [dict(row) for row in cur.fetchall()]
 
-    async def mark_as_published(self, post_id):
-        """Отметить пост как опубликованный"""
-        query = "UPDATE content_plan SET status='published', published_at=datetime('now') WHERE id=?"
-        async with self.conn.cursor() as cur:
-            await cur.execute(query, (post_id,))
-        await self.conn.commit()
+    def mark_as_published(self, post_id):
+        placeholder = "%s" if self.is_postgres else "?"
+        now_func = "NOW()" if self.is_postgres else "datetime('now')"
+        query = f"UPDATE content_plan SET status='published', published_at={now_func} WHERE id={placeholder}"
+        with self._get_connection() as conn:
+            cur = conn.cursor()
+            cur.execute(query, (post_id,))
+            if not self.is_postgres: conn.commit()
 
-    async def get_all_posts(self, limit=50):
-        """Получить все посты для просмотра"""
-        query = f"""
-            SELECT id, type, title, body, cta, publish_date, status, created_at, published_at, image_prompt, image_url
-            FROM content_plan
-            ORDER BY created_at DESC
-            LIMIT {limit}
-        """
-        async with self.conn.cursor() as cur:
-            await cur.execute(query)
-            rows = await cur.fetchall()
-            return [dict(row) for row in rows]
+    def get_all_posts(self, limit=50):
+        query = f"SELECT * FROM content_plan ORDER BY created_at DESC LIMIT {limit}"
+        with self._get_connection() as conn:
+            cur = conn.cursor()
+            cur.execute(query)
+            return [dict(row) for row in cur.fetchall()]
 
-    # Функции для работы с подписчиками (дни рождения и праздники)
-    async def add_subscriber(self, user_id, username=None, first_name=None, last_name=None,
-                           birthday=None, notes=None):
-        """Добавить подписчика"""
-        query = """
-            INSERT OR REPLACE INTO subscribers (user_id, username, first_name, last_name, birthday, added_at, notes)
-            VALUES (?, ?, ?, ?, ?, ?, ?)
-        """
-        async with self.conn.cursor() as cur:
-            await cur.execute(query, (user_id, username, first_name, last_name,
-                                    birthday, datetime.now().isoformat(), notes))
-        await self.conn.commit()
+    def add_subscriber(self, user_id, username=None, first_name=None, last_name=None, birthday=None, notes=None):
+        if self.is_postgres:
+            query = """
+                INSERT INTO subscribers (user_id, username, first_name, last_name, birthday, added_at, notes)
+                VALUES (%s, %s, %s, %s, %s, %s, %s)
+                ON CONFLICT (user_id) DO UPDATE SET
+                username=EXCLUDED.username, first_name=EXCLUDED.first_name, last_name=EXCLUDED.last_name,
+                birthday=EXCLUDED.birthday, notes=EXCLUDED.notes
+            """
+        else:
+            query = """
+                INSERT OR REPLACE INTO subscribers (user_id, username, first_name, last_name, birthday, added_at, notes)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+            """
+        with self._get_connection() as conn:
+            cur = conn.cursor()
+            cur.execute(query, (user_id, username, first_name, last_name, birthday, datetime.now().isoformat(), notes))
+            if not self.is_postgres: conn.commit()
 
-    async def delete_subscriber(self, user_id):
-        """Удалить подписчика"""
-        query = "DELETE FROM subscribers WHERE user_id=?"
-        async with self.conn.cursor() as cur:
-            await cur.execute(query, (user_id,))
-        await self.conn.commit()
-
-    async def get_subscriber(self, user_id):
-        """Получить подписчика по user_id"""
-        query = "SELECT * FROM subscribers WHERE user_id=?"
-        async with self.conn.cursor() as cur:
-            await cur.execute(query, (user_id,))
-            row = await cur.fetchone()
+    def get_subscriber(self, user_id):
+        placeholder = "%s" if self.is_postgres else "?"
+        query = f"SELECT * FROM subscribers WHERE user_id={placeholder}"
+        with self._get_connection() as conn:
+            cur = conn.cursor()
+            cur.execute(query, (user_id,))
+            row = cur.fetchone()
             return dict(row) if row else None
 
-    async def get_all_subscribers(self):
-        """Получить всех подписчиков"""
+    def get_all_subscribers(self):
         query = "SELECT * FROM subscribers ORDER BY added_at DESC"
-        async with self.conn.cursor() as cur:
-            await cur.execute(query)
-            rows = await cur.fetchall()
-            return [dict(row) for row in rows]
+        with self._get_connection() as conn:
+            cur = conn.cursor()
+            cur.execute(query)
+            return [dict(row) for row in cur.fetchall()]
 
-    async def get_today_birthdays(self):
-        """Получить подписчиков с днем рождения сегодня"""
+    def get_today_birthdays(self):
         today = datetime.now().strftime("%d.%m")
-        query = """
-            SELECT * FROM subscribers
-            WHERE birthday LIKE ? OR birthday LIKE ?
-        """
-        async with self.conn.cursor() as cur:
-            await cur.execute(query, (f"{today}.%", f"{today}"))
-            rows = await cur.fetchall()
-            return [dict(row) for row in rows]
+        placeholder = "%s" if self.is_postgres else "?"
+        query = f"SELECT * FROM subscribers WHERE birthday LIKE {placeholder} OR birthday LIKE {placeholder}"
+        with self._get_connection() as conn:
+            cur = conn.cursor()
+            cur.execute(query, (f"{today}.%", f"{today}"))
+            return [dict(row) for row in cur.fetchall()]
 
-    async def get_upcoming_birthdays(self, days_ahead=7):
-        """Получить подписчиков с днями рождения в ближайшие N дней"""
-        from datetime import timedelta
+    def add_news(self, title, url=None, summary=None, published_at=None):
+        if self.is_postgres:
+            query = "INSERT INTO news (title, url, summary, published_at) VALUES (%s, %s, %s, %s) ON CONFLICT DO NOTHING"
+        else:
+            query = "INSERT OR IGNORE INTO news (title, url, summary, published_at) VALUES (?, ?, ?, ?)"
+        with self._get_connection() as conn:
+            cur = conn.cursor()
+            cur.execute(query, (title, url, summary, published_at))
+            if not self.is_postgres: conn.commit()
 
-        # Получить всех подписчиков с днями рождения
-        all_subscribers = await self.get_all_subscribers()
-        upcoming = []
-        today = datetime.now().date()
+    def get_unnotified_news(self):
+        query = "SELECT * FROM news WHERE notified = 0 ORDER BY created_at ASC"
+        with self._get_connection() as conn:
+            cur = conn.cursor()
+            cur.execute(query)
+            return [dict(row) for row in cur.fetchall()]
 
-        for subscriber in all_subscribers:
-            if not subscriber.get('birthday'):
-                continue
+    def mark_news_as_notified(self, news_id):
+        placeholder = "%s" if self.is_postgres else "?"
+        query = f"UPDATE news SET notified = 1 WHERE id = {placeholder}"
+        with self._get_connection() as conn:
+            cur = conn.cursor()
+            cur.execute(query, (news_id,))
+            if not self.is_postgres: conn.commit()
 
-            try:
-                # Парсим день рождения (DD.MM или DD.MM.YYYY)
-                birthday_str = subscriber['birthday']
-                if '.' in birthday_str:
-                    parts = birthday_str.split('.')
-                    day = int(parts[0])
-                    month = int(parts[1])
-
-                    # Определяем год (текущий или следующий)
-                    current_year = today.year
-                    birthday_this_year = datetime(current_year, month, day).date()
-
-                    if birthday_this_year < today:
-                        # День рождения уже прошел в этом году, берем следующий год
-                        birthday_this_year = datetime(current_year + 1, month, day).date()
-
-                    # Проверяем, попадает ли в диапазон
-                    days_until_birthday = (birthday_this_year - today).days
-                    if 0 <= days_until_birthday <= days_ahead:
-                        subscriber_copy = subscriber.copy()
-                        subscriber_copy['days_until_birthday'] = days_until_birthday
-                        upcoming.append(subscriber_copy)
-
-            except (ValueError, IndexError):
-                # Пропускаем некорректные даты
-                continue
-
-        return upcoming
-
-    async def update_subscriber_birthday(self, user_id, birthday):
-        """Обновить день рождения подписчика"""
-        query = "UPDATE subscribers SET birthday=? WHERE user_id=?"
-        async with self.conn.cursor() as cur:
-            await cur.execute(query, (birthday, user_id))
-        await self.conn.commit()
-
-# Глобальный экземпляр базы данных
 db = Database()

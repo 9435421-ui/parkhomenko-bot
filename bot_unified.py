@@ -1,8 +1,8 @@
+from agents.image_agent import generate_image
+from s3_client import s3
 import os
 import time
 import datetime
-import threading
-import json
 import requests
 import telebot
 from telebot import types
@@ -51,8 +51,19 @@ from auto_poster import run_auto_poster
 
 # Подключение к базе данных будет выполнено в async контексте
 
-# --------- RAG (Отключено для режима Ассистента) ---------
-kb = None
+# --------- RAG ---------
+try:
+    from kb_rag import KnowledgeBaseRAG
+
+    kb = KnowledgeBaseRAG(KNOWLEDGE_DIR)
+    kb.index_markdown_files()
+    print(f"✅ База знаний загружена из: {KNOWLEDGE_DIR}")
+except ImportError:
+    print("⚠️ Модуль kb_rag не найден, RAG отключен")
+    kb = None
+except Exception as e:
+    print(f"❌ Ошибка загрузки базы знаний: {e}")
+    kb = None
 
 # --------- Состояния ---------
 
@@ -108,19 +119,18 @@ PRIVACY_POLICY_TEXT = (
     "«ЛАД В КВАРТИРЕ»!\n\n"
     "Перед началом работы необходимо:\n"
     "✅ Согласие на обработку персональных данных\n"
-    "✅ Согласие на получение уведомлений и сообщений\n\n"
-    "Наш ИИ-помощник Антон поможет вам, но помните:\n"
-    "• Консультации носят информационный характер\n"
-    "• Мы соблюдаем законодательство РФ"
+    "✅ Согласие на принятие условий Пользовательского соглашения\n\n"
+    "Я — Антон, ИИ-консультант и личный помощник эксперта Пархоменко Юлии Владимировны. "
+    "Я помогу вам оценить риски и потенциал вашей недвижимости по всей России."
 )
 
 AI_INTRO_TEXT = (
-    "🤖 Вас приветствует Антон, ИИ‑помощник команды «ЛАД В КВАРТИРЕ».\n\n"
-    "Я помогу вам:\n"
-    "• Правильно оформить заявку на перепланировку\n"
-    "• Собрать первичную информацию о вашем объекте\n"
-    "• Передать данные эксперту для детального разбора\n\n"
-    "⚠️ Для получения ответов на вопросы по нормам и расчёта стоимости, пожалуйста, оставьте заявку — наш эксперт свяжется с вами для бесплатной консультации."
+    "🤖 Я — Антон, личный ИИ-помощник и ИИ-консультант эксперта по перепланировкам "
+    "Пархоменко Юлии Владимировны.\n\n"
+    "Моя миссия — помогать клиентам по всей стране оценить риски и потенциал их недвижимости, "
+    "подготавливая их к экспертной консультации с Юлией Владимировной.\n\n"
+    "⚠️ Важно: я — искусственный интеллект. Мои рекомендации носят информационный характер. "
+    "Юлия Владимировна даст вам полную информацию после анализа документов."
 )
 
 # --------- Утилиты ---------
@@ -136,35 +146,6 @@ def get_user_consent(user_id: int) -> UserConsent:
     if user_id not in user_consents:
         user_consents[user_id] = UserConsent()
     return user_consents[user_id]
-
-
-def save_contact_to_json(user_id: int, first_name: str, last_name: str, phone: str):
-    contact_data = {
-        "user_id": user_id,
-        "first_name": first_name,
-        "last_name": last_name,
-        "phone": phone,
-        "timestamp": datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    }
-
-    file_path = "contacts.json"
-    contacts = []
-
-    if os.path.exists(file_path):
-        try:
-            with open(file_path, "r", encoding="utf-8") as f:
-                contacts = json.load(f)
-        except Exception as e:
-            print(f"Ошибка чтения contacts.json: {e}")
-            contacts = []
-
-    contacts.append(contact_data)
-
-    try:
-        with open(file_path, "w", encoding="utf-8") as f:
-            json.dump(contacts, f, ensure_ascii=False, indent=4)
-    except Exception as e:
-        print(f"Ошибка записи в contacts.json: {e}")
 
 
 def add_legal_disclaimer(text: str) -> str:
@@ -188,12 +169,8 @@ def show_ai_disclaimer(chat_id: int):
 
 def show_main_menu(chat_id: int):
     markup = types.InlineKeyboardMarkup()
-    markup.row(
+    markup.add(
         types.InlineKeyboardButton("📝 Оставить заявку", callback_data="mode_quiz")
-    )
-    markup.row(
-        types.InlineKeyboardButton("🌐 Наш сайт", url="https://9435421-ui.github.io/soglasovanie-landing/"),
-        types.InlineKeyboardButton("🔹 Мы в ВК", url="https://vk.com/lad_v_kvartire")
     )
     bot.send_message(chat_id, "Чем Антон может вам помочь?", reply_markup=markup)
 
@@ -344,25 +321,7 @@ def call_yandex_gpt(
             },
             "messages": [
                 {
-                    "role": "system",
-                    "text": (
-                        "Ты - Антон, ИИ-помощник по перепланировкам в компании «ЛАД В КВАРТИРЕ». "
-                        "\n\nКРИТИЧЕСКИ ВАЖНО:\n\n"
-                        "1. РАБОТА С БАЗОЙ ЗНАНИЙ:\n"
-                        "- ИСПОЛЬЗУЙ ТОЛЬКО информацию из базы знаний (контекст в промпте)\n"
-                        "- НЕ выдумывай и НЕ додумывай информацию\n"
-                        "- Если информации нет в базе — дай общий ответ на основе своих знаний о перепланировках\n\n"
-                        "2. СТИЛЬ ОТВЕТОВ:\n"
-                        "- Максимум 2-3 предложения (не больше!)\n"
-                        "- Конкретно и по делу, без 'воды'\n"
-                        "- НЕ задавай лишних вопросов про дизайн/стиль, если клиент про юридику\n\n"
-                        "3. ЛОГИКА КОНСУЛЬТАЦИИ:\n"
-                        "- Если клиент спрашивает про документы/согласование — кратко перечисли этапы из базы\n"
-                        "- После 2-х ответов предлагай оставить заявку для детальной консультации\n\n"
-                        "4. ПЕРЕХОД К СПЕЦИАЛИСТУ:\n"
-                        "- Если клиент просит связать со специалистом — подтверди и уточни удобное время\n\n"
-                        f"5. Обращайся по имени: {greeting if user_name else ''}"
-                    ),
+                    "role": "system", "text": "Ты - Антон, ассистент компании «ЛАД В КВАРТИРЕ»."
                 },
                 {"role": "user", "text": prompt},
             ],
@@ -450,8 +409,45 @@ def transcribe_audio(file_path: str) -> str:
         return ''
 
 
+
 # --------- Хэндлеры согласий ---------
 
+@bot.callback_query_handler(func=lambda call: call.data in ["consent_accept", "consent_decline"])
+def consent_callback_handler(call):
+    user_id = call.message.chat.id
+
+    if call.data == "consent_decline":
+        bot.edit_message_text(
+            "Без согласия на обработку данных и принятие условий соглашения использовать бота нельзя.",
+            chat_id=user_id,
+            message_id=call.message.message_id
+        )
+        return
+
+    # Accept consent
+    consent = get_user_consent(user_id)
+    consent.privacy_accepted = True
+    consent.notifications_accepted = True
+    consent.consent_timestamp = datetime.datetime.now()
+    consent.ai_disclaimer_seen = True
+
+    # RESET UserState as requested
+    user_states[user_id] = UserState()
+
+    bot.edit_message_text(
+        "✅ Спасибо! Теперь мы можем продолжить.",
+        chat_id=user_id,
+        message_id=call.message.message_id
+    )
+
+    # Request contact
+    markup = types.ReplyKeyboardMarkup(resize_keyboard=True, one_time_keyboard=True)
+    markup.add(types.KeyboardButton("📱 Поделиться контактом", request_contact=True))
+    bot.send_message(
+        user_id,
+        "Пожалуйста, поделитесь своим контактом для связи:",
+        reply_markup=markup
+    )
 
 @bot.message_handler(commands=["start"])
 def start_handler(message):
@@ -462,122 +458,38 @@ def start_handler(message):
         show_privacy_consent(user_id)
         return
 
-    if not consent.ai_disclaimer_seen:
-        show_ai_disclaimer(user_id)
-        consent.ai_disclaimer_seen = True
-        consent.consent_timestamp = datetime.datetime.now()
-
-        markup = types.ReplyKeyboardMarkup(resize_keyboard=True, one_time_keyboard=True)
-        markup.add(
-            types.KeyboardButton("📱 Поделиться контактом", request_contact=True)
-        )
-        bot.send_message(
-            user_id,
-            "Для продолжения работы поделитесь своим контактом Telegram — это защитит нас от спама и поможет быстрее связаться.",
-            reply_markup=markup,
-        )
-        return
-
-    if not consent.contact_received:
-        markup = types.ReplyKeyboardMarkup(resize_keyboard=True, one_time_keyboard=True)
-        markup.add(
-            types.KeyboardButton("📱 Поделиться контактом", request_contact=True)
-        )
-        bot.send_message(
-            user_id,
-            "Для продолжения работы поделитесь своим контактом Telegram.",
-            reply_markup=markup,
-        )
-        return
-
     show_main_menu(user_id)
 
-
-@bot.message_handler(commands=["privacy"])
-def privacy_info(message):
-    show_privacy_consent(message.chat.id)
-
-
-@bot.message_handler(
-    func=lambda m: m.text in ["✅ Я согласен и хочу продолжить", "❌ Отказаться"]
-)
-def privacy_consent_handler(message):
-    user_id = message.chat.id
-    consent = get_user_consent(user_id)
-
-    if "Отказаться" in message.text:
-        bot.send_message(
-            user_id, "Без согласия на обработку данных использовать бота нельзя."
-        )
-        return
-
-    consent.privacy_accepted = True
-    consent.notifications_accepted = True
-    consent.consent_timestamp = datetime.datetime.now()
-    show_ai_disclaimer(user_id)
-    consent.ai_disclaimer_seen = True
-
-    markup = types.ReplyKeyboardMarkup(resize_keyboard=True, one_time_keyboard=True)
-    markup.add(types.KeyboardButton("📱 Поделиться контактом", request_contact=True))
-    bot.send_message(
-        user_id,
-        "Для продолжения работы поделитесь своим контактом Telegram — это защитит нас от спама и поможет быстрее связаться.",
-        reply_markup=markup,
-    )
-
-
-@bot.message_handler(
-    content_types=["contact"],
-    func=lambda m: get_user_consent(m.chat.id).privacy_accepted
-    and not get_user_consent(m.chat.id).contact_received,
-)
+@bot.message_handler(content_types=["contact"])
 def initial_contact_handler(message):
     user_id = message.chat.id
+    state = get_user_state(user_id)
     consent = get_user_consent(user_id)
 
-    # Извлекаем данные
-    phone = message.contact.phone_number
-    first_name = message.contact.first_name or ""
-    last_name = message.contact.last_name or ""
-
-    # Сохраняем контакт
+    state.phone = message.contact.phone_number
+    state.name = message.contact.first_name
     consent.contact_received = True
-    save_contact_to_json(user_id, first_name, last_name, phone)
 
-    # Сброс стейта
-    user_states.pop(user_id, None)
-    # Создаем новый чистый стейт и записываем туда имя/телефон на будущее
-    state = get_user_state(user_id)
-    state.phone = phone
-    state.name = first_name
-
-    # МИНИМАЛЬНЫЙ ЛИД после получения контакта
-    contact_lead = f"""
-🆕 НОВЫЙ КОНТАКТ: {first_name} {last_name}
-📞 Телефон: {phone}
-👤 User ID: {user_id}
-🕐 Время: {datetime.datetime.now().strftime("%d.%m.%Y %H:%M")}
-ℹ️ Статус: контакт получен, регистрация завершена
-    """.strip()
-
+    # МИНИМАЛЬНЫЙ ЛИД
+    contact_lead = f"🆕 НОВЫЙ КОНТАКТ: {state.name}\n📞 Телефон: {state.phone}\n👤 User ID: {user_id}"
     try:
         bot.send_message(LEADS_GROUP_CHAT_ID, contact_lead)
-        print(f"✅ Минимальный лид отправлен: {first_name}, {phone}")
-    except Exception as e:
-        print(f"❌ Ошибка отправки минимального лида: {e}")
+    except: pass
 
-    bot.send_message(
-        user_id,
-        f"Приятно познакомиться, {first_name}! Теперь вы можете воспользоваться функциями нашего сервиса.",
-        reply_markup=types.ReplyKeyboardRemove()
-    )
-
-    # Прямой вход в меню
+    bot.send_message(user_id, f"Приятно познакомиться, {state.name}! 😊", reply_markup=types.ReplyKeyboardRemove())
     show_main_menu(user_id)
 
 
-
-
+@bot.callback_query_handler(
+    func=lambda call: call.data.startswith("confirm_name_")
+    or call.data == "change_name"
+)
+@bot.message_handler(
+    func=lambda m: get_user_consent(m.chat.id).contact_received
+    and get_user_state(m.chat.id).name is None
+    and get_user_state(m.chat.id).mode is None,
+    content_types=["text"],
+)
 @bot.message_handler(
     func=lambda m: get_user_state(m.chat.id).mode == "waiting_time",
     content_types=["text"],
@@ -744,19 +656,6 @@ def mode_select_handler(call):
         state.quiz_step = 4
         bot.send_message(user_id, "Укажите город/регион:")
 
-    # Выбор статуса перепланировки (выполнена/планируется)
-    elif call.data.startswith("status_") and state.mode == BotModes.QUIZ:
-        if call.data == "status_done":
-            state.remodeling_status = "Уже выполнена"
-        else:
-            state.remodeling_status = "Только планируется"
-
-        state.quiz_step = 7
-        bot.send_message(
-            user_id,
-            "Кратко опишите, что хотите изменить в перепланировке (объединить комнаты, перенести санузел, расширить кухню и т.п.).",
-        )
-
 
 # ========== КВИЗ: Сбор заявки ==========
 
@@ -805,18 +704,13 @@ def quiz_handler(message):
             state.total_floors = None
 
         state.quiz_step = 6
-        markup = types.InlineKeyboardMarkup()
-        markup.add(types.InlineKeyboardButton("✅ Уже выполнена", callback_data="status_done"))
-        markup.add(types.InlineKeyboardButton("🕒 Только планируется", callback_data="status_planned"))
-
         bot.send_message(
             chat_id,
-            "Перепланировка уже выполнена или только планируете?",
-            reply_markup=markup
+            "Перепланировка уже выполнена или только планируете? Напишите 'выполнена' или 'планируется'.",
         )
         return
 
-    # Шаг 6 (текстовый) - на случай если пользователь проигнорировал кнопки
+    # Шаг 6: статус перепланировки
     if state.quiz_step == 6:
         state.remodeling_status = message.text.strip()
         state.quiz_step = 7
@@ -843,51 +737,13 @@ def quiz_handler(message):
         bot.send_message(
             chat_id,
             f"✅ Спасибо, {state.name}! Ваша заявка принята.\n\n"
-            f"Команда «ЛАД В КВАРТИРЕ» свяжется с вами по номеру {state.phone} "
-            f"ежедневно с 10:00 до 20:00 по Москве для обсуждения деталей и предварительного расчёта.\n\n"
-            "Вы также можете прислать фото плана или написать любую дополнительную информацию прямо здесь в чате — я передам её специалисту.",
+            f"Команда «Пархоменко и компания» свяжется с вами по номеру {state.phone} "
+            f"ежедневно с 10:00 до 20:00 по Москве для обсуждения деталей и предварительного расчёта.",
         )
-        # Сброс состояния
+        # Сброс состояния БЕЗ показа меню
         state.mode = None
         state.quiz_step = 0
-
-        # Через небольшую паузу возвращаем меню
-        threading.Timer(2.0, lambda: show_main_menu(chat_id)).start()
         return
-
-
-# ========== ОБРАБОТКА ФОТО (Планы БТИ и др.) ==========
-
-
-@bot.message_handler(content_types=["photo"])
-def photo_handler(message):
-    chat_id = message.chat.id
-    state = get_user_state(chat_id)
-
-    # Текст для админов
-    caption = f"🖼 Дополнение к заявке от {state.name} (@{message.from_user.username or 'no_username'})\n"
-    caption += f"📞 Тел: {state.phone or 'не указан'}\n"
-    caption += f"🏠 Объект: {state.object_type or 'не указан'}"
-
-    # Определяем топик (по умолчанию Квартиры, если не выбран другой)
-    thread_id = THREAD_ID_KVARTIRY
-    if state.object_type == "Коммерция":
-        thread_id = THREAD_ID_KOMMERCIA
-    elif state.object_type == "Дом":
-        thread_id = THREAD_ID_DOMA
-
-    try:
-        # Пересылаем фото в группу лидов
-        bot.send_photo(
-            LEADS_GROUP_CHAT_ID,
-            message.photo[-1].file_id,
-            caption=caption,
-            message_thread_id=thread_id
-        )
-        bot.send_message(chat_id, "✅ Фото получил и передал специалисту! Спасибо.")
-    except Exception as e:
-        print(f"❌ Ошибка пересылки фото: {e}")
-        bot.send_message(chat_id, "Получил ваше фото. Передам его коллегам.")
 
 
 # ========== ДИАЛОГОВЫЙ РЕЖИМ ==========
@@ -898,18 +754,6 @@ def photo_handler(message):
     content_types=["text"],
 )
 def dialog_handler(message):
-    chat_id = message.chat.id
-    state = get_user_state(chat_id)
-
-    bot.send_message(
-        chat_id,
-        f"{state.name}, сейчас я работаю в режиме ассистента и помогаю в оформлении заявок. Для получения подробной консультации эксперта, пожалуйста, воспользуйтесь кнопкой «📝 Оставить заявку» в главном меню или дождитесь звонка нашего специалиста."
-    )
-    show_main_menu(chat_id)
-    state.mode = None
-    return
-
-def original_dialog_handler(message):
     chat_id = message.chat.id
     state = get_user_state(chat_id)
     consent = get_user_consent(chat_id)
@@ -1014,7 +858,7 @@ def original_dialog_handler(message):
         )
 
     system_prompt = """
-Ты — Антон, ИИ-помощник «ЛАД В КВАРТИРЕ» (Москва/МО, согласование перепланировок под ключ, 10+ лет).
+Ты — Антон, ИИ-консультант «Пархоменко и компания» (Москва/МО, согласование перепланировок под ключ, 10+ лет).
 
 ЖЕЛЕЗНЫЕ ПРАВИЛА:
 1. Читай историю — НЕ задавай вопросы, на которые клиент УЖЕ ответил
@@ -1101,52 +945,27 @@ def original_dialog_handler(message):
 # ========== БЫСТРАЯ КОНСУЛЬТАЦИЯ ==========
 
 
-def build_system_prompt():
-    """Общий system_prompt для dialog_handler и quick_handler"""
-    return """
-Ты — Антон, ИИ-помощник «ЛАД В КВАРТИРЕ» (Москва/МО, согласование перепланировок под ключ, 10+ лет).
 
-ЖЕЛЕЗНЫЕ ПРАВИЛА:
-1. Читай историю — НЕ задавай вопросы, на которые клиент УЖЕ ответил
-2. НЕ повторяй информацию, которую УЖЕ озвучил
-3. Каждый ответ — ТОЛЬКО новая информация
-4. Лимит: 250-350 символов (2-3 предложения max)
-5. УПОМИНАЙ КОМПАНИЮ: в каждом 2-3 ответе
-6. НЕ ПРЕДПОЛАГАЙ ГОРОД: НЕ говори "в Москве" пока клиент не назвал город
-7. КОГДА КЛИЕНТ ХОЧЕТ ОБСУДИТЬ ДЕТАЛИ:
-   - Задай 2-3 конкретных вопроса про объект (тип дома, документы БТИ, коммуникации)
-   - Дай 2-3 совета из базы знаний
-   - Только ПОТОМ мягко предложи заявку
-8. СТОИМОСТЬ:
-   - НИКОГДА не называй конкретные суммы.
-   - Если клиент спрашивает про цену, стоимость, тариф или «по деньгам» — объясни, что цена зависит от объекта, объёма работ и документов.
-   - Предложи обсудить стоимость со специалистом и обязательно скажи, что подберёте комфортные условия по оплате под ситуацию клиента.
+def build_system_prompt(user_name: str = None) -> str:
+    """
+    Формирует системный промпт для Антона (Sales Expert Persona).
+    """
+    greeting = f", {user_name}" if user_name else ""
+    return f"""
+Роль: Ты — Антон, личный ИИ-помощник и ИИ-консультант эксперта по перепланировкам Пархоменко Юлии Владимировны (сервис «ЛАД В КВАРТИРЕ»).
+Твоя задача — первичная квалификация лидов для эксперта Юлии Владимировны.
 
-ПРИМЕРЫ ПРАВИЛЬНЫХ ДИАЛОГОВ:
+География: Вся Россия. Оперируй федеральным законодательством (Жилищный кодекс РФ), учитывая, что нормы могут уточняться в зависимости от региона.
 
-1) Клиент: "хочу объединить ванную"
-   Ты: "Объединение санузла требует согласования. Важно не трогать несущие стены и гидроизоляция пола. В каком городе квартира? На каком этаже?"
+Стиль общения: Профессиональный, уверенный, немного интригующий. Используй термины (МЖИ, 508-ПП, мокрые зоны), но объясняй их просто. Обращайся к клиенту по имени{greeting}.
 
-2) Клиент: "Сочи, 2/5"
-   Ты: "В Сочи процесс аналогичен. На 2 этаже нельзя расширять мокрую зону над жилыми комнатами первого. Это панель, монолит или кирпич?"
+ГЛАВНАЯ СТРАТЕГИЯ:
+1. Давай ценность через риск: Если клиент спрашивает о перепланировке, сначала подсвети 2-3 юридических или технических нюанса (например, про вентшахты, границы мокрых зон или несущие конструкции).
+2. Продавай Юлию Владимировну: Всегда подчеркивай, что окончательное решение и 100% гарантию может дать только Юлия Владимировна после анализа документов. Используй её полное имя.
+3. Не давай полных инструкций: Никогда не пиши пошаговый план «как узаконить самому». Вместо этого пиши: «Существует несколько законных способов, но выбор зависит от вашего техпаспорта. Чтобы не получить отказ от администрации, лучше передать план Юлии Владимировне на экспресс-анализ».
+4. Крючок на аудит: Любой сложный вопрос должен заканчиваться предложением: «Давайте я передам ваши вводные Юлии Владимировне? Это сэкономит вам недели беготни по инстанциям».
 
-3) Клиент: "панель"
-   Ты: "В панельке перегородка обычно не несущая, сносить можно. Планируете менять разводку труб или стояки? Есть документы БТИ?"
-
-4) Клиент: "хочу обсудить детали"
-   Ты: "Хорошо! Уточните: какой тип дома? Есть документы БТИ? Планируете менять коммуникации? Для Сочи важно учитывать нормы Краснодарского края."
-
-
-
-7) Клиент: "соедините со специалистом"
-   Ты: "Соединяю. Когда вам удобно принять звонок?"
-
-НЕ ДЕЛАЙ НИКОГДА:
-× Не повторяй уже сказанное
-× НЕ называй конкретные цены и суммы, даже если клиент спрашивает. Объясняй, что стоимость рассчитывается индивидуально, и перенаправляй обсуждение стоимости к специалисту, обещая комфортные условия по оплате.
-× НЕ говори "в Москве" пока клиент не назвал город
-× НЕ предлагай заявку сразу — сначала задай вопросы и дай советы
-× Не уходи от обсуждения к продаже
+ЗАПРЕТ НА ЦЕНЫ: Никогда не называй точных сумм. Всегда: «Стоимость зависит от объема работ и состояния документов, Юлия Владимировна назовет вилку после аудита».
 """.strip()
 
 
@@ -1184,18 +1003,6 @@ def should_prevent_repeat(state, current_prompt):
     content_types=["text"],
 )
 def quick_handler(message):
-    chat_id = message.chat.id
-    state = get_user_state(chat_id)
-
-    bot.send_message(
-        chat_id,
-        f"{state.name}, для быстрого ответа на ваш вопрос лучше всего оставить заявку. Наши специалисты свяжутся с вами и дадут максимально точную информацию."
-    )
-    show_main_menu(chat_id)
-    state.mode = None
-    return
-
-def original_quick_handler(message):
     chat_id = message.chat.id
     state = get_user_state(chat_id)
     consent = get_user_consent(chat_id)
@@ -1423,15 +1230,38 @@ def handle_audio(message):
 @bot.message_handler(content_types=["document", "photo"])
 def handle_files(message):
     chat_id = message.chat.id
-    bot.send_message(
-        chat_id, "📁 Функция анализа планов будет доступна в следующем обновлении."
-    )
-    show_main_menu(chat_id)
+    state = get_user_state(chat_id)
 
+    try:
+        if message.content_type == "photo":
+            file_id = message.photo[-1].file_id
+            ext = ".jpg"
+        else:
+            file_id = message.document.file_id
+            ext = os.path.splitext(message.document.file_name)[1] or ".pdf"
 
-# ========== ТЕСТОВЫЕ КОМАНДЫ ==========
+        file_info = bot.get_file(file_id)
+        downloaded_file = bot.download_file(file_info.file_path)
 
+        local_path = os.path.join(UPLOAD_PLANS_DIR, f"{chat_id}_{int(time.time())}{ext}")
+        with open(local_path, "wb") as f:
+            f.write(downloaded_file)
 
+        # Upload to S3
+        s3_url = s3.upload_file(local_path)
+        if s3_url:
+            state.plan_path = s3_url
+            state.has_plan = True
+            bot.send_message(chat_id, "✅ План успешно загружен и сохранён в облаке!")
+        else:
+            state.plan_path = local_path
+            state.has_plan = True
+            bot.send_message(chat_id, "⚠️ План сохранён локально (облако недоступно).")
+
+        show_main_menu(chat_id)
+    except Exception as e:
+        print(f"❌ Error handling file: {e}")
+        bot.send_message(chat_id, "❌ Произошла ошибка при загрузке файла.")
 @bot.message_handler(commands=["test_gpt"])
 def test_gpt_handler(message):
     chat_id = message.chat.id
@@ -1484,12 +1314,12 @@ def generate_content_cmd(message):
         async def save_posts():
             for post in posts:
                 await db.save_post(
-                    post['type'],
-                    post.get('title', ''),
-                    post['body'],
-                    post['cta'],
-                    post['publish_date'],
-                    image_prompt=post.get('image_prompt')
+                    post["type"],
+                    post.get("title", ""),
+                    post["body"],
+                    post["cta"],
+                    post["publish_date"],
+                    image_prompt=post.get("image_prompt")
                 )
 
         asyncio.run(save_posts())
@@ -1501,15 +1331,8 @@ def generate_content_cmd(message):
             thread_id = THREAD_ID_SEASONAL if post['type'] in ['seasonal', 'живой'] else THREAD_ID_DRAFTS
 
             text = f"[Тип: {post['type']}]\n\n📌 {post.get('title', '')}\n\n{post['body']}\n\n👉 {post['cta']}"
-            if post.get('image_prompt'):
-                text += f"\n\n🎨 Промпт: {post['image_prompt']}"
-            if post.get('image_url'):
-                text += f"\n\n🖼 Изображение готово"
-
             markup = types.InlineKeyboardMarkup()
             markup.add(types.InlineKeyboardButton("✅ Утвердить", callback_data=f"approve_{post['id']}"))
-            if post.get('image_prompt') and not post.get('image_url'):
-                markup.add(types.InlineKeyboardButton("🎨 Генерировать фото", callback_data=f"genimg_{post['id']}"))
             markup.add(types.InlineKeyboardButton("❌ Удалить", callback_data=f"delete_{post['id']}"))
 
             try:
@@ -1659,7 +1482,7 @@ def generate_greetings_cmd(message):
             post = agent.generate_birthday_congrats_template(person_name=name, date=birthday)
 
             # Добавляем подпись компании программно
-            full_body = f"{post['body']}\n\nС наилучшими пожеланиями,\nКоманда «ЛАД В КВАРТИРЕ» ❤️"
+            full_body = f"{post['body']}\n\nС наилучшими пожеланиями,\nКоманда «Пархоменко и компания» ❤️"
 
             # Сохраняем как черновик
             publish_date = datetime.datetime.now() + datetime.timedelta(days=person['days_until_birthday'])
@@ -1669,8 +1492,7 @@ def generate_greetings_cmd(message):
                 title=post.get('title', f"Поздравление для {name}"),
                 body=full_body,
                 cta=post['cta'],
-                publish_date=publish_date,
-                image_prompt=agent.build_image_prompt({'type': 'поздравление'})
+                publish_date=publish_date
             ))
 
             # Отправляем в топик черновиков
@@ -1724,8 +1546,7 @@ def generate_welcome_cmd(message):
             title=post.get('title', f"Приветствие для {'нового подписчика' if not person_name else person_name}"),
             body=post['body'],
             cta=post['cta'],
-            publish_date=publish_date,
-            image_prompt=agent.build_image_prompt({'type': 'приветствие'})
+            publish_date=publish_date
         ))
 
         # Отправляем в топик черновиков
@@ -1774,13 +1595,8 @@ def show_plan_cmd(message):
         thread_id = THREAD_ID_SEASONAL if post['type'] in ['seasonal', 'живой'] else THREAD_ID_DRAFTS
 
         text = f"[Тип: {post['type']}]\n\n📌 {post.get('title', '')}\n\n{post['body']}\n\n👉 {post['cta']}"
-        if post.get('image_prompt'):
-            text += f"\n\n🎨 Промпт: {post['image_prompt']}"
-
         markup = types.InlineKeyboardMarkup()
         markup.add(types.InlineKeyboardButton("✅ Утвердить", callback_data=f"approve_{post['id']}"))
-        if post.get('image_prompt') and not post.get('image_url'):
-            markup.add(types.InlineKeyboardButton("🎨 Генерировать фото", callback_data=f"genimg_{post['id']}"))
         markup.add(types.InlineKeyboardButton("❌ Удалить", callback_data=f"delete_{post['id']}"))
 
         try:
@@ -1799,14 +1615,13 @@ def show_plan_cmd(message):
     bot.send_message(message.chat.id, f"✅ Черновики ({len(drafts)} шт.) отправлены в группу.")
 
 
-@bot.callback_query_handler(func=lambda call: call.data.startswith("approve_") or call.data.startswith("delete_") or call.data.startswith("genimg_"))
+@bot.callback_query_handler(func=lambda call: call.data.startswith("approve_") or call.data.startswith("delete_"))
 def content_callback_handler(call):
-    """Обработка кнопок approve/delete/genimg"""
+    """Обработка кнопок approve/delete"""
     if call.message.chat.id != LEADS_GROUP_CHAT_ID:
         return
 
-    action, post_id_str = call.data.split('_')
-    post_id = int(post_id_str)
+    post_id = int(call.data.split('_')[1])
 
     import asyncio
 
@@ -1834,10 +1649,21 @@ def content_callback_handler(call):
             next_date = max_date + timedelta(days=1)
 
         # Обновить пост
+        # Generate and save image if prompt exists
+        image_url = None
+        if post.get("image_prompt"):
+            image_data = generate_image(post["image_prompt"])
+            if image_data:
+                image_path = os.path.join(UPLOAD_DIR, f"post_{post_id}.jpg")
+                with open(image_path, "wb") as img_file:
+                    img_file.write(image_data)
+                image_url = image_path
+
         asyncio.run(db.update_content_plan_entry(
             post_id=post_id,
-            status='approved',
-            publish_date=next_date.strftime('%Y-%m-%d %H:%M:%S')
+            status="approved",
+            publish_date=next_date.strftime("%Y-%m-%d %H:%M:%S"),
+            image_url=image_url
         ))
 
         # Редактируем сообщение
@@ -1878,56 +1704,20 @@ def content_callback_handler(call):
 
         bot.answer_callback_query(call.id, "❌ Пост удалён")
 
-    elif action == "genimg":
-        bot.answer_callback_query(call.id, "🎨 Начинаю генерацию изображения...")
-
-        # Получаем данные поста
-        import asyncio
-        posts = asyncio.run(db.get_all_posts())
-        post = next((p for p in posts if p['id'] == post_id), None)
-
-        if not post or not post.get('image_prompt'):
-            bot.send_message(call.message.chat.id, "❌ Промпт для изображения не найден", message_thread_id=call.message.message_thread_id)
-            return
-
-        from agents.image_agent import generate_image
-        image_data = generate_image(post['image_prompt'])
-
-        if image_data:
-            # Сохраняем локально или загружаем куда-то. Для примера - сохраним в uploads.
-            img_path = f"uploads/post_{post_id}.png"
-            with open(img_path, "wb") as f:
-                f.write(image_data)
-
-            # Обновляем в БД (используем абсолютный путь или URL)
-            asyncio.run(db.update_content_plan_entry(post_id, image_url=img_path))
-
-            # Отправляем превью
-            bot.send_photo(call.message.chat.id, image_data, caption=f"✅ Изображение для поста #{post_id} готово!", message_thread_id=call.message.message_thread_id)
-
-            # Обновляем кнопки в исходном сообщении
-            new_text = call.message.text + "\n\n🖼 Изображение готово"
-            markup = types.InlineKeyboardMarkup()
-            markup.add(types.InlineKeyboardButton("✅ Утвердить", callback_data=f"approve_{post_id}"))
-            markup.add(types.InlineKeyboardButton("❌ Удалить", callback_data=f"delete_{post_id}"))
-            bot.edit_message_text(new_text, call.message.chat.id, call.message.message_id, reply_markup=markup)
-        else:
-            bot.send_message(call.message.chat.id, "❌ Ошибка при генерации изображения", message_thread_id=call.message.message_thread_id)
-
 
 # ========== ЗАПУСК ==========
 
 import asyncio
 
 # Подключаемся к БД
-asyncio.run(db.connect())
+db.connect()
 
 # Запускаем автопостер в отдельном потоке
 import threading
 poster_thread = threading.Thread(target=lambda: asyncio.run(run_auto_poster(bot)), daemon=True)
 poster_thread.start()
 
-print("🤖 Бот «ЛАД В КВАРТИРЕ» запущен...")
+print("🤖 Бот «Пархоменко и компания» запущен...")
 print(f"📁 База знаний: {KNOWLEDGE_DIR}")
 print(f"📞 Группа для лидов: {LEADS_GROUP_CHAT_ID}")
 print(f"🔑 ЯндексGPT FOLDER_ID: {FOLDER_ID}")
