@@ -9,11 +9,11 @@ load_dotenv()
 logger = logging.getLogger(__name__)
 
 OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY")
-MODEL = "anthropic/claude-3.5-sonnet"
+MODEL = "openai/gpt-4o-mini"
 
 def call_llm(system_prompt, user_message):
     """
-    Вызов Claude 3.5 Sonnet через OpenRouter.
+    Вызов GPT-4o-mini через OpenRouter.
     """
     if not OPENROUTER_API_KEY:
         logger.error("OPENROUTER_API_KEY not found in environment")

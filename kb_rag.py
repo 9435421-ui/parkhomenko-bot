@@ -34,7 +34,7 @@ class KnowledgeBaseRAG:
 
         print(f"📚 Всего документов в базе знаний: {len(self.documents)}")
     
-    def get_rag_context(self, query: str, max_chunks: int = 3) -> str:
+    def get_rag_context(self, query: str, max_chunks: int = 5) -> str:
         """Получить релевантный контекст по запросу"""
         if not self.documents:
             return "База знаний пуста."
@@ -66,7 +66,7 @@ class KnowledgeBaseRAG:
         
         return "\n\n".join(context_parts)
     
-    def _extract_relevant_snippet(self, content: str, keywords: List[str], context_size: int = 500) -> str:
+    def _extract_relevant_snippet(self, content: str, keywords: List[str], context_size: int = 1000) -> str:
         """Извлечь релевантный фрагмент из документа"""
         content_lower = content.lower()
         

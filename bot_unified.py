@@ -12,7 +12,7 @@ from typing import Optional
 
 load_dotenv()
 
-BOT_TOKEN = os.getenv("BOT_TOKEN")
+BOT_TOKEN = os.getenv("TELEGRAM_TOKEN")
 YANDEX_API_KEY = os.getenv("YANDEX_API_KEY")
 FOLDER_ID = os.getenv("FOLDER_ID")
 
@@ -26,7 +26,7 @@ THREAD_ID_DRAFTS = int(os.getenv("THREAD_ID_DRAFTS", "85"))
 THREAD_ID_SEASONAL = int(os.getenv("THREAD_ID_SEASONAL", "87"))
 THREAD_ID_LOGS = int(os.getenv("THREAD_ID_LOGS", "88"))
 
-ADMIN_ID = int(os.getenv("ADMIN_ID", "0"))
+ADMIN_ID = int(os.getenv("ADMIN_ID", "223465437"))
 CHANNEL_ID = os.getenv("CHANNEL_ID")
 
 # Пути для файлов
@@ -38,12 +38,13 @@ os.makedirs(UPLOAD_PLANS_DIR, exist_ok=True)
 os.makedirs(UPLOAD_DIR, exist_ok=True)
 os.makedirs(KNOWLEDGE_DIR, exist_ok=True)
 
-if not BOT_TOKEN:
+if not os.getenv("TELEGRAM_TOKEN"):
     raise RuntimeError("BOT_TOKEN must be set in .env")
 if not YANDEX_API_KEY or not FOLDER_ID:
     raise RuntimeError("YANDEX_API_KEY and FOLDER_ID must be set in .env")
 
 bot = telebot.TeleBot(BOT_TOKEN)
+replied_posts = set()
 
 # --------- CONTENT AGENT ---------
 from content_agent import ContentAgent
@@ -398,6 +399,7 @@ def route_user(user_id):
 
 @bot.callback_query_handler(func=lambda call: call.data in ["consent_accept", "consent_decline"])
 def consent_callback_handler(call):
+    if call.from_user.is_bot: return
     user_id = call.message.chat.id
     state = get_user_state(user_id)
 
@@ -439,10 +441,16 @@ def consent_callback_handler(call):
 
 @bot.message_handler(func=lambda m: m.chat.type in ["group", "supergroup"], content_types=["text"])
 def brand_advocate_handler(message):
-    """
-    Антон мониторит обсуждения в группе (комментарии канала) и вступает в дискуссию,
-    если видит юридические споры по перепланировке.
-    """
+    if message.from_user.is_bot: return
+
+    # Отвечаем только один раз на ветку обсуждения (на один пост канала)
+    post_id = None
+    if message.reply_to_message:
+        post_id = message.reply_to_message.message_id
+
+    if post_id and post_id in replied_posts:
+        return
+
     text = message.text.lower()
 
     # Ключевые слова для активации
@@ -458,11 +466,13 @@ def brand_advocate_handler(message):
         # Специальный промпт для Brand Advocate
         system_prompt = """
 Роль: Ты — Антон, гениальный ИИ-консультант Пархоменко Юлии Владимировны.
+ВАЖНО: Обязательно начни ответ с фразы или включи её: «Я — ИИ-помощник Юлии Владимировны».
+
 Твоя задача: Вступить в дискуссию в комментариях канала, чтобы разрешить юридический спор или ответить на вопрос.
 
 Стиль: Вежливый, экспертный, примиряющий.
 - Обращайся к участникам обсуждения профессионально.
-- Опирайся на базу знаний и ЖК РФ.
+- Опирайся на базу знаний и ЖК РФ на 2026 год.
 - Мягко напомни о важности легализации, чтобы избежать проблем с МЖИ.
 - Предложи написать тебе в личные сообщения для детального разбора или перейти в @Lad_v_kvartire_bot.
 """.strip()
@@ -482,11 +492,14 @@ def brand_advocate_handler(message):
             response = call_llm(full_prompt, message.text)
             if response:
                 bot.reply_to(message, response)
+                if post_id:
+                    replied_posts.add(post_id)
         except Exception as e:
             print(f"Error in brand_advocate: {e}")
 
 @bot.message_handler(commands=["start"])
 def start_handler(message):
+    if message.from_user.is_bot: return
     user_id = message.chat.id
     consent = get_user_consent(user_id)
     state = get_user_state(user_id)
@@ -507,6 +520,7 @@ def start_handler(message):
 
 @bot.message_handler(commands=["privacy"])
 def privacy_info(message):
+    if message.from_user.is_bot: return
     show_privacy_consent(message.chat.id)
 
 @bot.message_handler(
@@ -514,6 +528,7 @@ def privacy_info(message):
     content_types=["text"],
 )
 def time_handler(message):
+    if message.from_user.is_bot: return
     from datetime import datetime
 
     chat_id = message.chat.id
@@ -560,6 +575,7 @@ def time_handler(message):
     func=lambda call: call.data.startswith("mode_") or call.data.startswith("obj_")
 )
 def mode_select_handler(call):
+    if call.from_user.is_bot: return
     user_id = call.message.chat.id
     consent = get_user_consent(user_id)
     if not consent.privacy_accepted:
@@ -679,6 +695,7 @@ def mode_select_handler(call):
 
 @bot.message_handler(func=lambda m: m.text in ["📝 Квиз", "💰 Инвест-оценка", "💬 Задать вопрос", "📞 Контакты"])
 def main_menu_handler(message):
+    if message.from_user.is_bot: return
     user_id = message.chat.id
     state = get_user_state(user_id)
     if message.text == "📝 Квиз":
@@ -695,6 +712,7 @@ def main_menu_handler(message):
 
 @bot.message_handler(func=lambda m: get_user_state(m.chat.id).mode == BotModes.INVEST, content_types=["text"])
 def invest_handler(message):
+    if message.from_user.is_bot: return
     chat_id = message.chat.id
     state = get_user_state(chat_id)
     text = message.text.strip()
@@ -730,6 +748,7 @@ def invest_handler(message):
     content_types=["text"],
 )
 def quiz_handler(message):
+    if message.from_user.is_bot: return
     chat_id = message.chat.id
     state = get_user_state(chat_id)
 
@@ -829,6 +848,7 @@ def quiz_handler(message):
     content_types=["text"],
 )
 def dialog_handler(message):
+    if message.from_user.is_bot: return
     chat_id = message.chat.id
     state = get_user_state(chat_id)
     consent = get_user_consent(chat_id)
@@ -1038,6 +1058,7 @@ def should_prevent_repeat(state, current_prompt):
     content_types=["text"],
 )
 def quick_handler(message):
+    if message.from_user.is_bot: return
     chat_id = message.chat.id
     state = get_user_state(chat_id)
     consent = get_user_consent(chat_id)
@@ -1112,6 +1133,7 @@ def quick_handler(message):
 
 @bot.message_handler(content_types=["voice"])
 def handle_voice(message):
+    if message.from_user.is_bot: return
     chat_id = message.chat.id
     state = get_user_state(chat_id)
 
@@ -1187,6 +1209,7 @@ def handle_voice(message):
 
 @bot.message_handler(content_types=["audio"])
 def handle_audio(message):
+    if message.from_user.is_bot: return
     chat_id = message.chat.id
     state = get_user_state(chat_id)
 
@@ -1265,6 +1288,7 @@ def handle_audio(message):
 
 @bot.message_handler(content_types=["document", "photo"])
 def handle_files(message):
+    if message.from_user.is_bot: return
     chat_id = message.chat.id
     state = get_user_state(chat_id)
 
@@ -1300,6 +1324,7 @@ def handle_files(message):
         bot.send_message(chat_id, "❌ Произошла ошибка при загрузке файла.")
 @bot.message_handler(commands=["test_gpt"])
 def test_gpt_handler(message):
+    if message.from_user.is_bot: return
     chat_id = message.chat.id
     test_response = call_llm("Ты - Антон, ассистент компании.", "Привет! Ответь коротко как дела?")
     bot.send_message(chat_id, f"Тест ЯндексGPT:\n{test_response}")
@@ -1307,6 +1332,7 @@ def test_gpt_handler(message):
 
 @bot.message_handler(commands=["test_rag"])
 def test_rag_handler(message):
+    if message.from_user.is_bot: return
     chat_id = message.chat.id
     if kb:
         test_context = kb.get_rag_context("перепланировка квартиры")
@@ -1321,6 +1347,7 @@ def test_rag_handler(message):
 
 @bot.message_handler(commands=["generate_content"])
 def generate_content_cmd(message):
+    if message.from_user.is_bot: return
     """Генерация контент-плана на неделю"""
     if message.from_user.id != ADMIN_ID:
         bot.reply_to(message, "❌ Команда доступна только администратору")
@@ -1394,6 +1421,7 @@ def generate_content_cmd(message):
 
 @bot.message_handler(commands=["add_subscriber"])
 def add_subscriber_cmd(message):
+    if message.from_user.is_bot: return
     """Добавить подписчика в систему поздравлений (только для ADMIN_ID)"""
     if message.from_user.id != ADMIN_ID:
         bot.send_message(message.chat.id, "❌ Доступ запрещен")
@@ -1452,6 +1480,7 @@ def add_subscriber_cmd(message):
 
 @bot.message_handler(commands=["list_birthdays"])
 def list_birthdays_cmd(message):
+    if message.from_user.is_bot: return
     """Показать предстоящие дни рождения (только для ADMIN_ID)"""
     if message.from_user.id != ADMIN_ID:
         bot.send_message(message.chat.id, "❌ Доступ запрещен")
@@ -1488,6 +1517,7 @@ def list_birthdays_cmd(message):
 
 @bot.message_handler(commands=["generate_greetings"])
 def generate_greetings_cmd(message):
+    if message.from_user.is_bot: return
     """Генерировать поздравления для предстоящих дней рождения (только для ADMIN_ID)"""
     if message.from_user.id != ADMIN_ID:
         bot.send_message(message.chat.id, "❌ Доступ запрещен")
@@ -1551,6 +1581,7 @@ def generate_greetings_cmd(message):
 
 @bot.message_handler(commands=["generate_welcome"])
 def generate_welcome_cmd(message):
+    if message.from_user.is_bot: return
     """Генерировать приветственное сообщение для потенциального клиента (только для ADMIN_ID)"""
     if message.from_user.id != ADMIN_ID:
         bot.send_message(message.chat.id, "❌ Доступ запрещен")
@@ -1608,6 +1639,7 @@ def generate_welcome_cmd(message):
 
 @bot.message_handler(commands=["show_plan"])
 def show_plan_cmd(message):
+    if message.from_user.is_bot: return
     """Показать контент-план"""
     if message.from_user.id != ADMIN_ID:
         bot.send_message(message.chat.id, "❌ Доступ запрещен")
@@ -1650,6 +1682,7 @@ def show_plan_cmd(message):
 
 @bot.callback_query_handler(func=lambda call: call.data.startswith("approve_") or call.data.startswith("delete_"))
 def content_callback_handler(call):
+    if call.from_user.is_bot: return
     """Обработка кнопок approve/delete"""
     if call.message.chat.id != LEADS_GROUP_CHAT_ID:
         return
