@@ -292,4 +292,34 @@ class Database:
             cur.execute(query, (news_id,))
             if not self.is_postgres: conn.commit()
 
+
+
+
+
+
+
+
+
+
+    def get_upcoming_birthdays(self, days=7):
+        subscribers = self.get_all_subscribers()
+        import datetime
+        from datetime import datetime as dt
+        upcoming = []
+        today = dt.now().replace(hour=0, minute=0, second=0, microsecond=0)
+        for s in subscribers:
+            if not s["birthday"]: continue
+            try:
+                parts = s["birthday"].split(".")
+                day = int(parts[0])
+                month = int(parts[1])
+                bday = today.replace(month=month, day=day)
+                if bday < today: bday = bday.replace(year=today.year + 1)
+                diff = (bday - today).days
+                if 0 <= diff <= days:
+                    s["days_until_birthday"] = diff
+                    upcoming.append(s)
+            except: continue
+        return sorted(upcoming, key=lambda x: x["days_until_birthday"])
+
 db = Database()

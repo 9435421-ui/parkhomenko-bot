@@ -1,6 +1,7 @@
 from agents.image_agent import generate_image
 from s3_client import s3
 import os
+import re
 import time
 import datetime
 import requests
@@ -72,6 +73,7 @@ class BotModes:
     QUIZ = "quiz"
     DIALOG = "dialog"
     QUICK = "quick"
+    INVEST = "invest"
 
 
 class UserConsent:
@@ -107,6 +109,7 @@ class UserState:
         self.plan_path = None
         self.change_plan = None
         self.voice_used = False
+        self.target_module = None
 
 
 user_states: dict[int, UserState] = {}
@@ -410,11 +413,38 @@ def transcribe_audio(file_path: str) -> str:
 
 
 
+
+
+def route_user(user_id):
+    state = get_user_state(user_id)
+    module = state.target_module
+
+    if module == "quiz":
+        state.mode = BotModes.QUIZ
+        state.quiz_step = 3
+        markup = types.InlineKeyboardMarkup()
+        markup.add(types.InlineKeyboardButton("Квартира", callback_data="obj_kvartira"))
+        markup.add(types.InlineKeyboardButton("Коммерция", callback_data="obj_kommertsia"))
+        markup.add(types.InlineKeyboardButton("Дом", callback_data="obj_dom"))
+        bot.send_message(user_id, "📝 **Запуск Квиза: Законность вашей перепланировки**\n\nВыберите тип объекта:", reply_markup=markup, parse_mode="Markdown")
+    elif module == "invest":
+        state.mode = BotModes.INVEST
+        state.quiz_step = 1
+        bot.send_message(user_id, "💰 **Инвест-Оценка: Узнайте рост стоимости вашей квартиры!**\n\nУкажите город (Москва и МО):", parse_mode="Markdown")
+    elif module == "ask":
+        state.mode = BotModes.DIALOG
+        bot.send_message(user_id, "💬 **Консультация с Антоном**\n\nНапишите ваш вопрос по перепланировке, и я отвечу, опираясь на базу знаний и ПП №508.", parse_mode="Markdown")
+    else:
+        show_main_menu(user_id)
+
+    state.target_module = None
+
 # --------- Хэндлеры согласий ---------
 
 @bot.callback_query_handler(func=lambda call: call.data in ["consent_accept", "consent_decline"])
 def consent_callback_handler(call):
     user_id = call.message.chat.id
+    state = get_user_state(user_id)
 
     if call.data == "consent_decline":
         bot.edit_message_text(
@@ -424,15 +454,18 @@ def consent_callback_handler(call):
         )
         return
 
+    # Preserve target module for deep linking
+    target = state.target_module
+
     # Accept consent
     consent = get_user_consent(user_id)
     consent.privacy_accepted = True
     consent.notifications_accepted = True
     consent.consent_timestamp = datetime.datetime.now()
-    consent.ai_disclaimer_seen = True
 
     # RESET UserState as requested
     user_states[user_id] = UserState()
+    get_user_state(user_id).target_module = target
 
     bot.edit_message_text(
         "✅ Спасибо! Теперь мы можем продолжить.",
@@ -440,56 +473,36 @@ def consent_callback_handler(call):
         message_id=call.message.message_id
     )
 
-    # Request contact
-    markup = types.ReplyKeyboardMarkup(resize_keyboard=True, one_time_keyboard=True)
-    markup.add(types.KeyboardButton("📱 Поделиться контактом", request_contact=True))
-    bot.send_message(
-        user_id,
-        "Пожалуйста, поделитесь своим контактом для связи:",
-        reply_markup=markup
-    )
+    show_ai_disclaimer(user_id)
+    consent.ai_disclaimer_seen = True
+
+    # Immediate routing instead of contact request
+    route_user(user_id)
 
 @bot.message_handler(commands=["start"])
 def start_handler(message):
     user_id = message.chat.id
     consent = get_user_consent(user_id)
+    state = get_user_state(user_id)
+
+    # Deep linking parsing
+    args = message.text.split()
+    if len(args) > 1:
+        param = args[1].lower()
+        if "quiz" in param: state.target_module = "quiz"
+        elif "invest" in param: state.target_module = "invest"
+        elif "ask" in param: state.target_module = "ask"
 
     if not consent.privacy_accepted:
         show_privacy_consent(user_id)
         return
 
-    show_main_menu(user_id)
+    route_user(user_id)
 
-@bot.message_handler(content_types=["contact"])
-def initial_contact_handler(message):
-    user_id = message.chat.id
-    state = get_user_state(user_id)
-    consent = get_user_consent(user_id)
+@bot.message_handler(commands=["privacy"])
+def privacy_info(message):
+    show_privacy_consent(message.chat.id)
 
-    state.phone = message.contact.phone_number
-    state.name = message.contact.first_name
-    consent.contact_received = True
-
-    # МИНИМАЛЬНЫЙ ЛИД
-    contact_lead = f"🆕 НОВЫЙ КОНТАКТ: {state.name}\n📞 Телефон: {state.phone}\n👤 User ID: {user_id}"
-    try:
-        bot.send_message(LEADS_GROUP_CHAT_ID, contact_lead)
-    except: pass
-
-    bot.send_message(user_id, f"Приятно познакомиться, {state.name}! 😊", reply_markup=types.ReplyKeyboardRemove())
-    show_main_menu(user_id)
-
-
-@bot.callback_query_handler(
-    func=lambda call: call.data.startswith("confirm_name_")
-    or call.data == "change_name"
-)
-@bot.message_handler(
-    func=lambda m: get_user_consent(m.chat.id).contact_received
-    and get_user_state(m.chat.id).name is None
-    and get_user_state(m.chat.id).mode is None,
-    content_types=["text"],
-)
 @bot.message_handler(
     func=lambda m: get_user_state(m.chat.id).mode == "waiting_time",
     content_types=["text"],
@@ -657,6 +670,52 @@ def mode_select_handler(call):
         bot.send_message(user_id, "Укажите город/регион:")
 
 
+
+@bot.message_handler(func=lambda m: m.text in ["📝 Квиз", "💰 Инвест-оценка", "💬 Задать вопрос", "📞 Контакты"])
+def main_menu_handler(message):
+    user_id = message.chat.id
+    state = get_user_state(user_id)
+    if message.text == "📝 Квиз":
+        state.target_module = "quiz"
+        route_user(user_id)
+    elif message.text == "💰 Инвест-оценка":
+        state.target_module = "invest"
+        route_user(user_id)
+    elif message.text == "💬 Задать вопрос":
+        state.target_module = "ask"
+        route_user(user_id)
+    elif message.text == "📞 Контакты":
+        bot.send_message(user_id, "📞 **Наши контакты:**\n\n👤 Эксперт: Пархоменко Юлия Владимировна\n🌐 Сайт: [lad-v-kvartire.ru](https://lad-v-kvartire.ru)\n📱 Телефон: +7 (900) 000-00-00", parse_mode="Markdown")
+
+@bot.message_handler(func=lambda m: get_user_state(m.chat.id).mode == BotModes.INVEST, content_types=["text"])
+def invest_handler(message):
+    chat_id = message.chat.id
+    state = get_user_state(chat_id)
+    text = message.text.strip()
+    if state.quiz_step == 1:
+        state.city = text
+        state.quiz_step = 2
+        bot.send_message(chat_id, "Укажите площадь квартиры (кв.м):")
+    elif state.quiz_step == 2:
+        state.change_plan = f"Площадь: {text}"
+        state.quiz_step = 3
+        bot.send_message(chat_id, "Укажите текущую рыночную стоимость квартиры (в рублях):")
+    elif state.quiz_step == 3:
+        try:
+            import re
+            price = int(re.sub(r"[^\d]", "", text))
+            growth_min = int(price * 0.12)
+            growth_max = int(price * 0.18)
+            res = f"📊 **Результат оценки инвест-привлекательности:**\n\nПри грамотной перепланировке и её согласовании, ликвидность вашей квартиры вырастет на **12-18%**.\n\n💰 Ожидаемый прирост стоимости: **{growth_min:,} — {growth_max:,} руб.**\n\nХотите узнать, какие именно изменения дадут такой рост? Пройдите наш квиз или свяжитесь с экспертом!"
+            bot.send_message(chat_id, res, parse_mode="Markdown")
+            save_lead_and_notify(chat_id, scenario="Инвест-оценка")
+            state.mode = None
+            state.quiz_step = 0
+            show_main_menu(chat_id)
+        except:
+            bot.send_message(chat_id, "Пожалуйста, введите стоимость цифрами.")
+
+
 # ========== КВИЗ: Сбор заявки ==========
 
 
@@ -730,19 +789,29 @@ def quiz_handler(message):
         )
         return
 
-    # Шаг 8: статус документов БТИ + завершение квиза
+    # Шаг 8: статус документов БТИ
     if state.quiz_step == 8:
         state.bti_status = message.text.strip()
+        state.quiz_step = 9
+        bot.send_message(
+            chat_id,
+            "Есть ли что-то еще, что нам важно знать? Можете написать текстом или отправить голосовое сообщение:",
+        )
+        return
+
+    # Шаг 9: дополнительная информация + завершение
+    if state.quiz_step == 9:
+        state.extra_contact = message.text.strip() # Используем это поле для доп. инфо
         save_lead_and_notify(chat_id)
         bot.send_message(
             chat_id,
-            f"✅ Спасибо, {state.name}! Ваша заявка принята.\n\n"
-            f"Команда «Пархоменко и компания» свяжется с вами по номеру {state.phone} "
-            f"ежедневно с 10:00 до 20:00 по Москве для обсуждения деталей и предварительного расчёта.",
+            f"✅ Спасибо, {state.name or ""}! Ваша заявка принята.\n\n"
+            f"Команда «Пархоменко и компания» свяжется с вами для обсуждения деталей и предварительного расчёта.\n"
+            f"Мы работаем ежедневно с 10:00 до 20:00 по Москве.",
         )
-        # Сброс состояния БЕЗ показа меню
         state.mode = None
         state.quiz_step = 0
+        show_main_menu(chat_id)
         return
 
 
@@ -1311,21 +1380,18 @@ def generate_content_cmd(message):
         posts = agent.generate_posts(7, theme=theme)
 
         # Сохраняем в БД
-        async def save_posts():
-            for post in posts:
-                await db.save_post(
-                    post["type"],
-                    post.get("title", ""),
-                    post["body"],
-                    post["cta"],
-                    post["publish_date"],
-                    image_prompt=post.get("image_prompt")
-                )
-
-        asyncio.run(save_posts())
+        for post in posts:
+            db.save_post(
+                post["type"],
+                post.get("title", ""),
+                post["body"],
+                post["cta"],
+                post["publish_date"],
+                image_prompt=post.get("image_prompt")
+            )
 
         # Отправляем черновики в соответствующие топики
-        drafts = asyncio.run(db.get_draft_posts())
+        drafts = db.get_draft_posts()
         for post in drafts:
             # Определяем топик по типу поста
             thread_id = THREAD_ID_SEASONAL if post['type'] in ['seasonal', 'живой'] else THREAD_ID_DRAFTS
@@ -1404,14 +1470,14 @@ def add_subscriber_cmd(message):
 
     # Добавляем в базу
     try:
-        asyncio.run(db.add_subscriber(
+        db.add_subscriber(
             user_id=user_id,
             username=username,
             first_name=first_name,
             last_name=last_name,
             birthday=birthday,
             notes=notes
-        ))
+        )
         bot.send_message(message.chat.id, f"✅ Подписчик @{username} добавлен с днем рождения {birthday}")
     except Exception as e:
         bot.send_message(message.chat.id, f"❌ Ошибка добавления: {str(e)}")
@@ -1427,7 +1493,7 @@ def list_birthdays_cmd(message):
     import asyncio
 
     try:
-        upcoming = asyncio.run(db.get_upcoming_birthdays(7))
+        upcoming = db.get_upcoming_birthdays(7)
 
         if not upcoming:
             bot.send_message(message.chat.id, "📅 Нет предстоящих дней рождения на следующей неделе")
@@ -1464,7 +1530,7 @@ def generate_greetings_cmd(message):
     import datetime
 
     try:
-        upcoming = asyncio.run(db.get_upcoming_birthdays(7))
+        upcoming = db.get_upcoming_birthdays(7)
 
         if not upcoming:
             bot.send_message(message.chat.id, "📅 Нет предстоящих дней рождения для генерации поздравлений")
@@ -1487,13 +1553,13 @@ def generate_greetings_cmd(message):
             # Сохраняем как черновик
             publish_date = datetime.datetime.now() + datetime.timedelta(days=person['days_until_birthday'])
 
-            post_id = asyncio.run(db.save_post(
+            post_id = db.save_post(
                 post_type='поздравление',
                 title=post.get('title', f"Поздравление для {name}"),
                 body=full_body,
                 cta=post['cta'],
                 publish_date=publish_date
-            ))
+            )
 
             # Отправляем в топик черновиков
             text = f"[Тип: поздравление]\n\n🎂 {name}\n\n{post['body']}\n\n{post['cta']}"
@@ -1541,13 +1607,13 @@ def generate_welcome_cmd(message):
         publish_date = datetime.datetime.now() + datetime.timedelta(days=1)  # Завтра в 10:00
         publish_date = publish_date.replace(hour=10, minute=0, second=0, microsecond=0)
 
-        post_id = asyncio.run(db.save_post(
+        post_id = db.save_post(
             post_type='приветствие',
             title=post.get('title', f"Приветствие для {'нового подписчика' if not person_name else person_name}"),
             body=post['body'],
             cta=post['cta'],
             publish_date=publish_date
-        ))
+        )
 
         # Отправляем в топик черновиков
         text = f"[Тип: приветствие]\n\n{post['body']}\n\n{post['cta']}"
@@ -1583,7 +1649,7 @@ def show_plan_cmd(message):
     import asyncio
 
     # Получаем черновики
-    drafts = asyncio.run(db.get_draft_posts())
+    drafts = db.get_draft_posts()
 
     if not drafts:
         bot.send_message(message.chat.id, "📭 Контент-план пуст. Используй /generate_content для генерации.")
@@ -1627,7 +1693,7 @@ def content_callback_handler(call):
 
     if call.data.startswith("approve_"):
         # СНАЧАЛА получаем информацию о посте
-        drafts = asyncio.run(db.get_draft_posts())
+        drafts = db.get_draft_posts()
         post = next((p for p in drafts if p['id'] == post_id), None)
 
         if not post:
@@ -1639,7 +1705,7 @@ def content_callback_handler(call):
         from datetime import datetime, timedelta
 
         # Получить максимальную дату среди approved постов
-        max_date = asyncio.run(db.get_max_publish_date(status='approved'))
+        max_date = db.get_max_publish_date(status='approved')
 
         if max_date is None:
             # Первый approved пост → завтра в 10:00
@@ -1659,12 +1725,12 @@ def content_callback_handler(call):
                     img_file.write(image_data)
                 image_url = image_path
 
-        asyncio.run(db.update_content_plan_entry(
+        db.update_content_plan_entry(
             post_id=post_id,
             status="approved",
             publish_date=next_date.strftime("%Y-%m-%d %H:%M:%S"),
             image_url=image_url
-        ))
+        )
 
         # Редактируем сообщение
         new_text = f"✅ УТВЕРЖДЁН\nПубликация: {next_date.strftime('%d.%m.%Y %H:%M')}\n\n{call.message.text}"
@@ -1681,11 +1747,11 @@ def content_callback_handler(call):
 
     elif call.data.startswith("delete_"):
         # Получаем информацию о посте перед удалением
-        drafts = asyncio.run(db.get_draft_posts())
+        drafts = db.get_draft_posts()
         post = next((p for p in drafts if p['id'] == post_id), None)
 
         # Удаляем пост
-        asyncio.run(db.delete_post(post_id))
+        db.delete_post(post_id)
 
         # Редактируем сообщение
         if post:
