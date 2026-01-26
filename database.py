@@ -323,3 +323,6 @@ class Database:
         return sorted(upcoming, key=lambda x: x["days_until_birthday"])
 
 db = Database()
+if __name__ == "__main__":
+    db.connect()
+    print("✅ Database initialized successfully.")
