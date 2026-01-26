@@ -158,10 +158,21 @@ def add_legal_disclaimer(text: str) -> str:
 
 
 def show_privacy_consent(chat_id: int):
-    markup = types.ReplyKeyboardMarkup(resize_keyboard=True, one_time_keyboard=True)
-    markup.add(types.KeyboardButton("✅ Я согласен и хочу продолжить"))
-    markup.add(types.KeyboardButton("❌ Отказаться"))
-    bot.send_message(chat_id, PRIVACY_POLICY_TEXT, reply_markup=markup)
+    """Показ согласий с 2 inline кнопками"""
+    markup = types.InlineKeyboardMarkup()
+    markup.add(types.InlineKeyboardButton("✅ Согласен с политикой обработки ПД", callback_data="consent_privacy"))
+    markup.add(types.InlineKeyboardButton("✅ Согласен с офертой", callback_data="consent_offer"))
+    
+    text = (
+        "👋 Здравствуйте! Я Антон, <b>ИИ-помощник эксперта Пархоменко Юлии Владимировны</b> "
+        "по согласованию перепланировок.\n\n"
+        "Я помогу вам:\n"
+        "• Разобраться в нормах и требованиях\n"
+        "• Оценить возможность вашей перепланировки\n"
+        "• Оформить заявку на консультацию\n\n"
+        "Для продолжения необходимо ваше согласие:"
+    )
+    bot.send_message(chat_id, text, reply_markup=markup, parse_mode="HTML")
 
 
 def show_ai_disclaimer(chat_id: int):
@@ -476,32 +487,44 @@ def privacy_info(message):
     show_privacy_consent(message.chat.id)
 
 
-@bot.message_handler(
-    func=lambda m: m.text in ["✅ Я согласен и хочу продолжить", "❌ Отказаться"]
-)
-def privacy_consent_handler(message):
-    user_id = message.chat.id
+@bot.callback_query_handler(func=lambda call: call.data.startswith("consent_"))
+def consent_callback_handler(call):
+    """Обработчик 2 кнопок согласия"""
+    user_id = call.from_user.id
     consent = get_user_consent(user_id)
-
-    if "Отказаться" in message.text:
-        bot.send_message(
-            user_id, "Без согласия на обработку данных использовать бота нельзя."
+    
+    if call.data == "consent_privacy":
+        consent.privacy_accepted = True
+        bot.answer_callback_query(call.id, "✅ Согласие на обработку ПД получено")
+    elif call.data == "consent_offer":
+        consent.notifications_accepted = True
+        bot.answer_callback_query(call.id, "✅ Согласие с офертой получено")
+    
+    # Проверяем оба согласия
+    if consent.privacy_accepted and consent.notifications_accepted:
+        consent.ai_disclaimer_seen = True
+        consent.consent_timestamp = datetime.datetime.now()
+        
+        bot.edit_message_text(
+            "✅ Спасибо за согласие!\n\n"
+            "Для идентификации вас в системе и возможности получения отчета, "
+            "пожалуйста, подтвердите ваш контакт.",
+            user_id,
+            call.message.message_id
         )
-        return
-
-    consent.privacy_accepted = True
-    consent.notifications_accepted = True
-    consent.consent_timestamp = datetime.datetime.now()
-    show_ai_disclaimer(user_id)
-    consent.ai_disclaimer_seen = True
-
-    markup = types.ReplyKeyboardMarkup(resize_keyboard=True, one_time_keyboard=True)
-    markup.add(types.KeyboardButton("📱 Поделиться контактом", request_contact=True))
-    bot.send_message(
-        user_id,
-        "Для продолжения работы поделитесь своим контактом Telegram — это защитит нас от спама и поможет быстрее связаться.",
-        reply_markup=markup,
-    )
+        
+        # Запрос контакта
+        markup = types.ReplyKeyboardMarkup(resize_keyboard=True, one_time_keyboard=True)
+        markup.add(types.KeyboardButton("📱 Поделиться контактом", request_contact=True))
+        bot.send_message(user_id, "Нажмите кнопку ниже:", reply_markup=markup)
+    else:
+        # Ещё не все согласия
+        missing = []
+        if not consent.privacy_accepted:
+            missing.append("политику обработки ПД")
+        if not consent.notifications_accepted:
+            missing.append("оферту")
+        bot.answer_callback_query(call.id, f"Пожалуйста, согласитесь также с: {', '.join(missing)}", show_alert=True)
 
 
 @bot.message_handler(
