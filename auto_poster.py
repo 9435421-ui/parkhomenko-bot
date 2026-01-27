@@ -48,7 +48,7 @@ class AutoPoster:
 
                     # Отправляем в канал
                     logging.info(f"Publishing post {post['id']}: len={len(formatted_post)}")
-                    self.bot.send_message(chat_id=CONTENT_CHANNEL_ID, text=formatted_post)  # parse_mode убран
+                    self.bot.send_message(chat_id=CONTENT_CHANNEL_ID, text=formatted_post, parse_mode='HTML')
 
                     # Отмечаем как опубликованный
                     await db.mark_as_published(post['id'])
