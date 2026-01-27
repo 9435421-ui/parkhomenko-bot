@@ -24,7 +24,7 @@ def call_llm(system_prompt, user_message):
         "Authorization": f"Bearer {OPENROUTER_API_KEY}",
         "Content-Type": "application/json",
         "HTTP-Referer": "https://lad-v-kvartire.ru", # Optional
-        "X-Title": "LAD V KVARTIRE Bot" # Optional
+        "X-Title": "LAD EXPERT Bot" # Optional
     }
 
     payload = {

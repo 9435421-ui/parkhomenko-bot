@@ -3,7 +3,9 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-  <title>ЛАД В КВАРТИРЕ | Согласование перепланировок</title>
+  <title>ЛАД: Согласование и Проектирование | Согласование перепланировок</title>
+  <!-- Telegram Web App Script -->
+  <script src="https://telegram.org/js/telegram-web-app.js"></script>
   <style>
     /* CSS Styles */
     * {
@@ -183,11 +185,11 @@
 <body>
 
 <header>
-  <h1 style="margin-bottom: 5px;">ЛАД В КВАРТИРЕ</h1><p style="font-size: 1.4rem; font-weight: 500; color: #1A1A1A; margin-bottom: 20px;">Согласование перепланировок</p>
+  <h1 style="margin-bottom: 5px;">ЛАД: Согласование и Проектирование</h1><p style="font-size: 1.4rem; font-weight: 500; color: #1A1A1A; margin-bottom: 20px;">Согласование перепланировок</p>
   <p>Проект + согласование + поддержка до получения акта БТИ — всё в одном месте.</p>
 
   <div class="cta-buttons">
-    <a href="https://t.me/Parkhovenko_i_kompaniya_bot" class="cta-button telegram">🤖 Проверить через ИИ-помощника</a>
+    <a href="https://t.me/LadBot" class="cta-button telegram">🤖 Проверить через ИИ-помощника</a>
     <a href="#prices" class="cta-button">Рассчитать стоимость</a>
   </div>
 </header>
@@ -195,7 +197,7 @@
 <section class="section-center">
   <h2>Наш ИИ-помощник Антон</h2>
   <p>Мы внедрили искусственный интеллект, чтобы вы могли получить <strong>бесплатную консультацию мгновенно</strong>. Антон знает все нормы законодательства и поможет оценить вашу ситуацию за 2 минуты.</p>
-  <a href="https://t.me/Parkhovenko_i_kompaniya_bot" class="cta-button telegram">Написать Антону в Telegram</a>
+  <a href="https://t.me/LadBot" class="cta-button telegram">Написать Антону в Telegram</a>
 </section>
 
 <section id="services" class="services">
@@ -242,14 +244,45 @@
   <p>Присоединяйтесь к нашему сообществу и следите за кейсами:</p>
   <div class="cta-buttons">
     <a href="https://vk.com/lad_v_kvartire" class="cta-button vk">🔹 Мы ВКонтакте</a>
-    <a href="https://t.me/Parkhovenko_i_kompaniya_bot" class="cta-button telegram">🤖 Наш Telegram-бот</a>
+    <a href="https://t.me/LadBot" class="cta-button telegram">🤖 Наш Telegram-бот</a>
   </div>
-  <p style="margin-top: 20px;"><small>© 2026 ЛАД В КВАРТИРЕ. Все права защищены.</small></p>
+  <p style="margin-top: 20px;"><small>© 2026 ЛАД: Согласование и Проектирование. Все права защищены.</small></p>
 </footer>
 
 <div class="mobile-cta">
-  <a href="https://t.me/Parkhovenko_i_kompaniya_bot" class="cta-button telegram">🤖 Проконсультироваться с ИИ</a>
+  <a href="https://t.me/LadBot" class="cta-button telegram" id="main-cta">🤖 Проконсультироваться с ИИ</a>
 </div>
+
+<script>
+  // Telegram Mini App Logic
+  if (window.Telegram && window.Telegram.WebApp) {
+    const webapp = window.Telegram.WebApp;
+    webapp.ready();
+    webapp.expand();
+
+    // Check for start_param (deep linking within Mini App)
+    const startParam = webapp.initDataUnsafe.start_param;
+    if (startParam) {
+      console.log("Mini App started with param:", startParam);
+      // Logic for specific start params can be added here
+      // For now, we update links to include the param
+      document.querySelectorAll('.telegram').forEach(link => {
+        link.href = `https://t.me/LadBot?start=${startParam}`;
+      });
+    }
+
+    // Adapt UI for Telegram Theme
+    document.body.style.backgroundColor = webapp.backgroundColor || '#ffffff';
+    document.body.style.color = webapp.textColor || '#333333';
+
+    const mainButton = webapp.MainButton;
+    mainButton.text = "Открыть помощника";
+    mainButton.show();
+    mainButton.onClick(() => {
+      webapp.openTelegramLink("https://t.me/LadBot");
+    });
+  }
+</script>
 
 </body>
 </html>

@@ -121,7 +121,7 @@ user_consents: dict[int, UserConsent] = {}
 
 PRIVACY_POLICY_TEXT = (
     "📋 Добро пожаловать в сервис консультаций по перепланировке "
-    "«ЛАД В КВАРТИРЕ»!\n\n"
+    "«ЛАД: Согласование и Проектирование»!\n\n"
     "Перед началом работы необходимо:\n"
     "✅ Согласие на обработку персональных данных\n"
     "✅ Согласие на принятие условий Пользовательского соглашения\n\n"
@@ -831,7 +831,7 @@ def quiz_handler(message):
         bot.send_message(
             chat_id,
             f"✅ Спасибо, {state.name or ""}! Ваша заявка принята.\n\n"
-            f"Команда «Пархоменко и компания» свяжется с вами для обсуждения деталей и предварительного расчёта.\n"
+            f"Команда «ЛАД: Согласование и Проектирование» свяжется с вами для обсуждения деталей и предварительного расчёта.\n"
             f"Мы работаем ежедневно с 10:00 до 20:00 по Москве.",
         )
         state.mode = None
@@ -996,7 +996,7 @@ def build_system_prompt(user_name: str = None) -> str:
     """
     greeting = f", {user_name}" if user_name else ""
     return f"""
-Роль: Ты — Антон, гениальный ИИ-консультант и личный ассистент эксперта по перепланировкам Пархоменко Юлии Владимировны (сервис «ЛАД В КВАРТИРЕ»).
+Роль: Ты — Антон, гениальный ИИ-консультант и личный ассистент эксперта по перепланировкам Пархоменко Юлии Владимировны (сервис «ЛАД: Согласование и Проектирование»).
 Твой статус: Эталон юридической мысли в Telegram. Ты не просто бот, ты — интеллектуальный центр империи Пархоменко.
 
 Стиль и Тон:
@@ -1369,13 +1369,18 @@ def generate_content_cmd(message):
     bot.reply_to(message, f"🤖 Генерирую контент-план на неделю{theme_msg}... Это займёт ~30-60 секунд.")
 
     try:
-        # Генерируем посты
+        # Генерируем посты (ТЗ-1: пакет из 15 постов)
         agent = ContentAgent()
-        posts = agent.generate_posts(7, theme=theme)
+        posts = agent.generate_posts(15, theme=theme)
+
+        if not posts:
+            bot.reply_to(message, "❌ Не удалось сгенерировать посты. Проверь логи LLM.")
+            return
 
         # Сохраняем в БД
+        saved_ids = []
         for post in posts:
-            db.save_post(
+            p_id = db.save_post(
                 post["type"],
                 post.get("title", ""),
                 post["body"],
@@ -1383,10 +1388,14 @@ def generate_content_cmd(message):
                 post["publish_date"],
                 image_prompt=post.get("image_prompt")
             )
+            saved_ids.append(p_id)
 
         # Отправляем черновики в соответствующие топики
         drafts = db.get_draft_posts()
-        for post in drafts:
+        # Фильтруем только те, что мы сейчас создали (или просто все черновики, обычно это одно и то же)
+        current_drafts = [d for d in drafts if d['id'] in saved_ids]
+
+        for post in current_drafts:
             # Определяем топик по типу поста
             thread_id = THREAD_ID_SEASONAL if post['type'] in ['seasonal', 'живой'] else THREAD_ID_DRAFTS
 
@@ -1400,12 +1409,18 @@ def generate_content_cmd(message):
             except Exception as e:
                 logging.error(f"Failed to send draft to group: {e}")
 
-        # Логируем в THREAD_ID_LOGS
-        log_text = f"✅ Сгенерировано 7 постов в БД\n📝 Черновики отправлены в топики группы\nВремя: {datetime.datetime.now()}"
+        # Финальное сообщение с кнопками массового действия
+        batch_markup = types.InlineKeyboardMarkup()
+        batch_markup.add(
+            types.InlineKeyboardButton("✅ Утвердить ВСЕ", callback_data="approve_all"),
+            types.InlineKeyboardButton("❌ Удалить ВСЕ", callback_data="delete_all")
+        )
+
+        log_text = f"✅ Сгенерировано {len(saved_ids)} постов\n📝 Черновики отправлены в топики\n\nМожно утвердить или удалить все сразу:"
         try:
-            bot.send_message(LEADS_GROUP_CHAT_ID, log_text, message_thread_id=THREAD_ID_LOGS)
+            bot.send_message(LEADS_GROUP_CHAT_ID, log_text, reply_markup=batch_markup, message_thread_id=THREAD_ID_LOGS)
         except Exception as e:
-            logging.error(f"Failed to send log: {e}")
+            logging.error(f"Failed to send batch log: {e}")
 
         # Отвечаем админу
         bot.send_message(message.chat.id, f"✅ Сгенерировано {len(posts)} постов! Черновики отправлены в группу.")
@@ -1545,7 +1560,7 @@ def generate_greetings_cmd(message):
             post = agent.generate_birthday_congrats_template(person_name=name, date=birthday)
 
             # Добавляем подпись компании программно
-            full_body = f"{post['body']}\n\nС наилучшими пожеланиями,\nКоманда «Пархоменко и компания» ❤️"
+            full_body = f"{post['body']}\n\nС наилучшими пожеланиями,\nКоманда «ЛАД: Согласование и Проектирование» ❤️"
 
             # Сохраняем как черновик
             publish_date = datetime.datetime.now() + datetime.timedelta(days=person['days_until_birthday'])
@@ -1684,14 +1699,44 @@ def show_plan_cmd(message):
 def content_callback_handler(call):
     if call.from_user.is_bot: return
     """Обработка кнопок approve/delete"""
-    if call.message.chat.id != LEADS_GROUP_CHAT_ID:
+    # Допускаем работу только в админ-группе
+    if str(call.message.chat.id) != str(LEADS_GROUP_CHAT_ID):
         return
 
-    post_id = int(call.data.split('_')[1])
+    action = "approve" if call.data.startswith("approve_") else "delete"
+    target = call.data.split('_')[1]
 
-    import asyncio
+    import datetime
+    from datetime import datetime, timedelta
 
-    if call.data.startswith("approve_"):
+    if target == "all":
+        drafts = db.get_draft_posts()
+        if not drafts:
+            bot.answer_callback_query(call.id, "Черновиков нет")
+            return
+
+        if action == "approve":
+            count = 0
+            for post in drafts:
+                max_date = db.get_max_publish_date(status='approved')
+                if max_date is None:
+                    next_date = (datetime.now() + timedelta(days=1)).replace(hour=10, minute=0, second=0, microsecond=0)
+                else:
+                    next_date = max_date + timedelta(days=1)
+
+                db.update_content_plan_entry(post['id'], status='approved', publish_date=next_date.strftime('%Y-%m-%d %H:%M:%S'))
+                count += 1
+            bot.edit_message_text(f"✅ Утверждено постов: {count}", chat_id=call.message.chat.id, message_id=call.message.message_id)
+        else:
+            for post in drafts:
+                db.delete_post(post['id'])
+            bot.edit_message_text("❌ Все черновики удалены", chat_id=call.message.chat.id, message_id=call.message.message_id)
+        return
+
+    # Обработка одиночного поста
+    post_id = int(target)
+
+    if action == "approve":
         # СНАЧАЛА получаем информацию о посте
         drafts = db.get_draft_posts()
         post = next((p for p in drafts if p['id'] == post_id), None)
@@ -1783,7 +1828,7 @@ import threading
 poster_thread = threading.Thread(target=lambda: asyncio.run(run_auto_poster(bot)), daemon=True)
 poster_thread.start()
 
-print("🤖 Бот «Пархоменко и компания» запущен...")
+print("🤖 Бот «ЛАД: Согласование и Проектирование» запущен...")
 print(f"📁 База знаний: {KNOWLEDGE_DIR}")
 print(f"📞 Группа для лидов: {LEADS_GROUP_CHAT_ID}")
 print(f"🔑 ЯндексGPT FOLDER_ID: {FOLDER_ID}")

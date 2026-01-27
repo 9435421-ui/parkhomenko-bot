@@ -1,0 +1,146 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ЛАД: Оценка перепланировки | Квиз</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            margin: 0;
+            padding: 0;
+            background-color: #f4f7f6;
+            color: #333;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+        }
+        .quiz-container {
+            background: #fff;
+            max-width: 500px;
+            width: 90%;
+            padding: 30px;
+            border-radius: 15px;
+            box-shadow: 0 10px 25px rgba(0,0,0,0.1);
+            text-align: center;
+        }
+        .logo {
+            font-weight: bold;
+            font-size: 1.2rem;
+            color: #2E7D32;
+            margin-bottom: 20px;
+        }
+        h1 {
+            font-size: 1.5rem;
+            margin-bottom: 15px;
+        }
+        p {
+            color: #666;
+            margin-bottom: 25px;
+            line-height: 1.5;
+        }
+        .btn {
+            display: block;
+            width: 100%;
+            padding: 15px;
+            margin-bottom: 12px;
+            border: none;
+            border-radius: 8px;
+            background: #f0f2f5;
+            color: #333;
+            font-size: 1rem;
+            cursor: pointer;
+            transition: all 0.2s;
+            text-decoration: none;
+            font-weight: 500;
+        }
+        .btn:hover {
+            background: #e4e6e9;
+        }
+        .btn-primary {
+            background: #2E7D32;
+            color: white;
+            margin-top: 10px;
+        }
+        .btn-primary:hover {
+            background: #1B5E20;
+        }
+        .progress-bar {
+            height: 6px;
+            background: #eee;
+            border-radius: 3px;
+            margin-bottom: 30px;
+            overflow: hidden;
+        }
+        .progress-fill {
+            height: 100%;
+            background: #2E7D32;
+            width: 20%;
+            transition: width 0.3s;
+        }
+        .hidden {
+            display: none;
+        }
+    </style>
+</head>
+<body>
+
+<div class="quiz-container" id="quiz-box">
+    <div class="logo">ЛАД: Согласование и Проектирование</div>
+
+    <div id="step-1">
+        <div class="progress-bar"><div class="progress-fill" style="width: 25%"></div></div>
+        <h1>Начнем! Где находится объект?</h1>
+        <p>Это поможет нам учесть региональные нормы (ПП №508 в Москве и др.)</p>
+        <button class="btn" onclick="nextStep(2, 'Москва')">Москва</button>
+        <button class="btn" onclick="nextStep(2, 'Московская область')">Московская область</button>
+        <button class="btn" onclick="nextStep(2, 'Другой город')">Другой регион</button>
+    </div>
+
+    <div id="step-2" class="hidden">
+        <div class="progress-bar"><div class="progress-fill" style="width: 50%"></div></div>
+        <h1>Тип дома</h1>
+        <p>В панельных домах многие стены несущие, в кирпичных — больше свободы.</p>
+        <button class="btn" onclick="nextStep(3, 'Панельный')">Панельный</button>
+        <button class="btn" onclick="nextStep(3, 'Кирпичный')">Кирпичный</button>
+        <button class="btn" onclick="nextStep(3, 'Монолитный')">Монолитный / Новостройка</button>
+    </div>
+
+    <div id="step-3" class="hidden">
+        <div class="progress-bar"><div class="progress-fill" style="width: 75%"></div></div>
+        <h1>Что планируете сделать?</h1>
+        <p>Выберите наиболее подходящий вариант</p>
+        <button class="btn" onclick="nextStep(4, 'Объединение санузла')">Объединение санузла</button>
+        <button class="btn" onclick="nextStep(4, 'Снос стены')">Снос стены / Проем</button>
+        <button class="btn" onclick="nextStep(4, 'Перенос кухни')">Перенос кухни</button>
+        <button class="btn" onclick="nextStep(4, 'Другое')">Другое</button>
+    </div>
+
+    <div id="step-4" class="hidden">
+        <div class="progress-bar"><div class="progress-fill" style="width: 100%"></div></div>
+        <h1>Почти готово!</h1>
+        <p>Антон готов проанализировать ваши ответы и дать бесплатную консультацию в Telegram.</p>
+        <a href="https://t.me/LadBot?start=quiz_land" class="btn btn-primary">Получить результат в Telegram</a>
+        <p style="font-size: 0.8rem; margin-top: 15px;">Это бесплатно и займет 1 минуту.</p>
+    </div>
+</div>
+
+<script>
+    let answers = {};
+    function nextStep(step, answer) {
+        answers['step' + (step-1)] = answer;
+
+        // Hide all steps
+        document.getElementById('step-1').classList.add('hidden');
+        document.getElementById('step-2').classList.add('hidden');
+        document.getElementById('step-3').classList.add('hidden');
+        document.getElementById('step-4').classList.add('hidden');
+
+        // Show current step
+        document.getElementById('step-' + step).classList.remove('hidden');
+    }
+</script>
+
+</body>
+</html>

@@ -1,5 +1,5 @@
 #!/bin/bash
-# Deployment script for Timeweb server - LAD V KVARTIRE
+# Deployment script for Timeweb server - LAD EXPERT
 
 echo "Pulling latest changes from the branch..."
 # Replace with the actual branch name if not master
@@ -11,7 +11,7 @@ pip install -r requirements.txt
 echo "Running database migrations..."
 python3 database.py
 
-echo "Restarting the Unified Bot (LAD V KVARTIRE)..."
+echo "Restarting the Unified Bot (LAD EXPERT)..."
 pkill -f bot_unified.py || true
 nohup python3 bot_unified.py > bot.log 2>&1 &
 
