@@ -12,7 +12,7 @@ from typing import Optional
 
 load_dotenv()
 
-BOT_TOKEN = os.getenv("TELEGRAM_TOKEN")
+BOT_TOKEN = os.getenv("TELEGRAM_TOKEN") or os.getenv("BOT_TOKEN")
 YANDEX_API_KEY = os.getenv("YANDEX_API_KEY")
 FOLDER_ID = os.getenv("FOLDER_ID")
 
@@ -38,8 +38,8 @@ os.makedirs(UPLOAD_PLANS_DIR, exist_ok=True)
 os.makedirs(UPLOAD_DIR, exist_ok=True)
 os.makedirs(KNOWLEDGE_DIR, exist_ok=True)
 
-if not os.getenv("TELEGRAM_TOKEN"):
-    raise RuntimeError("BOT_TOKEN must be set in .env")
+if not BOT_TOKEN:
+    raise RuntimeError("TELEGRAM_TOKEN or BOT_TOKEN must be set in .env")
 if not YANDEX_API_KEY or not FOLDER_ID:
     raise RuntimeError("YANDEX_API_KEY and FOLDER_ID must be set in .env")
 
