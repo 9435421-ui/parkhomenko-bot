@@ -447,7 +447,8 @@ def start_handler(message):
     user_id = message.chat.id
     consent = get_user_consent(user_id)
 
-    if not consent.privacy_accepted:
+    # ВСЕГДА показываем приветствие если согласий нет
+    if not (consent.privacy_accepted and consent.notifications_accepted):
         show_privacy_consent(user_id)
         return
 
@@ -696,7 +697,7 @@ def mode_select_handler(call):
     # Выбор режима работы
     if call.data == "mode_quiz":
         state.mode = BotModes.QUIZ
-        state.quiz_step = 2  # По умолчанию начинаем с шага 2
+        state.quiz_step = 3  # Начинаем сразу с выбора объекта (пропускаем доп. контакт)
 
         # Извлекаем данные из истории диалога если есть
         if state.dialog_history:
