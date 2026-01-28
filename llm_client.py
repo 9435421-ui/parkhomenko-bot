@@ -23,8 +23,8 @@ def call_llm(system_prompt, user_message):
     headers = {
         "Authorization": f"Bearer {OPENROUTER_API_KEY}",
         "Content-Type": "application/json",
-        "HTTP-Referer": "https://lad-v-kvartire.ru", # Optional
-        "X-Title": "LAD EXPERT Bot" # Optional
+        "HTTP-Referer": "https://terion-expert.ru", # Updated
+        "X-Title": "TERION Expert Bot" # Updated
     }
 
     payload = {
@@ -42,4 +42,4 @@ def call_llm(system_prompt, user_message):
         return result['choices'][0]['message']['content']
     except Exception as e:
         logger.error(f"Error calling OpenRouter: {e}")
-        return f"Извините, сейчас я испытываю трудности с ответом. Пожалуйста, обратитесь к нашему эксперту Юлии напрямую. {e}"
+        return f"Извините, сейчас я испытываю трудности с ответом. Пожалуйста, обратитесь к эксперту компании ТЕРИОН напрямую. {e}"

@@ -64,6 +64,7 @@ class Database:
                 city {text_type},
                 change_plan {text_type},
                 bti_status {text_type},
+                    scenario {text_type},
                 created_at TIMESTAMP DEFAULT {timestamp_default}
             )
         """
@@ -113,17 +114,17 @@ class Database:
             cur.execute(news_sql)
 
     def save_lead(self, name, phone, extra_contact=None, object_type=None,
-                       city=None, change_plan=None, bti_status=None):
+                       city=None, change_plan=None, bti_status=None, scenario=None):
         query = """
-            INSERT INTO leads (name, phone, extra_contact, object_type, city, change_plan, bti_status)
-            VALUES (%s, %s, %s, %s, %s, %s, %s)
+            INSERT INTO leads (name, phone, extra_contact, object_type, city, change_plan, bti_status, scenario)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
         """ if self.is_postgres else """
-            INSERT INTO leads (name, phone, extra_contact, object_type, city, change_plan, bti_status)
-            VALUES (?, ?, ?, ?, ?, ?, ?)
+            INSERT INTO leads (name, phone, extra_contact, object_type, city, change_plan, bti_status, scenario)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
         """
         with self._get_cursor() as cur:
             cur.execute(query, (name, phone, extra_contact, object_type,
-                                city, change_plan, bti_status))
+                                city, change_plan, bti_status, scenario))
 
     def save_post(self, post_type, title, body, cta, publish_date, image_prompt=None, image_url=None):
         placeholder = "%s" if self.is_postgres else "?"
@@ -296,6 +297,24 @@ class Database:
                     upcoming.append(s)
             except: continue
         return sorted(upcoming, key=lambda x: x["days_until_birthday"])
+
+    def get_daily_stats(self):
+        """Возвращает статистику по лидам за последние 24 часа"""
+        if self.is_postgres:
+            query = "SELECT scenario, COUNT(*) as count FROM leads WHERE created_at > NOW() - INTERVAL '1 day' GROUP BY scenario"
+        else:
+            query = "SELECT scenario, COUNT(*) as count FROM leads WHERE created_at > datetime('now', '-1 day') GROUP BY scenario"
+            # Но в моей таблице leads нет поля scenario! Оно передается в save_lead_and_notify но не сохраняется в БД!
+            # Нужно добавить поле scenario в таблицу leads.
+
+        # Для начала просто вернем общее кол-во
+        query_total = "SELECT COUNT(*) FROM leads WHERE created_at > " + ("NOW() - INTERVAL '1 day'" if self.is_postgres else "datetime('now', '-1 day')")
+
+        with self._get_cursor() as cur:
+            cur.execute(query_total)
+            row = cur.fetchone()
+            total = row[0] if not self.is_postgres else row['count'] # row['count'] если именованный
+            return {"total": total}
 
 db = Database()
 if __name__ == "__main__":
