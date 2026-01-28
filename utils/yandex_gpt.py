@@ -13,6 +13,7 @@ class YandexGPTClient:
         self.api_key = os.getenv("YANDEX_API_KEY")
         self.folder_id = os.getenv("FOLDER_ID")
         self.endpoint = "https://llm.api.cloud.yandex.net/foundationModels/v1/completion"
+        self.max_prompt_length = 3000  # Максимальная длина промпта в символах
         
         if not self.api_key or not self.folder_id:
             raise ValueError("YANDEX_API_KEY and FOLDER_ID must be set in environment")
@@ -38,6 +39,13 @@ class YandexGPTClient:
         Returns:
             str: Ответ от модели
         """
+        # Проверка длины промпта
+        prompt_length = len(user_prompt) + (len(system_prompt) if system_prompt else 0)
+        if prompt_length > self.max_prompt_length:
+            print(f"⚠️ ОШИБКА: Длина промпта ({prompt_length} символов) превышает лимит ({self.max_prompt_length} символов)")
+            print(f"⚠️ Запрос не будет отправлен для экономии средств")
+            return "Извините, запрос слишком большой. Пожалуйста, сформулируйте вопрос короче."
+        
         headers = {
             "Authorization": f"Api-Key {self.api_key}",
             "Content-Type": "application/json"
