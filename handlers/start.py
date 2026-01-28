@@ -18,3 +18,31 @@ async def handle_start(message: Message, state: FSMContext):
         reply_markup=get_consent_keyboard()
     )
     await state.update_data(_payload=payload)
+
+
+@router.message(F.text == "✅ Согласен и хочу продолжить")
+async def handle_consent(message: Message, state: FSMContext):
+    """Обработка согласия пользователя"""
+    data = await state.get_data()
+    payload = data.get('_payload', '')
+    
+    if payload == 'quiz':
+        # Запуск квиза
+        await state.set_state(QuizOrder.city)
+        await message.answer("📋 Кто вы? (Собственник/Дизайнер/Застройщик/Инвестор/Другое)")
+    elif payload == 'invest':
+        # Запуск инвестиционного калькулятора
+        await state.set_state(QuizOrder.city)
+        await message.answer("💰 Давайте оценим капитализацию вашего объекта после перепланировки. Какой город?")
+    elif payload == 'expert':
+        # Запуск экспертизы
+        await state.set_state(QuizOrder.city)
+        await message.answer("🔍 Какой тип недвижимости? (Жилая/Коммерческая/Инвестиционная)")
+        await message.answer("❓ Есть ли ипотека/банк на объекте?")
+    elif payload == 'price':
+        # Запуск калькулятора стоимости услуг
+        await state.set_state(QuizOrder.city)
+        await message.answer("🧮 Давайте рассчитаем стоимость наших услуг. Какой тип объекта?")
+    else:
+        # Стандартное главное меню
+        await message.answer("Выберите действие:", reply_markup=get_main_menu())
