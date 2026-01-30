@@ -272,6 +272,14 @@ class Database:
             await cur.execute(query, (post_id,))
         await self.conn.commit()
 
+    async def get_jk_stats(self):
+        """Получить статистику по ЖК"""
+        query = "SELECT source, COUNT(*) as count FROM leads WHERE source IS NOT NULL GROUP BY source ORDER BY count DESC"
+        async with self.conn.cursor() as cur:
+            await cur.execute(query)
+            rows = await cur.fetchall()
+            return [dict(row) for row in rows]
+
     async def get_all_posts(self, limit=50):
         """Получить все посты для просмотра"""
         query = f"""
