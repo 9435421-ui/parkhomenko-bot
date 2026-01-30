@@ -29,4 +29,34 @@ async def cmd_schedule(message: Message):
 
 @router.message(Command("publish_now"))
 async def cmd_publish_now(message: Message):
-    await message.answer("🚀 Мгновенная публикация: отправьте /publish_now [ID]\nПост должен иметь статус APPROVED.")
+    args = message.text.split()
+    if len(args) < 2:
+        await message.answer("🚀 Мгновенная публикация: отправьте /publish_now [ID]\nПост должен иметь статус APPROVED.")
+        return
+
+    try:
+        item_id = int(args[1])
+    except ValueError:
+        await message.answer("❌ ID должен быть числом.")
+        return
+
+    # Получаем айтем и проверяем статус
+    async with db.conn.execute("SELECT status, bot_name FROM content_items WHERE id = ?", (item_id,)) as cursor:
+        item = await cursor.fetchone()
+        if not item:
+            await message.answer("❌ Пост не найден.")
+            return
+
+        if item['status'] != 'approved':
+            await message.answer(f"❌ Пост должен иметь статус APPROVED (текущий: {item['status']}).")
+            return
+
+    from services.publisher_tg import TelegramPublisher
+    publisher = TelegramPublisher(message.bot)
+
+    success = await publisher.publish_item(item_id, bot_name=item['bot_name'])
+
+    if success:
+        await message.answer(f"✅ Пост #{item_id} успешно опубликован через {item['bot_name']}!")
+    else:
+        await message.answer(f"❌ Ошибка при публикации поста #{item_id}. Проверьте логи.")

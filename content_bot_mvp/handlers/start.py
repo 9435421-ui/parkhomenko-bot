@@ -20,4 +20,26 @@ async def cmd_start(message: Message):
         "Используйте меню для управления контент-планом и публикациями."
     )
 
-# Добавим метод получения пользователя в БД (нужно обновить db.py)
+@router.message(Command("add_bot_config"))
+async def cmd_add_bot(message: Message, role: str):
+    if role != 'ADMIN':
+        await message.answer("❌ У вас нет прав для выполнения этой команды.")
+        return
+
+    args = message.text.split()
+    if len(args) < 4:
+        await message.answer("📝 Формат: /add_bot_config [name] [token] [channel_id] [description...]")
+        return
+
+    bot_name = args[1]
+    token = args[2]
+    try:
+        channel_id = int(args[3])
+    except ValueError:
+        await message.answer("❌ Channel ID должен быть числом.")
+        return
+
+    description = " ".join(args[4:]) if len(args) > 4 else ""
+
+    await db.add_bot_config(bot_name, token, channel_id, description)
+    await message.answer(f"✅ Бот {bot_name} успешно сконфигурирован для канала {channel_id}!")

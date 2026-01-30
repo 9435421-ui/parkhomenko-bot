@@ -26,69 +26,89 @@ class ContentDatabase:
                 )
             """)
 
-            # Каналы публикации
+            # Таблица ботов и каналов для публикации
             await cursor.execute("""
-                CREATE TABLE IF NOT EXISTS channels (
+                CREATE TABLE IF NOT EXISTS bots_channels (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    channel_id INTEGER UNIQUE,
-                    title TEXT,
-                    channel_type TEXT, -- main, agent
-                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                    bot_name TEXT UNIQUE,
+                    token TEXT,
+                    channel_id INTEGER,
+                    description TEXT,
+                    last_post_status TEXT,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                 )
             """)
 
-            # Контент-план
+            # Единицы контента (Content Items)
+            await cursor.execute("""
+                CREATE TABLE IF NOT EXISTS content_items (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    title TEXT,
+                    body TEXT,
+                    image_prompt TEXT,
+                    image_url TEXT,
+                    status TEXT DEFAULT 'idea', -- idea, draft, review, approved, scheduled, published
+                    bot_name TEXT, -- Имя бота из bots_channels
+                    cta_type TEXT,
+                    cta_link TEXT,
+                    created_by INTEGER,
+                    approved_by INTEGER,
+                    telegram_message_id TEXT,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY (bot_name) REFERENCES bots_channels(bot_name)
+                )
+            """)
+
+            # План публикаций (Content Plan)
             await cursor.execute("""
                 CREATE TABLE IF NOT EXISTS content_plan (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    theme TEXT,
-                    post_type TEXT, -- expert, educational, sales, engaging
-                    target_date DATE,
-                    status TEXT DEFAULT 'planned', -- planned, in_progress, completed
+                    content_item_id INTEGER,
+                    scheduled_at DATETIME,
+                    channel_id INTEGER,
+                    published_at TIMESTAMP,
+                    published BOOLEAN DEFAULT 0,
+                    error_log TEXT,
+                    FOREIGN KEY (content_item_id) REFERENCES content_items(id)
+                )
+            """)
+
+            # Дни рождения (Birthdays)
+            await cursor.execute("""
+                CREATE TABLE IF NOT EXISTS birthdays (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    user_id INTEGER,
+                    name TEXT,
+                    birth_date DATE,
+                    sent BOOLEAN DEFAULT 0,
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                 )
             """)
 
-            # Посты
-            await cursor.execute("""
-                CREATE TABLE IF NOT EXISTS posts (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    plan_id INTEGER,
-                    channel_id INTEGER,
-                    text TEXT,
-                    image_prompt TEXT,
-                    image_url TEXT,
-                    status TEXT DEFAULT 'draft', -- draft, pending, approved, published
-                    created_by INTEGER,
-                    approved_by INTEGER,
-                    published_at TIMESTAMP,
-                    source_tag TEXT DEFAULT 'content_bot',
-                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    FOREIGN KEY (plan_id) REFERENCES content_plan(id),
-                    FOREIGN KEY (channel_id) REFERENCES channels(id)
-                )
-            """)
-
-            # Лог аудита
+            # Лог аудита (Audit Log)
             await cursor.execute("""
                 CREATE TABLE IF NOT EXISTS audit_log (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    user_id INTEGER,
                     action TEXT,
-                    target_type TEXT, -- post, plan, user
-                    target_id INTEGER,
+                    bot_name TEXT,
+                    channel_id INTEGER,
+                    status TEXT,
+                    user_id INTEGER,
                     details TEXT,
-                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                    timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                 )
             """)
 
             await self.conn.commit()
 
-    async def log_action(self, user_id: int, action: str, target_type: str, target_id: int, details: str = ""):
+    async def log_action(self, user_id: int, action: str, details: str = "", bot_name: str = None, channel_id: int = None, status: str = None):
         async with self.conn.cursor() as cursor:
             await cursor.execute(
-                "INSERT INTO audit_log (user_id, action, target_type, target_id, details) VALUES (?, ?, ?, ?, ?)",
-                (user_id, action, target_type, target_id, details)
+                """INSERT INTO audit_log (user_id, action, details, bot_name, channel_id, status)
+                   VALUES (?, ?, ?, ?, ?, ?)""",
+                (user_id, action, details, bot_name, channel_id, status)
             )
             await self.conn.commit()
 
@@ -104,6 +124,37 @@ class ContentDatabase:
                 (telegram_id, username, role)
             )
             await self.conn.commit()
+
+    async def get_bot_config(self, bot_name: str):
+        async with self.conn.cursor() as cursor:
+            await cursor.execute("SELECT * FROM bots_channels WHERE bot_name = ?", (bot_name,))
+            return await cursor.fetchone()
+
+    async def update_bot_status(self, bot_name: str, status: str):
+        async with self.conn.cursor() as cursor:
+            await cursor.execute(
+                "UPDATE bots_channels SET last_post_status = ?, updated_at = ? WHERE bot_name = ?",
+                (status, datetime.now(), bot_name)
+            )
+            await self.conn.commit()
+
+    async def add_bot_config(self, bot_name: str, token: str, channel_id: int, description: str = ""):
+        async with self.conn.cursor() as cursor:
+            await cursor.execute(
+                """INSERT OR REPLACE INTO bots_channels (bot_name, token, channel_id, description)
+                   VALUES (?, ?, ?, ?)""",
+                (bot_name, token, channel_id, description)
+            )
+            await self.conn.commit()
+
+    async def update_item_status(self, item_id: int, status: str, user_id: int):
+        async with self.conn.cursor() as cursor:
+            await cursor.execute(
+                "UPDATE content_items SET status = ?, updated_at = ? WHERE id = ?",
+                (status, datetime.now(), item_id)
+            )
+            await self.conn.commit()
+            await self.log_action(user_id, f"status_change_{status}", f"Item ID: {item_id}", status=status)
 
 # Singleton
 db = ContentDatabase()
