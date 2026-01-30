@@ -22,7 +22,7 @@ class QuizOrder(StatesGroup):
 async def handle_phone(message: Message, state: FSMContext):
     # Мгновенное сохранение лида
     from utils.time_utils import is_working_hours
-    from database import db
+    from database.db import db
     from services.lead_service import lead_service
 
     phone = message.text.strip()
@@ -46,21 +46,19 @@ async def handle_phone(message: Message, state: FSMContext):
     data = await state.get_data()
     payload = data.get('_payload', '')
 
+    # Все пути в этом квизе ведут к вопросу о городе
+    await state.set_state(QuizOrder.city)
+
     if payload == 'invest':
-        await state.set_state(QuizOrder.city)
-        await message.answer("✅ Контакт сохранен. 💰 Давайте оценим капитализацию вашего объекта после перепланировки. Какой город?")
+        await message.answer("✅ Контакт сохранен. 💰 Давайте оценим капитализацию вашего объекта. В каком городе он находится?")
     elif payload == 'expert':
-        await state.set_state(QuizOrder.city)
-        await message.answer("✅ Контакт сохранен. 🔍 Какой тип недвижимости? (Жилая/Коммерческая/Инвестиционная)")
+        await message.answer("✅ Контакт сохранен. 🔍 Начнем экспертную оценку. В каком городе находится объект?")
     elif payload == 'price':
-        await state.set_state(QuizOrder.city)
-        await message.answer("✅ Контакт сохранен. 🧮 Давайте рассчитаем стоимость наших услуг. Какой тип объекта?")
+        await message.answer("✅ Контакт сохранен. 🧮 Рассчитаем стоимость. В каком городе находится объект?")
     elif payload == 'quiz':
-        await state.set_state(QuizOrder.city)
-        await message.answer("✅ Контакт сохранен. 📋 Кто вы? (Собственник/Дизайнер/Застройщик/Инвестор/Другое)")
+        await message.answer("✅ Контакт сохранен. 📋 Для начала, в каком городе находится объект?")
     else:
-        await state.set_state(QuizOrder.city)
-        await message.answer("✅ Контакт сохранен. Для подготовки предложения ответьте на несколько вопросов.\n\nВ каком городе находится объект?")
+        await message.answer("✅ Контакт сохранен. Для подготовки предложения, в каком городе находится объект?")
 
 
 @router.message(QuizOrder.city)
@@ -111,7 +109,7 @@ async def finish_quiz(message: Message, state: FSMContext):
     data = await state.get_data()
 
     # Дополняем лид в БД
-    from database import db
+    from database.db import db
     await db.save_lead(
         message.from_user.id,
         city=data.get('city'),
