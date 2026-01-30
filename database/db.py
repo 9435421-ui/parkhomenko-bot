@@ -95,6 +95,8 @@ class Database:
                     remodeling_status TEXT,
                     change_plan TEXT,
                     bti_status TEXT,
+                    qualification_started BOOLEAN DEFAULT 0,
+                    night_lead BOOLEAN DEFAULT 0,
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                     sent_to_group BOOLEAN DEFAULT 0,
                     FOREIGN KEY (user_id) REFERENCES users(user_id)
@@ -247,23 +249,46 @@ class Database:
     async def save_lead(
         self,
         user_id: int,
-        name: str,
-        phone: str,
         **kwargs
     ) -> int:
-        """Сохранить лид в базу данных"""
+        """Сохранить или обновить лид в базе данных (upsert за последние 24 часа)"""
         async with self.conn.cursor() as cursor:
-            columns = ['user_id', 'name', 'phone'] + list(kwargs.keys())
-            values = [user_id, name, phone] + list(kwargs.values())
-            placeholders = ", ".join(["?" for _ in columns])
-            
+            # Проверяем наличие недавнего лида
             await cursor.execute(
-                f"""INSERT INTO leads ({', '.join(columns)})
-                    VALUES ({placeholders})""",
-                values
+                """SELECT id FROM leads
+                   WHERE user_id = ? AND created_at > datetime('now', '-1 day')
+                   ORDER BY created_at DESC LIMIT 1""",
+                (user_id,)
             )
-            await self.conn.commit()
-            return cursor.lastrowid
+            row = await cursor.fetchone()
+
+            if row:
+                # Обновление
+                lead_id = row[0]
+                if not kwargs:
+                    return lead_id
+
+                set_clause = ", ".join([f"{k} = ?" for k in kwargs.keys()])
+                values = list(kwargs.values()) + [lead_id]
+                await cursor.execute(
+                    f"UPDATE leads SET {set_clause} WHERE id = ?",
+                    values
+                )
+                await self.conn.commit()
+                return lead_id
+            else:
+                # Создание
+                kwargs['user_id'] = user_id
+                columns = list(kwargs.keys())
+                placeholders = ", ".join(["?" for _ in columns])
+
+                await cursor.execute(
+                    f"""INSERT INTO leads ({', '.join(columns)})
+                        VALUES ({placeholders})""",
+                    list(kwargs.values())
+                )
+                await self.conn.commit()
+                return cursor.lastrowid
     
     async def get_leads(
         self,
