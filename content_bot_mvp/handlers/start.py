@@ -39,7 +39,7 @@ async def cmd_add_bot(message: Message, role: str):
         await message.answer("❌ Channel ID должен быть числом.")
         return
 
-    description = " ".join(args[4:]) if len(args) > 4 else ""
+    notes = " ".join(args[4:]) if len(args) > 4 else ""
 
-    await db.add_bot_config(bot_name, token, channel_id, description)
+    await db.add_bot_config(bot_name, token, tg_channel_id=str(channel_id), notes=notes)
     await message.answer(f"✅ Бот {bot_name} успешно сконфигурирован для канала {channel_id}!")

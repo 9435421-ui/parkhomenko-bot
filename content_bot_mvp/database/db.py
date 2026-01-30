@@ -30,13 +30,16 @@ class ContentDatabase:
             await cursor.execute("""
                 CREATE TABLE IF NOT EXISTS bots_channels (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    bot_name TEXT NOT NULL,
+                    bot_name TEXT UNIQUE NOT NULL,
                     bot_token TEXT NOT NULL,
                     tg_channel_id TEXT,
                     vk_group_id TEXT,
+                    lead_group_id TEXT,
                     platform TEXT NOT NULL, -- TG, VK, BOTH
                     last_published TIMESTAMP,
                     status TEXT DEFAULT 'active',
+                    is_archived BOOLEAN DEFAULT 0,
+                    notes TEXT,
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                 )
@@ -140,12 +143,14 @@ class ContentDatabase:
             )
             await self.conn.commit()
 
-    async def add_bot_config(self, bot_name: str, token: str, tg_channel_id: str = None, vk_group_id: str = None, platform: str = "TG"):
+    async def add_bot_config(self, bot_name: str, token: str, tg_channel_id: str = None, vk_group_id: str = None,
+                           lead_group_id: str = None, platform: str = "TG", is_archived: bool = False, notes: str = None):
         async with self.conn.cursor() as cursor:
             await cursor.execute(
-                """INSERT OR REPLACE INTO bots_channels (bot_name, bot_token, tg_channel_id, vk_group_id, platform)
-                   VALUES (?, ?, ?, ?, ?)""",
-                (bot_name, token, tg_channel_id, vk_group_id, platform)
+                """INSERT OR REPLACE INTO bots_channels
+                   (bot_name, bot_token, tg_channel_id, vk_group_id, lead_group_id, platform, is_archived, notes)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+                (bot_name, token, tg_channel_id, vk_group_id, lead_group_id, platform, is_archived, notes)
             )
             await self.conn.commit()
 
