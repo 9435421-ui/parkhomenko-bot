@@ -23,8 +23,8 @@ class TelegramPublisher:
                 logging.error(f"Bot config for {bot_name} not found")
                 return False
 
-            token = bot_config['token']
-            channel_id = bot_config['channel_id']
+            token = bot_config['bot_token']
+            channel_id = bot_config['tg_channel_id']
 
             # Создаем временный инстанс бота для отправки
             async with Bot(token=token) as current_bot:
@@ -40,13 +40,14 @@ class TelegramPublisher:
                 # Формируем текст
                 text = f"<b>{item['title']}</b>\n\n{item['body']}"
 
-                # Формируем клавиатуру (в MVP базово, можно расширить по cta_type)
+                # Формируем клавиатуру (в MVP базово, всегда ведем на основной бот ТЕРИОН)
+                # Если айтем из архивного бота, ссылка все равно ведет на TerionProjectBot
                 keyboard = InlineKeyboardMarkup(inline_keyboard=[
                     [InlineKeyboardButton(text="Задать вопрос эксперту 💬", url="https://t.me/TerionProjectBot?start=content_bot")]
                 ])
 
                 # Отправка
-                if item['image_url']:
+                if item['image_url'] and item['image_url'].startswith('http'):
                     msg = await current_bot.send_photo(
                         chat_id=channel_id,
                         photo=item['image_url'],
@@ -69,10 +70,10 @@ class TelegramPublisher:
                         "UPDATE content_items SET status = 'published', updated_at = ? WHERE id = ?",
                         (datetime.now(), item_id)
                     )
-                    # Добавляем запись в content_plan или обновляем существующую
+                    # Добавляем запись в content_plan
                     await cursor.execute(
-                        """INSERT INTO content_plan (content_item_id, publish_datetime, platform, published)
-                           VALUES (?, ?, 'telegram', 1)""",
+                        """INSERT INTO content_plan (content_item_id, published_at, published)
+                           VALUES (?, ?, 1)""",
                         (item_id, datetime.now())
                     )
                     await db.conn.commit()

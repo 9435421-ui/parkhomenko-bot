@@ -137,6 +137,7 @@ AI_INTRO_TEXT = (
 # --------- Утилиты ---------
 
 from utils.time_utils import get_moscow_now, is_working_hours
+from utils.geo_db import geo_db
 
 # Глобальный цикл для работы с БД
 db_loop = asyncio.new_event_loop()
@@ -346,8 +347,47 @@ def generate_manager_brief(chat_id: int) -> str:
 # --------- YandexGPT + RAG ---------
 
 
+def build_system_prompt_with_jk(chat_id):
+    state = get_user_state(chat_id)
+    jk_info_text = ""
+
+    # Пытаемся найти инфо о ЖК в городе/параметрах
+    if state.city:
+        for jk_name in ["ЖК Сердце Столицы", "ЖК Символ", "ЖК Зиларт"]:
+            if jk_name.lower() in state.city.lower():
+                jk_info = geo_db.get_jk_info(jk_name)
+                if jk_info:
+                    jk_info_text = (
+                        f"\nКЛИЕНТ ИЗ {jk_name.upper()}:\n"
+                        f"- Район: {jk_info['district']}\n"
+                        f"- Застройщик: {jk_info['developer']}\n"
+                        f"- Тип дома: {jk_info['house_type']}\n"
+                        f"- Особенности: {jk_info['features']}\n"
+                        "Учитывай эти технические параметры в ответах!"
+                    )
+                break
+
+    return (
+        "Ты - ИИ-консультант по перепланировкам в компании «ТЕРИОН». "
+        f"{jk_info_text}"
+        "\n\nКРИТИЧЕСКИ ВАЖНО:\n\n"
+        "1. РАБОТА С БАЗОЙ ЗНАНИЙ:\n"
+        "- ИСПОЛЬЗУЙ ТОЛЬКО информацию из базы знаний (контекст в промпте)\n"
+        "- НЕ выдумывай и НЕ додумывай информацию\n"
+        "- Если информации нет в базе — дай общий ответ на основе своих знаний о перепланировках\n\n"
+        "2. СТИЛЬ ОТВЕТОВ:\n"
+        "- Максимум 2-3 предложения (не больше!)\n"
+        "- Конкретно и по делу, без 'воды'\n"
+        "- НЕ задавай лишних вопросов про дизайн/стиль, если клиент про юридику\n\n"
+        "3. ЛОГИКА КОНСУЛЬТАЦИИ:\n"
+        "- Если клиент спрашивает про документы/согласование — кратко перечисли этапы из базы\n"
+        "- После 2-х ответов предлагай оставить заявку для детальной консультации\n\n"
+        "4. ПЕРЕХОД К СПЕЦИАЛИСТУ:\n"
+        "- Если клиент просит связать со специалистом — подтверди и уточни удобное время\n"
+    )
+
 def call_yandex_gpt(
-    prompt: str, user_name: str = None, model: str = "yandexgpt"
+    prompt: str, user_name: str = None, model: str = "yandexgpt", chat_id: int = None
 ) -> str:
     try:
         headers = {
@@ -356,6 +396,10 @@ def call_yandex_gpt(
         }
 
         greeting = f"{user_name}, " if user_name else ""
+
+        system_text = build_system_prompt_with_jk(chat_id) if chat_id else "Ты - ИИ-консультант по перепланировкам в компании «ТЕРИОН»."
+        if user_name:
+            system_text += f"\nОбращайся по имени: {user_name}"
 
         data = {
             "modelUri": f"gpt://{FOLDER_ID}/{model}/latest",
@@ -367,24 +411,7 @@ def call_yandex_gpt(
             "messages": [
                 {
                     "role": "system",
-                    "text": (
-                        "Ты - ИИ-консультант по перепланировкам в компании «ТЕРИОН». "
-                        "\n\nКРИТИЧЕСКИ ВАЖНО:\n\n"
-                        "1. РАБОТА С БАЗОЙ ЗНАНИЙ:\n"
-                        "- ИСПОЛЬЗУЙ ТОЛЬКО информацию из базы знаний (контекст в промпте)\n"
-                        "- НЕ выдумывай и НЕ додумывай информацию\n"
-                        "- Если информации нет в базе — дай общий ответ на основе своих знаний о перепланировках\n\n"
-                        "2. СТИЛЬ ОТВЕТОВ:\n"
-                        "- Максимум 2-3 предложения (не больше!)\n"
-                        "- Конкретно и по делу, без 'воды'\n"
-                        "- НЕ задавай лишних вопросов про дизайн/стиль, если клиент про юридику\n\n"
-                        "3. ЛОГИКА КОНСУЛЬТАЦИИ:\n"
-                        "- Если клиент спрашивает про документы/согласование — кратко перечисли этапы из базы\n"
-                        "- После 2-х ответов предлагай оставить заявку для детальной консультации\n\n"
-                        "4. ПЕРЕХОД К СПЕЦИАЛИСТУ:\n"
-                        "- Если клиент просит связать со специалистом — подтверди и уточни удобное время\n\n"
-                        f"5. Обращайся по имени: {greeting if user_name else ''}"
-                    ),
+                    "text": system_text,
                 },
                 {"role": "user", "text": prompt},
             ],
@@ -478,7 +505,17 @@ def transcribe_audio(file_path: str) -> str:
 @bot.message_handler(commands=["start"])
 def start_handler(message):
     user_id = message.chat.id
+    state = get_user_state(user_id)
     consent = get_user_consent(user_id)
+
+    # Обработка Deep-Linking (ЖК)
+    if " " in message.text:
+        jk_param = message.text.split(" ", 1)[1]
+        jk_info = geo_db.get_jk_info(jk_param)
+        if jk_info:
+            state.city = f"Москва, {jk_param}"
+            # Сохраняем информацию о ЖК в state для промпта
+            state.extra_contact = f"Лид из {jk_param}"
 
     # ВСЕГДА показываем приветствие если согласий нет
     if not (consent.privacy_accepted and consent.notifications_accepted):
@@ -1121,7 +1158,7 @@ def dialog_handler(message):
 5. Каждое сообщение должно ПРОДВИГАТЬ диалог вперёд, а не повторять предыдущее
 """
 
-    response = call_yandex_gpt(full_prompt, user_name=state.name)
+    response = call_yandex_gpt(full_prompt, user_name=state.name, chat_id=chat_id)
 
     state.dialog_history.append({"role": "assistant", "text": response})
     bot.send_message(chat_id, response)
@@ -1877,6 +1914,33 @@ def content_callback_handler(call):
             print(f"Failed to send deletion log: {e}")
 
         bot.answer_callback_query(call.id, "❌ Пост удалён")
+
+
+# ========== ГРУППОВОЙ РЕЖИМ (Privacy Mode) ==========
+
+@bot.message_handler(func=lambda m: m.chat.type in ['group', 'supergroup'])
+def group_handler(message):
+    """Реакция в группах только на упоминание бота или ключевые слова"""
+    bot_username = bot.get_me().username
+    is_mentioned = False
+
+    if message.entities:
+        for entity in message.entities:
+            if entity.type == 'mention':
+                mention = message.text[entity.offset:entity.offset+entity.length]
+                if bot_username in mention:
+                    is_mentioned = True
+                    break
+
+    keywords = ["перепланировка", "снос стены", "узаконить", "бти", "проект", "согласование"]
+    has_keyword = any(kw in message.text.lower() for kw in keywords)
+
+    if is_mentioned or has_keyword:
+        # Отвечаем как ИИ-консультант
+        rag_context = get_rag_context(message.text)
+        prompt = f"Вопрос из группы: {message.text}\nКонтекст: {rag_context}\nОтветь кратко и предложи перейти в ЛС для детальной консультации."
+        response = call_yandex_gpt(prompt)
+        bot.reply_to(message, response)
 
 
 # ========== ЗАПУСК ==========

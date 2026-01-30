@@ -1,7 +1,7 @@
 from typing import Callable, Dict, Any, Awaitable
 from aiogram import BaseMiddleware
 from aiogram.types import Message, CallbackQuery
-from database.db import db
+from content_bot_mvp.database.db import db
 
 class RoleMiddleware(BaseMiddleware):
     async def __call__(
