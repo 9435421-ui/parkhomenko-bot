@@ -1,0 +1,6 @@
+aiogram>=3.13.0
+aiosqlite
+python-dotenv
+openai
+requests
+pydantic-settings
