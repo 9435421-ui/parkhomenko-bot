@@ -21,10 +21,17 @@ async def main():
     from database.db import db
     await db.connect()
 
+    # Middleware
+    from utils.role_middleware import RoleMiddleware
+    dp.message.middleware(RoleMiddleware())
+    dp.callback_query.middleware(RoleMiddleware())
+
     # Регистрация роутеров
     from handlers import start, planner
+    from handlers.admin import review
     dp.include_router(start.router)
     dp.include_router(planner.router)
+    dp.include_router(review.router)
 
     print("🚀 Контент-бот ТЕРИОН запущен")
     await dp.start_polling(bot)

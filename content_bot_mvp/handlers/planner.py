@@ -1,43 +1,60 @@
 from aiogram import Router, F
-from aiogram.types import Message, CallbackQuery
+from aiogram.types import Message
+from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import StatesGroup, State
-from services.content_generator import generator
 from database.db import db
 
 router = Router()
 
-class PostCreation(StatesGroup):
-    theme = State()
-    type = State()
-    editing = State()
+class PostStates(StatesGroup):
+    waiting_for_title = State()
+    waiting_for_body = State()
 
-@router.message(F.text == "📝 Создать пост")
-async def start_post_creation(message: Message, state: FSMContext):
-    await state.set_state(PostCreation.theme)
-    await message.answer("Введите тему поста (например: «Перепланировка кухни в хрущевке»):")
+@router.message(Command("new_post"))
+async def cmd_new_post(message: Message, state: FSMContext):
+    await message.answer("📝 Введите заголовок (тему) нового поста:")
+    await state.set_state(PostStates.waiting_for_title)
 
-@router.message(PostCreation.theme)
-async def process_theme(message: Message, state: FSMContext):
-    await state.update_data(theme=message.text)
-    await state.set_state(PostCreation.type)
-    # Здесь в идеале клавиатура с типами, но пока текстом для MVP
-    await message.answer("Выберите тип поста: экспертный, образовательный, продающий, вовлекающий")
+@router.message(PostStates.waiting_for_title)
+async def process_title(message: Message, state: FSMContext):
+    await state.update_data(title=message.text)
+    await message.answer("📥 Теперь введите основной текст поста:")
+    await state.set_state(PostStates.waiting_for_body)
 
-@router.message(PostCreation.type)
-async def process_type(message: Message, state: FSMContext):
+@router.message(PostStates.waiting_for_body)
+async def process_body(message: Message, state: FSMContext):
     data = await state.get_data()
-    theme = data['theme']
-    post_type = message.text
+    title = data['title']
+    body = message.text
 
-    await message.answer("⌛ Генерирую текст и промпт для изображения...")
+    # Сохраняем как идею/черновик
+    async with db.conn.cursor() as cursor:
+        await cursor.execute(
+            "INSERT INTO content_items (title, body, status, created_by) VALUES (?, ?, 'idea', ?)",
+            (title, body, message.from_user.id)
+        )
+        item_id = cursor.lastrowid
+        await db.conn.commit()
 
-    text = await generator.generate_post_text(theme, post_type)
-    prompt = await generator.generate_image_prompt(text)
+    await state.clear()
+    await message.answer(f"✅ Пост «{title}» сохранен со статусом IDEA (ID: {item_id}).\nИспользуйте /my_posts для управления.")
 
-    await state.update_data(text=text, prompt=prompt)
-    await state.set_state(PostCreation.editing)
+@router.message(Command("my_posts"))
+async def cmd_my_posts(message: Message):
+    async with db.conn.cursor() as cursor:
+        await cursor.execute(
+            "SELECT id, title, status FROM content_items WHERE created_by = ? ORDER BY created_at DESC LIMIT 10",
+            (message.from_user.id,)
+        )
+        rows = await cursor.fetchall()
 
-    preview = f"<b>ПРЕВЬЮ ПОСТА:</b>\n\n{text}\n\n<b>ПРОМПТ:</b>\n<i>{prompt}</i>"
-    await message.answer(preview, parse_mode="HTML")
-    await message.answer("Вы можете отредактировать текст (просто пришлите новый) или подтвердить публикацию.")
+    if not rows:
+        await message.answer("У вас пока нет созданных постов.")
+        return
+
+    text = "📂 Ваши последние посты:\n\n"
+    for row in rows:
+        text += f"ID: {row['id']} | [{row['status']}] {row['title']}\n"
+
+    await message.answer(text)
