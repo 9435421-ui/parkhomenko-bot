@@ -114,18 +114,18 @@ user_consents: dict[int, UserConsent] = {}
 
 PRIVACY_POLICY_TEXT = (
     "📋 Добро пожаловать в сервис консультаций по перепланировке "
-    "«Пархоменко и компания»!\n\n"
+    "«ТЕРИОН»!\n\n"
     "Перед началом работы необходимо:\n"
     "✅ Согласие на обработку персональных данных\n"
     "✅ Согласие на получение уведомлений\n\n"
-    "Наш AI-консультант Антон поможет вам, но помните:\n"
+    "Наш ИИ-консультант поможет вам, но помните:\n"
     "• Консультации носят информационный характер\n"
     "• Мы соблюдаем законодательство РФ"
 )
 
 AI_INTRO_TEXT = (
-    "🤖 Вас приветствует Антон, AI‑консультант по перепланировкам "
-    "в команде «Пархоменко и компания».\n\n"
+    "🤖 Вас приветствует ИИ‑консультант по перепланировкам "
+    "в команде «ТЕРИОН».\n\n"
     "Я могу:\n"
     "• Ответить на вопросы по нормам и требованиям\n"
     "• Помочь с оформлением заявки\n"
@@ -135,6 +135,15 @@ AI_INTRO_TEXT = (
 )
 
 # --------- Утилиты ---------
+
+from utils.time_utils import get_moscow_now, is_working_hours
+
+# Глобальный цикл для работы с БД
+db_loop = asyncio.new_event_loop()
+
+def run_async(coro):
+    """Вспомогательная функция для запуска асинхронных задач из синхронного кода"""
+    return db_loop.run_until_complete(coro)
 
 
 def get_user_state(user_id: int) -> UserState:
@@ -163,15 +172,20 @@ def show_privacy_consent(chat_id: int):
     markup.add(types.InlineKeyboardButton("✅ Согласен с политикой обработки ПД", callback_data="consent_privacy"))
     markup.add(types.InlineKeyboardButton("✅ Согласен с офертой", callback_data="consent_offer"))
     
-    text = (
-        "👋 Здравствуйте! Я Антон, <b>ИИ-помощник эксперта Пархоменко Юлии Владимировны</b> "
-        "по согласованию перепланировок.\n\n"
-        "Я помогу вам:\n"
-        "• Разобраться в нормах и требованиях\n"
-        "• Оценить возможность вашей перепланировки\n"
-        "• Оформить заявку на консультацию\n\n"
-        "Для продолжения необходимо ваше согласие:"
-    )
+    if is_working_hours():
+        text = (
+            "👋 Здравствуйте! Наш эксперт по согласованию перепланировок поможет вам:\n\n"
+            "• Разобраться в нормах и требованиях\n"
+            "• Оценить возможность вашей перепланировки\n"
+            "• Оформить заявку на консультацию\n\n"
+            "Для продолжения необходимо ваше согласие:"
+        )
+    else:
+        text = (
+            "Здравствуйте. Сейчас нерабочее время. Вы можете пройти опрос сейчас — "
+            "наш специалист изучит заявку в рабочее время.\n\n"
+            "Для продолжения необходимо ваше согласие:"
+        )
     bot.send_message(chat_id, text, reply_markup=markup, parse_mode="HTML")
 
 
@@ -184,7 +198,7 @@ def show_main_menu(chat_id: int):
     markup.add(
         types.InlineKeyboardButton("📝 Оставить заявку", callback_data="mode_quiz")
     )
-    bot.send_message(chat_id, "Чем Антон может вам помочь?", reply_markup=markup)
+    bot.send_message(chat_id, "Чем мы можем вам помочь?", reply_markup=markup)
 
 
 # --------- Лиды ---------
@@ -192,6 +206,25 @@ def show_main_menu(chat_id: int):
 
 def save_lead_and_notify(user_id: int):
     state = get_user_state(user_id)
+
+    # Сохраняем расширенные данные в БД
+    lead_data = {
+        "name": state.name,
+        "phone": state.phone,
+        "extra_contact": state.extra_contact,
+        "object_type": state.object_type,
+        "city": state.city,
+        "floor": state.floor,
+        "total_floors": state.total_floors,
+        "remodeling_status": state.remodeling_status,
+        "change_plan": state.change_plan,
+        "bti_status": state.bti_status
+    }
+    try:
+        run_async(db.save_lead(user_id, **lead_data))
+        print(f"✅ Лид обновлен в БД: {user_id}")
+    except Exception as e:
+        print(f"❌ Ошибка обновления лида в БД: {e}")
 
     lead_info = f"""
 📋 Новая заявка на перепланировку
@@ -203,7 +236,7 @@ def save_lead_and_notify(user_id: int):
 🏙️ Город: {state.city or 'не указан'}
 🛠️ Что хочет изменить: {state.change_plan or 'не указано'}
 📄 Статус БТИ: {state.bti_status or 'не указан'}
-🕐 Время: {datetime.datetime.now().strftime("%d.%m.%Y %H:%M")}
+🕐 Время: {get_moscow_now().strftime("%d.%m.%Y %H:%M")}
 👤 User ID: {user_id}
     """.strip()
 
@@ -267,7 +300,7 @@ def generate_manager_brief(chat_id: int) -> str:
     # Формируем полный текст диалога для анализа
     full_dialog = "\n".join(
         [
-            f"{'Клиент' if h['role'] == 'user' else 'Антон'}: {h['text']}"
+            f"{'Клиент' if h['role'] == 'user' else 'Консультант'}: {h['text']}"
             for h in state.dialog_history
         ]
     )
@@ -335,7 +368,7 @@ def call_yandex_gpt(
                 {
                     "role": "system",
                     "text": (
-                        "Ты - Антон, AI-консультант по перепланировкам в компании «Пархоменко и компания». "
+                        "Ты - ИИ-консультант по перепланировкам в компании «ТЕРИОН». "
                         "\n\nКРИТИЧЕСКИ ВАЖНО:\n\n"
                         "1. РАБОТА С БАЗОЙ ЗНАНИЙ:\n"
                         "- ИСПОЛЬЗУЙ ТОЛЬКО информацию из базы знаний (контекст в промпте)\n"
@@ -541,22 +574,31 @@ def initial_contact_handler(message):
     state.phone = message.contact.phone_number
     consent.contact_received = True
 
-    # МИНИМАЛЬНЫЙ ЛИД после получения контакта
-    contact_lead = f"""
-🆕 НОВЫЙ КОНТАКТ: {message.contact.first_name} {message.contact.last_name or ''}
-📞 Телефон: {state.phone}
-👤 User ID: {user_id}
-🕐 Время: {datetime.datetime.now().strftime("%d.%m.%Y %H:%M")}
-ℹ️ Статус: контакт получен, тип объекта и заявка ещё не оформлены
-    """.strip()
+    # МГНОВЕННОЕ СОХРАНЕНИЕ ЛИДА (ТЗ)
+    is_night = not is_working_hours()
+    lead_data = {
+        "name": message.contact.first_name,
+        "phone": state.phone,
+        "qualification_started": True,
+        "night_lead": is_night
+    }
+
+    # Сохраняем в БД
+    try:
+        run_async(db.save_lead(user_id, **lead_data))
+        print(f"✅ Лид сохранен в БД: {user_id}, {state.phone}")
+    except Exception as e:
+        print(f"❌ Ошибка сохранения лида в БД: {e}")
+
+    # Уведомление в группу
+    status_line = "🌙 Ночная заявка" if is_night else "Дневная заявка"
+    notification = f"⚠️ <b>Начата квалификация</b>\n<b>Телефон:</b> {state.phone}\n<b>Статус:</b> {status_line}"
 
     try:
-        bot.send_message(LEADS_GROUP_CHAT_ID, contact_lead)
-        print(
-            f"✅ Минимальный лид отправлен: {message.contact.first_name}, {state.phone}"
-        )
+        bot.send_message(LEADS_GROUP_CHAT_ID, notification, parse_mode="HTML")
+        print(f"✅ Уведомление о начале квалификации отправлено: {state.phone}")
     except Exception as e:
-        print(f"❌ Ошибка отправки минимального лида: {e}")
+        print(f"❌ Ошибка отправки уведомления: {e}")
 
     # Извлекаем имя из контакта
     contact_name = message.contact.first_name or ""
@@ -882,8 +924,8 @@ def quiz_handler(message):
         bot.send_message(
             chat_id,
             f"✅ Спасибо, {state.name}! Ваша заявка принята.\n\n"
-            f"Команда «Пархоменко и компания» свяжется с вами по номеру {state.phone} "
-            f"ежедневно с 10:00 до 20:00 по Москве для обсуждения деталей и предварительного расчёта.",
+            f"Команда «ТЕРИОН» свяжется с вами по номеру {state.phone} "
+            f"с 09:00 до 19:00 (Пн–Пт) по Москве для обсуждения деталей и предварительного расчёта.",
         )
         # Сброс состояния БЕЗ показа меню
         state.mode = None
@@ -992,18 +1034,19 @@ def dialog_handler(message):
     rag_context = get_rag_context(message.text)
 
     # Формируем историю диалога
+    # Формируем историю диалога
     history_text = ""
     if len(state.dialog_history) > 1:
         recent_history = state.dialog_history[-6:-1]
         history_text = "\n".join(
             [
-                f"{'Клиент' if h['role'] == 'user' else 'Антон'}: {h['text']}"
+                f"{'Клиент' if h['role'] == 'user' else 'Консультант'}: {h['text']}"
                 for h in recent_history
             ]
         )
 
     system_prompt = """
-Ты — Антон, ИИ-консультант «Пархоменко и компания» (Москва/МО, согласование перепланировок под ключ, 10+ лет).
+Ты — ИИ-консультант «ТЕРИОН» (согласование перепланировок под ключ, 10+ лет).
 
 ЖЕЛЕЗНЫЕ ПРАВИЛА:
 1. Читай историю — НЕ задавай вопросы, на которые клиент УЖЕ ответил
@@ -1093,7 +1136,7 @@ def dialog_handler(message):
 def build_system_prompt():
     """Общий system_prompt для dialog_handler и quick_handler"""
     return """
-Ты — Антон, ИИ-консультант «Пархоменко и компания» (Москва/МО, согласование перепланировок под ключ, 10+ лет).
+Ты — ИИ-консультант «ТЕРИОН» (согласование перепланировок под ключ, 10+ лет).
 
 ЖЕЛЕЗНЫЕ ПРАВИЛА:
 1. Читай историю — НЕ задавай вопросы, на которые клиент УЖЕ ответил
@@ -1146,7 +1189,7 @@ def build_history_text(state):
 
     recent_history = state.dialog_history[-6:-1]  # Последние 5 сообщений
     return "\n".join([
-        f"{'Клиент' if h['role'] == 'user' else 'Антон'}: {h['text']}"
+        f"{'Клиент' if h['role'] == 'user' else 'Консультант'}: {h['text']}"
         for h in recent_history
     ])
 
@@ -1468,10 +1511,10 @@ def generate_content_cmd(message):
                     post['publish_date']
                 )
 
-        asyncio.run(save_posts())
+        run_async(save_posts())
 
         # Отправляем черновики в соответствующие топики
-        drafts = asyncio.run(db.get_draft_posts())
+        drafts = run_async(db.get_draft_posts())
         for post in drafts:
             # Определяем топик по типу поста
             thread_id = THREAD_ID_SEASONAL if post['type'] in ['seasonal', 'живой'] else THREAD_ID_DRAFTS
@@ -1550,7 +1593,7 @@ def add_subscriber_cmd(message):
 
     # Добавляем в базу
     try:
-        asyncio.run(db.add_subscriber(
+        run_async(db.add_subscriber(
             user_id=user_id,
             username=username,
             first_name=first_name,
@@ -1570,10 +1613,8 @@ def list_birthdays_cmd(message):
         bot.send_message(message.chat.id, "❌ Доступ запрещен")
         return
 
-    import asyncio
-
     try:
-        upcoming = asyncio.run(db.get_upcoming_birthdays(7))
+        upcoming = run_async(db.get_upcoming_birthdays(7))
 
         if not upcoming:
             bot.send_message(message.chat.id, "📅 Нет предстоящих дней рождения на следующей неделе")
@@ -1610,7 +1651,7 @@ def generate_greetings_cmd(message):
     import datetime
 
     try:
-        upcoming = asyncio.run(db.get_upcoming_birthdays(7))
+        upcoming = run_async(db.get_upcoming_birthdays(7))
 
         if not upcoming:
             bot.send_message(message.chat.id, "📅 Нет предстоящих дней рождения для генерации поздравлений")
@@ -1628,12 +1669,12 @@ def generate_greetings_cmd(message):
             post = agent.generate_birthday_congrats_template(person_name=name, date=birthday)
 
             # Добавляем подпись компании программно
-            full_body = f"{post['body']}\n\nС наилучшими пожеланиями,\nКоманда «Пархоменко и компания» ❤️"
+            full_body = f"{post['body']}\n\nС наилучшими пожеланиями,\nКоманда «ТЕРИОН» ❤️"
 
             # Сохраняем как черновик
             publish_date = datetime.datetime.now() + datetime.timedelta(days=person['days_until_birthday'])
 
-            post_id = asyncio.run(db.save_post(
+            post_id = run_async(db.save_post(
                 post_type='поздравление',
                 title=post.get('title', f"Поздравление для {name}"),
                 body=full_body,
@@ -1687,7 +1728,7 @@ def generate_welcome_cmd(message):
         publish_date = datetime.datetime.now() + datetime.timedelta(days=1)  # Завтра в 10:00
         publish_date = publish_date.replace(hour=10, minute=0, second=0, microsecond=0)
 
-        post_id = asyncio.run(db.save_post(
+        post_id = run_async(db.save_post(
             post_type='приветствие',
             title=post.get('title', f"Приветствие для {'нового подписчика' if not person_name else person_name}"),
             body=post['body'],
@@ -1726,10 +1767,8 @@ def show_plan_cmd(message):
         bot.send_message(message.chat.id, "❌ Доступ запрещен")
         return
 
-    import asyncio
-
     # Получаем черновики
-    drafts = asyncio.run(db.get_draft_posts())
+    drafts = run_async(db.get_draft_posts())
 
     if not drafts:
         bot.send_message(message.chat.id, "📭 Контент-план пуст. Используй /generate_content для генерации.")
@@ -1773,7 +1812,7 @@ def content_callback_handler(call):
 
     if call.data.startswith("approve_"):
         # СНАЧАЛА получаем информацию о посте
-        drafts = asyncio.run(db.get_draft_posts())
+        drafts = run_async(db.get_draft_posts())
         post = next((p for p in drafts if p['id'] == post_id), None)
 
         if not post:
@@ -1785,7 +1824,7 @@ def content_callback_handler(call):
         from datetime import datetime, timedelta
 
         # Получить максимальную дату среди approved постов
-        max_date = asyncio.run(db.get_max_publish_date(status='approved'))
+        max_date = run_async(db.get_max_publish_date(status='approved'))
 
         if max_date is None:
             # Первый approved пост → завтра в 10:00
@@ -1795,7 +1834,7 @@ def content_callback_handler(call):
             next_date = max_date + timedelta(days=1)
 
         # Обновить пост
-        asyncio.run(db.update_content_plan_entry(
+        run_async(db.update_content_plan_entry(
             post_id=post_id,
             status='approved',
             publish_date=next_date.strftime('%Y-%m-%d %H:%M:%S')
@@ -1816,11 +1855,11 @@ def content_callback_handler(call):
 
     elif call.data.startswith("delete_"):
         # Получаем информацию о посте перед удалением
-        drafts = asyncio.run(db.get_draft_posts())
+        drafts = run_async(db.get_draft_posts())
         post = next((p for p in drafts if p['id'] == post_id), None)
 
         # Удаляем пост
-        asyncio.run(db.delete_post(post_id))
+        run_async(db.delete_post(post_id))
 
         # Редактируем сообщение
         if post:
@@ -1845,14 +1884,14 @@ def content_callback_handler(call):
 import asyncio
 
 # Подключаемся к БД
-asyncio.run(db.connect())
+run_async(db.connect())
 
 # Запускаем автопостер в отдельном потоке
 import threading
 poster_thread = threading.Thread(target=lambda: asyncio.run(run_auto_poster(bot)), daemon=True)
 poster_thread.start()
 
-print("🤖 Бот «Пархоменко и компания» запущен...")
+print("🤖 Бот «ТЕРИОН» запущен...")
 print(f"📁 База знаний: {KNOWLEDGE_DIR}")
 print(f"📞 Группа для лидов: {LEADS_GROUP_CHAT_ID}")
 print(f"🔑 ЯндексGPT FOLDER_ID: {FOLDER_ID}")

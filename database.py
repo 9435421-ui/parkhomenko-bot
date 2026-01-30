@@ -44,13 +44,19 @@ class Database:
             leads_sql = """
                 CREATE TABLE IF NOT EXISTS leads (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    user_id INTEGER,
                     name TEXT,
                     phone TEXT,
                     extra_contact TEXT,
                     object_type TEXT,
                     city TEXT,
+                    floor TEXT,
+                    total_floors TEXT,
+                    remodeling_status TEXT,
                     change_plan TEXT,
                     bti_status TEXT,
+                    qualification_started BOOLEAN DEFAULT 0,
+                    night_lead BOOLEAN DEFAULT 0,
                     created_at TEXT DEFAULT (datetime('now'))
                 )
             """
@@ -127,17 +133,42 @@ class Database:
         await self.conn.commit()
 
     # Функции для работы с лидами
-    async def save_lead(self, name, phone, extra_contact=None, object_type=None,
-                       city=None, change_plan=None, bti_status=None):
-        """Сохранить лид"""
-        query = """
-            INSERT INTO leads (name, phone, extra_contact, object_type, city, change_plan, bti_status)
-            VALUES (?, ?, ?, ?, ?, ?, ?)
+    async def save_lead(self, user_id: int, **kwargs):
+        """
+        Сохранить или обновить лид.
+        Если для этого user_id есть лид, созданный менее 24 часов назад, обновляем его.
+        """
+        # Проверяем наличие недавнего лида
+        query_check = """
+            SELECT id FROM leads
+            WHERE user_id = ? AND created_at > datetime('now', '-1 day')
+            ORDER BY created_at DESC LIMIT 1
         """
         async with self.conn.cursor() as cur:
-            await cur.execute(query, (name, phone, extra_contact, object_type,
-                                    city, change_plan, bti_status))
-        await self.conn.commit()
+            await cur.execute(query_check, (user_id,))
+            row = await cur.fetchone()
+
+            if row:
+                # Обновление существующего лида
+                lead_id = row[0]
+                if not kwargs:
+                    return lead_id
+
+                set_clause = ", ".join([f"{k} = ?" for k in kwargs.keys()])
+                values = list(kwargs.values()) + [lead_id]
+                query_update = f"UPDATE leads SET {set_clause} WHERE id = ?"
+                await cur.execute(query_update, values)
+                await self.conn.commit()
+                return lead_id
+            else:
+                # Создание нового лида
+                kwargs['user_id'] = user_id
+                columns = ", ".join(kwargs.keys())
+                placeholders = ", ".join(["?" for _ in kwargs])
+                query_insert = f"INSERT INTO leads ({columns}) VALUES ({placeholders})"
+                await cur.execute(query_insert, list(kwargs.values()))
+                await self.conn.commit()
+                return cur.lastrowid
 
     # Функции для работы с контент-планом
     async def save_post(self, post_type, title, body, cta, publish_date, image_prompt=None, image_url=None):

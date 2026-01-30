@@ -8,6 +8,7 @@ router = Router()
 
 
 class QuizOrder(StatesGroup):
+    phone = State()
     city = State()
     obj_type = State()
     status = State()
@@ -15,7 +16,51 @@ class QuizOrder(StatesGroup):
     goal = State()
     bti_doc = State()
     urgency = State()
-    phone = State()
+
+
+@router.message(QuizOrder.phone)
+async def handle_phone(message: Message, state: FSMContext):
+    # Мгновенное сохранение лида
+    from utils.time_utils import is_working_hours
+    from database import db
+    from services.lead_service import lead_service
+
+    phone = message.text.strip()
+    await state.update_data(phone=phone)
+
+    is_night = not is_working_hours()
+    user_id = message.from_user.id
+
+    # Сохраняем в БД
+    await db.save_lead(
+        user_id,
+        name=message.from_user.first_name,
+        phone=phone,
+        qualification_started=True,
+        night_lead=is_night
+    )
+
+    # Уведомление в группу
+    await lead_service.send_qualification_notification(message.bot, phone, is_night)
+
+    data = await state.get_data()
+    payload = data.get('_payload', '')
+
+    if payload == 'invest':
+        await state.set_state(QuizOrder.city)
+        await message.answer("✅ Контакт сохранен. 💰 Давайте оценим капитализацию вашего объекта после перепланировки. Какой город?")
+    elif payload == 'expert':
+        await state.set_state(QuizOrder.city)
+        await message.answer("✅ Контакт сохранен. 🔍 Какой тип недвижимости? (Жилая/Коммерческая/Инвестиционная)")
+    elif payload == 'price':
+        await state.set_state(QuizOrder.city)
+        await message.answer("✅ Контакт сохранен. 🧮 Давайте рассчитаем стоимость наших услуг. Какой тип объекта?")
+    elif payload == 'quiz':
+        await state.set_state(QuizOrder.city)
+        await message.answer("✅ Контакт сохранен. 📋 Кто вы? (Собственник/Дизайнер/Застройщик/Инвестор/Другое)")
+    else:
+        await state.set_state(QuizOrder.city)
+        await message.answer("✅ Контакт сохранен. Для подготовки предложения ответьте на несколько вопросов.\n\nВ каком городе находится объект?")
 
 
 @router.message(QuizOrder.city)
@@ -61,16 +106,20 @@ async def ask_bti(message: Message, state: FSMContext):
 
 
 @router.message(QuizOrder.urgency)
-async def ask_urgency(message: Message, state: FSMContext):
-    await state.update_data(urgency=message.text)
-    await state.set_state(QuizOrder.phone)
-    await message.answer("Оставьте, пожалуйста, ваш номер телефона для связи.")
-
-
-@router.message(QuizOrder.phone)
 async def finish_quiz(message: Message, state: FSMContext):
-    await state.update_data(phone=message.text)
+    await state.update_data(urgency=message.text)
     data = await state.get_data()
+
+    # Дополняем лид в БД
+    from database import db
+    await db.save_lead(
+        message.from_user.id,
+        city=data.get('city'),
+        object_type=data.get('obj_type'),
+        remodeling_status=data.get('status'),
+        change_plan=f"Сложность: {data.get('complexity')}, Цель: {data.get('goal')}",
+        bti_status=data.get('bti_doc')
+    )
 
     summary = (
         f"📋 Новая заявка от пользователя @{message.from_user.username or message.from_user.id}:\n\n"
@@ -97,5 +146,5 @@ async def finish_quiz(message: Message, state: FSMContext):
     )
     
     await message.answer(checklist, parse_mode="HTML")
-    await message.answer("Спасибо! Юлия Пархоменко свяжется с вами для анализа.")
+    await message.answer("Спасибо! Наш эксперт свяжется с вами для анализа.")
     await state.clear()
