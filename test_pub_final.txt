@@ -1,0 +1,7 @@
+Publication success: True
+Sent to chat: @test_channel
+Text starts with: <b>Заголовок</b>
+
+Те...
+Reply markup exists: True
+New status in DB: published

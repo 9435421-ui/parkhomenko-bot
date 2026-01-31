@@ -4,6 +4,7 @@ from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import StatesGroup, State
 from database.db import db
+from services.workflow_service import workflow
 
 router = Router()
 
@@ -81,4 +82,32 @@ async def cmd_my_posts(message: Message):
     for row in rows:
         text += f"ID: {row['id']} | [{row['status']}] {row['title']}\n"
 
-    await message.answer(text)
+    await message.answer(text + "\nДля изменения статуса используйте /submit_to_review [ID]")
+
+@router.message(Command("submit_to_review"))
+async def cmd_submit_review(message: Message, role: str):
+    args = message.text.split()
+    if len(args) < 2:
+        await message.answer("Использование: /submit_to_review [ID]")
+        return
+
+    try:
+        item_id = int(args[1])
+    except ValueError:
+        await message.answer("ID должен быть числом.")
+        return
+
+    # Сначала в draft, потом в review (цепочка: idea -> draft -> review)
+    # Попробуем сразу в review если это позволено, но workflow может ограничить
+
+    # Сначала переводим в DRAFT
+    success_draft = await workflow.move_to_status(item_id, 'draft', message.from_user.id, role)
+    if success_draft:
+        # Пытаемся перевести в REVIEW
+        success_review = await workflow.move_to_status(item_id, 'review', message.from_user.id, role)
+        if success_review:
+            await message.answer(f"✅ Пост #{item_id} отправлен на проверку (REVIEW).")
+        else:
+            await message.answer(f"✅ Пост #{item_id} сохранен как черновик (DRAFT).")
+    else:
+        await message.answer(f"❌ Не удалось изменить статус поста #{item_id}. Проверьте текущий статус.")
