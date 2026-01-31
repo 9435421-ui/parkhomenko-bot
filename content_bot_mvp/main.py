@@ -23,7 +23,9 @@ ADMIN_ID = int(os.getenv("ADMIN_ID", "0"))
 if not BOT_TOKEN or not OPENAI_API_KEY:
     raise RuntimeError("BOT_TOKEN and OPENAI_API_KEY must be set in .env")
 
-client = OpenAI(api_key=OPENAI_API_KEY)
+client = OpenAI(api_key=OPENAI_API_KEY, base_url="https://openrouter.ai/api/v1")
+
+user_leads = {}
 
 # ==========================
 # Настройки бота и OpenAI
@@ -60,7 +62,7 @@ def save_posts(posts):
 def generate_text(prompt: str) -> str:
     try:
         resp = client.chat.completions.create(
-            model="gpt-4o-mini",
+            model="openai/gpt-4o-mini",
             messages=[{"role": "user", "content": prompt}]
         )
         return resp.choices[0].message.content

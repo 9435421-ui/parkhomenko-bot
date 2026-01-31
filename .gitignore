@@ -25,6 +25,7 @@ wheels/
 
 # Environment variables
 .env
+content_bot_mvp/.env
 .env.local
 .env.*.local
 
@@ -36,6 +37,9 @@ database/*.db
 
 # Logs
 *.log
+content_bot_mvp/bot_full_report.txt
+content_bot_mvp/bot_test.log
+content_bot_mvp/bot.pid
 logs/
 bot.log
 
