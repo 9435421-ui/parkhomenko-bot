@@ -540,6 +540,10 @@ def transcribe_audio(file_path: str) -> str:
 
 @bot.message_handler(commands=["start"])
 def start_handler(message):
+    # Игнорируем сообщения от самого бота и других ботов
+    if message.from_user.is_bot:
+        return
+    
     user_id = message.chat.id
     state = get_user_state(user_id)
     consent = get_user_consent(user_id)
