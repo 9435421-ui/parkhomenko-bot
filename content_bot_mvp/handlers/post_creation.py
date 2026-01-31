@@ -2,8 +2,8 @@ from aiogram import Router, F
 from aiogram.types import Message, CallbackQuery
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import StatesGroup, State
-from ..database.db import db
-from ..keyboards.post_keyboards import get_channels_keyboard, get_themes_keyboard, get_skip_keyboard
+from database.db import db
+from keyboards.post_keyboards import get_channels_keyboard, get_themes_keyboard, get_skip_keyboard
 
 router = Router()
 
@@ -75,9 +75,16 @@ async def finish_creation(message: Message, state: FSMContext):
     cta_start = "torion_main" if brand == "Torion" else "domgrand"
     cta_link = f"https://t.me/torion_bot?start={cta_start}"
 
+    # Validation: mandatory quiz link presence
+    body = data.get('body', '')
+    if cta_start not in body and cta_link not in body:
+        # User didn't include it in text, we will ensure it's at least in cta_link
+        # but for strict TZ compliance we might want to warn or auto-append
+        body += f"\n\nПереходите по ссылке для расчета: {cta_link}"
+
     post_id = await db.save_post(
         type=data.get('type'),
-        body=data.get('body'),
+        body=body,
         image_description=data.get('image_description'),
         target_channel_alias=data.get('target_channel_alias'),
         brand=brand,

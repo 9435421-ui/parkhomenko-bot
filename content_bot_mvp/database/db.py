@@ -109,9 +109,13 @@ class ContentDatabase:
 
     async def get_scheduled_posts(self) -> List[Dict]:
         async with self.conn.cursor() as cursor:
-            await cursor.execute(
-                "SELECT * FROM content_plan WHERE status = 'scheduled' AND publish_date <= CURRENT_TIMESTAMP"
-            )
+            # Query for posts that are either scheduled and time has come,
+            # or approved (which implies they are ready for immediate/next cycle publication)
+            await cursor.execute("""
+                SELECT * FROM content_plan
+                WHERE (status = 'scheduled' AND publish_date <= CURRENT_TIMESTAMP)
+                   OR (status = 'approved')
+            """)
             rows = await cursor.fetchall()
             return [dict(row) for row in rows]
 

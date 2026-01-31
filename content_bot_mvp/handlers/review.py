@@ -2,8 +2,8 @@ from aiogram import Router, F, Bot
 from aiogram.types import Message, CallbackQuery
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import StatesGroup, State
-from ..database.db import db
-from ..keyboards.review_keyboards import get_review_keyboard
+from database.db import db
+from keyboards.review_keyboards import get_review_keyboard
 import os
 from datetime import datetime
 
@@ -14,6 +14,7 @@ REVIEW_GROUP_ID = os.getenv("LEADS_GROUP_CHAT_ID", "-1003370698977")
 
 class PostReview(StatesGroup):
     entering_schedule_time = State()
+    editing_post_body = State()
 
 async def notify_review_group(bot: Bot, post_id: int):
     post = await db.get_post(post_id)
@@ -84,5 +85,35 @@ async def schedule_time_entered(message: Message, state: FSMContext):
         await message.answer("❌ Неверный формат. Используйте ГГГГ-ММ-ДД ЧЧ:ММ (например, 2026-02-01 12:00):")
 
 @router.callback_query(F.data.startswith("edit:"))
-async def edit_post_stub(callback: CallbackQuery):
-    await callback.answer("🛠 Функция редактирования в разработке. Используйте /new_post для создания нового черновика.", show_alert=True)
+async def edit_post_start(callback: CallbackQuery, state: FSMContext):
+    post_id = int(callback.data.split(":")[1])
+    post = await db.get_post(post_id)
+    if not post:
+        await callback.answer("❌ Пост не найден", show_alert=True)
+        return
+
+    await state.update_data(editing_post_id=post_id)
+    await state.set_state(PostReview.editing_post_body)
+
+    await callback.message.answer(f"✏️ <b>Редактирование поста #{post_id}</b>\n\nТекущий текст:\n<code>{post['body']}</code>\n\nВведите новый текст поста:", parse_mode="HTML")
+    await callback.answer()
+
+@router.message(PostReview.editing_post_body)
+async def post_body_edited(message: Message, state: FSMContext):
+    data = await state.get_data()
+    post_id = data.get('editing_post_id')
+    new_body = message.text
+
+    await db.update_post(post_id, body=new_body)
+
+    await db.add_audit_log(
+        action="edit_post",
+        user_id=message.from_user.id,
+        details=f"Post #{post_id} body updated"
+    )
+
+    await message.answer(f"✅ Текст поста #{post_id} обновлен.")
+    await state.clear()
+
+    # Notify group again with updated text
+    await notify_review_group(message.bot, post_id)

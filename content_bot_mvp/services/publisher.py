@@ -1,7 +1,8 @@
 import logging
 from aiogram import Bot
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
-from ..database.db import db
+from database.db import db
+from services.openai_service import openai_service
 from datetime import datetime
 
 logger = logging.getLogger(__name__)
@@ -27,6 +28,12 @@ class TelegramPublisher:
             logger.error(f"Channel config not found for alias {post['target_channel_alias']}")
             return
 
+        # Validation: Mandatory quiz link presence
+        cta_start = "torion_main" if post['brand'] == "Torion" else "domgrand"
+        if cta_start not in post['body'] and cta_start not in post['cta_link']:
+             logger.error(f"Post #{post_id} missing mandatory quiz link for {post['brand']}")
+             return False
+
         # Prepare text with hashtags
         brand_hashtags = self.hashtags.get(post['brand'], "")
         full_text = f"{post['body']}\n\n{brand_hashtags}"
@@ -37,13 +44,27 @@ class TelegramPublisher:
         ])
 
         try:
+            # Optional image generation
+            image_url = None
+            if post['image_description']:
+                image_url = await openai_service.generate_image(post['image_description'])
+
             # Publish to Telegram
-            await self.bot.send_message(
-                chat_id=channel_config['channel_id'],
-                text=full_text,
-                reply_markup=keyboard,
-                parse_mode="HTML"
-            )
+            if image_url:
+                await self.bot.send_photo(
+                    chat_id=channel_config['channel_id'],
+                    photo=image_url,
+                    caption=full_text,
+                    reply_markup=keyboard,
+                    parse_mode="HTML"
+                )
+            else:
+                await self.bot.send_message(
+                    chat_id=channel_config['channel_id'],
+                    text=full_text,
+                    reply_markup=keyboard,
+                    parse_mode="HTML"
+                )
 
             # Mark as published in database
             await db.update_post(post_id, status='published', published_at=datetime.now())

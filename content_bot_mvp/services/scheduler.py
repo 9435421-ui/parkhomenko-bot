@@ -1,7 +1,7 @@
 import asyncio
 import logging
-from .publisher import TelegramPublisher
-from ..database.db import db
+from services.publisher import TelegramPublisher
+from database.db import db
 
 logger = logging.getLogger(__name__)
 
