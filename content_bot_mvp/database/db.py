@@ -151,13 +151,14 @@ class ContentDatabase:
             await self.conn.commit()
 
     async def add_bot_config(self, bot_name: str, token: str, tg_channel_id: str = None, vk_group_id: str = None,
-                           lead_group_id: str = None, platform: str = "TG", is_archived: bool = False, notes: str = None):
+                           lead_group_id: str = None, platform: str = "TG", is_archived: bool = False,
+                           notes: str = None, channel_alias: str = None, brand: str = "TORION"):
         async with self.conn.cursor() as cursor:
             await cursor.execute(
                 """INSERT OR REPLACE INTO bots_channels
-                   (bot_name, bot_token, tg_channel_id, vk_group_id, lead_group_id, platform, is_archived, notes)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
-                (bot_name, token, tg_channel_id, vk_group_id, lead_group_id, platform, is_archived, notes)
+                   (bot_name, bot_token, tg_channel_id, vk_group_id, lead_group_id, platform, is_archived, notes, channel_alias, brand)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                (bot_name, token, tg_channel_id, vk_group_id, lead_group_id, platform, is_archived, notes, channel_alias, brand)
             )
             await self.conn.commit()
 

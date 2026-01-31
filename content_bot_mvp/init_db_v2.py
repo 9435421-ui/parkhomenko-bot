@@ -4,10 +4,31 @@ from content_bot_mvp.database.db import db
 async def init_db():
     await db.connect()
 
-    # Добавление архивного бота
+    # 1. Добавление основного контент-бота
+    await db.add_bot_config(
+        bot_name="domgrad_content",
+        token="8123470161:AAGRFvjNWlp2mQaAt19qO8bnVowZg4FTJ64",
+        tg_channel_id="@torion_channel",
+        channel_alias="torion_main",
+        brand="TORION",
+        platform="TG",
+        notes="Основной канал ТОРИОН"
+    )
+
+    await db.add_bot_config(
+        bot_name="domgrad_content",
+        token="8123470161:AAGRFvjNWlp2mQaAt19qO8bnVowZg4FTJ64",
+        tg_channel_id="-1002628548032",
+        channel_alias="domgrand",
+        brand="TORION",
+        platform="TG",
+        notes="Канал DomGrand"
+    )
+
+    # 2. Добавление архивного бота
     await db.add_bot_config(
         bot_name="Lad_v_kvartire",
-        token="7123456789:AAHdqTcvCH1vGWJxfSeofSAs0K5PALDsaw",
+        token="ARCHIVED",
         tg_channel_id="@kapremont_channel",
         lead_group_id="-1003370698977",
         platform="TG",
@@ -15,10 +36,7 @@ async def init_db():
         notes="Архивный бот. Все CTA ссылки должны вести на основной бот ТОРИОН."
     )
 
-    # Добавление админа по умолчанию (замените на ваш ID при необходимости)
-    # await db.add_user(telegram_id=USER_ID, username="admin", role="ADMIN")
-
-    print("Database initialized with legacy bot entry.")
+    print("Database initialized with current production bot entries.")
 
 if __name__ == "__main__":
     asyncio.run(init_db())
