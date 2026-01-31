@@ -21,10 +21,13 @@ class ContentScheduler:
     async def check_and_publish(self):
         now = datetime.now()
         async with db.conn.execute(
-            """SELECT cp.id, cp.content_item_id, ci.bot_name
+            """SELECT cp.id, cp.content_item_id, ci.bot_name, ci.status, ci.quiz_link
                FROM content_plan cp
                JOIN content_items ci ON cp.content_item_id = ci.id
-               WHERE cp.published = 0 AND cp.scheduled_at <= ?""",
+               WHERE cp.published = 0
+               AND cp.scheduled_at <= ?
+               AND ci.status IN ('approved', 'scheduled')
+               AND ci.quiz_link IS NOT NULL""",
             (now,)
         ) as cursor:
             tasks = await cursor.fetchall()

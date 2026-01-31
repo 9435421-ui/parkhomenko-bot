@@ -23,7 +23,7 @@ class TelegramPublisher:
 
             # Получаем данные айтема
             async with db.conn.execute(
-                "SELECT title, body, image_url, cta_type, cta_link FROM content_items WHERE id = ?",
+                "SELECT title, body, image_url, hashtags, quiz_link, target_channel_alias FROM content_items WHERE id = ?",
                 (item_id,)
             ) as cursor:
                 item = await cursor.fetchone()
@@ -31,14 +31,15 @@ class TelegramPublisher:
                     logging.error(f"Item {item_id} not found")
                     return False
 
-            # Проверяем наличие целевого канала в плане
-            target_alias = None
+            # Проверяем наличие целевого канала (из айтема или из плана)
+            target_alias = item['target_channel_alias']
+
             async with db.conn.execute(
                 "SELECT target_channel_alias FROM content_plan WHERE content_item_id = ?",
                 (item_id,)
             ) as cursor:
                 plan_row = await cursor.fetchone()
-                if plan_row:
+                if plan_row and plan_row['target_channel_alias']:
                     target_alias = plan_row['target_channel_alias']
 
             overall_success = False
@@ -57,12 +58,16 @@ class TelegramPublisher:
                 try:
                     # Создаем временный инстанс бота для отправки
                     async with Bot(token=token) as current_bot:
-                        # Формируем текст
+                        # Формируем текст (Тело + Хэштеги)
                         text = f"<b>{item['title']}</b>\n\n{item['body']}"
+                        if item['hashtags']:
+                            text += f"\n\n{item['hashtags']}"
 
-                        # Формируем клавиатуру (всегда ведет на основной бот @torion_bot)
+                        # Формируем клавиатуру (ссылка на квиз с трекингом)
+                        url = item['quiz_link'] if item['quiz_link'] else "https://t.me/torion_bot"
+
                         keyboard = InlineKeyboardMarkup(inline_keyboard=[
-                            [InlineKeyboardButton(text="Задать вопрос эксперту 💬", url="https://t.me/torion_bot?start=content_bot")]
+                            [InlineKeyboardButton(text="Задать вопрос эксперту 💬", url=url)]
                         ])
 
                         # Отправка

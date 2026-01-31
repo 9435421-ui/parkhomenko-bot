@@ -33,6 +33,10 @@ async def main():
     dp.include_router(planner.router)
     dp.include_router(review.router)
 
+    # Запуск планировщика
+    from services.scheduler import start_scheduler
+    asyncio.create_task(start_scheduler(bot))
+
     print("🚀 Контент-бот ТОРИОН запущен")
     await dp.start_polling(bot)
 

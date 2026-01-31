@@ -62,6 +62,9 @@ class ContentDatabase:
                     created_by INTEGER,
                     approved_by INTEGER,
                     telegram_message_id TEXT,
+                    hashtags TEXT,
+                    quiz_link TEXT,
+                    target_channel_alias TEXT,
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                     FOREIGN KEY (bot_name) REFERENCES bots_channels(bot_name)

@@ -14,6 +14,7 @@ class Settings(BaseSettings):
     # Брендинг
     BRAND_NAME: str = "ТОРИОН"
     MAIN_BOT_USERNAME: str = "@torion_bot"
+    CONTENT_BOT_USERNAME: str = "domGrad_bot"
 
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8")
 
