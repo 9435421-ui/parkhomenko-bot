@@ -33,7 +33,7 @@ async def main():
     dp.include_router(planner.router)
     dp.include_router(review.router)
 
-    print("🚀 Контент-бот ТЕРИОН запущен")
+    print("🚀 Контент-бот ТОРИОН запущен")
     await dp.start_polling(bot)
 
 if __name__ == "__main__":

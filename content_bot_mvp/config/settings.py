@@ -12,8 +12,8 @@ class Settings(BaseSettings):
     DEFAULT_DISCLAIMER: str = "Информация носит ознакомительный характер и не является публичной офертой."
 
     # Брендинг
-    BRAND_NAME: str = "ТЕРИОН"
-    MAIN_BOT_USERNAME: str = "@TerionProjectBot"
+    BRAND_NAME: str = "ТОРИОН"
+    MAIN_BOT_USERNAME: str = "@TorionProjectBot"
 
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8")
 
