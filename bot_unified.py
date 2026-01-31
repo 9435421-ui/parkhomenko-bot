@@ -138,13 +138,21 @@ AI_INTRO_TEXT = (
 
 from utils.time_utils import get_moscow_now, is_working_hours
 from utils.geo_db import geo_db
+import threading
 
-# Глобальный цикл для работы с БД
+# Глобальный цикл для работы с БД в отдельном потоке (Thread-safe bridge)
 db_loop = asyncio.new_event_loop()
+
+def start_loop(loop):
+    asyncio.set_event_loop(loop)
+    loop.run_forever()
+
+threading.Thread(target=start_loop, args=(db_loop,), daemon=True).start()
 
 def run_async(coro):
     """Вспомогательная функция для запуска асинхронных задач из синхронного кода"""
-    return db_loop.run_until_complete(coro)
+    future = asyncio.run_coroutine_threadsafe(coro, db_loop)
+    return future.result()
 
 
 def get_user_state(user_id: int) -> UserState:

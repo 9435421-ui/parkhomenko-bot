@@ -9,82 +9,104 @@ class TelegramPublisher:
         self.default_bot = default_bot
 
     async def publish_item(self, item_id: int, bot_name: str = None) -> bool:
-        """Публикует конкретный айтем из БД через выбранного бота"""
+        """Публикует конкретный айтем из БД во все активные каналы выбранного бота"""
         try:
-            # Если бот не указан, используем дефолтный и какой-то дефолтный канал?
-            # Или лучше всегда требовать bot_name
             if not bot_name:
                 logging.error("bot_name is required for publication")
                 return False
 
-            # Получаем конфиг бота
-            bot_config = await db.get_bot_config(bot_name)
-            if not bot_config:
-                logging.error(f"Bot config for {bot_name} not found")
+            # Получаем все активные конфиги каналов для этого бота
+            bot_configs = await db.get_bot_configs(bot_name)
+            if not bot_configs:
+                logging.error(f"No active bot configs for {bot_name} found")
                 return False
 
-            token = bot_config['bot_token']
-            channel_id = bot_config['tg_channel_id']
+            # Получаем данные айтема
+            async with db.conn.execute(
+                "SELECT title, body, image_url, cta_type, cta_link FROM content_items WHERE id = ?",
+                (item_id,)
+            ) as cursor:
+                item = await cursor.fetchone()
+                if not item:
+                    logging.error(f"Item {item_id} not found")
+                    return False
 
-            # Создаем временный инстанс бота для отправки
-            async with Bot(token=token) as current_bot:
-                # Получаем данные айтема
-                async with db.conn.execute(
-                    "SELECT title, body, image_url, cta_type, cta_link FROM content_items WHERE id = ?",
-                    (item_id,)
-                ) as cursor:
-                    item = await cursor.fetchone()
-                    if not item:
-                        return False
+            # Проверяем наличие целевого канала в плане
+            target_alias = None
+            async with db.conn.execute(
+                "SELECT target_channel_alias FROM content_plan WHERE content_item_id = ?",
+                (item_id,)
+            ) as cursor:
+                plan_row = await cursor.fetchone()
+                if plan_row:
+                    target_alias = plan_row['target_channel_alias']
 
-                # Формируем текст
-                text = f"<b>{item['title']}</b>\n\n{item['body']}"
+            overall_success = False
 
-                # Формируем клавиатуру (в MVP базово, всегда ведем на основной бот ТОРИОН)
-                # Если айтем из архивного бота, ссылка все равно ведет на TorionProjectBot
-                keyboard = InlineKeyboardMarkup(inline_keyboard=[
-                    [InlineKeyboardButton(text="Задать вопрос эксперту 💬", url="https://t.me/TorionProjectBot?start=content_bot")]
-                ])
+            for config in bot_configs:
+                channel_alias = config['channel_alias']
 
-                # Отправка
-                if item['image_url'] and item['image_url'].startswith('http'):
-                    msg = await current_bot.send_photo(
-                        chat_id=channel_id,
-                        photo=item['image_url'],
-                        caption=text,
-                        reply_markup=keyboard,
-                        parse_mode="HTML"
-                    )
-                else:
-                    msg = await current_bot.send_message(
-                        chat_id=channel_id,
-                        text=text,
-                        reply_markup=keyboard,
-                        parse_mode="HTML"
-                    )
+                # Если указан конкретный целевой канал, пропускаем остальные
+                if target_alias and target_alias != channel_alias:
+                    logging.info(f"Skipping channel {channel_alias} as it doesn't match target {target_alias}")
+                    continue
 
-                # Сохраняем результат в план/лог
-                async with db.conn.cursor() as cursor:
-                    # Обновляем статус айтема
-                    await cursor.execute(
-                        "UPDATE content_items SET status = 'published', updated_at = ? WHERE id = ?",
-                        (datetime.now(), item_id)
-                    )
-                    # Добавляем запись в content_plan
-                    await cursor.execute(
-                        """INSERT INTO content_plan (content_item_id, published_at, published)
-                           VALUES (?, ?, 1)""",
-                        (item_id, datetime.now())
-                    )
-                    await db.conn.commit()
+                token = config['bot_token']
+                channel_id = config['tg_channel_id']
 
-                await db.update_bot_status(bot_name, "success")
-                await db.log_action(0, "published_to_tg", f"Bot: {bot_name}, Channel: {channel_id}, Item ID: {item_id}, Msg ID: {msg.message_id}", bot_name=bot_name, channel_id=channel_id, status="success")
-                return True
+                try:
+                    # Создаем временный инстанс бота для отправки
+                    async with Bot(token=token) as current_bot:
+                        # Формируем текст
+                        text = f"<b>{item['title']}</b>\n\n{item['body']}"
+
+                        # Формируем клавиатуру (всегда ведет на основной бот @torion_bot)
+                        keyboard = InlineKeyboardMarkup(inline_keyboard=[
+                            [InlineKeyboardButton(text="Задать вопрос эксперту 💬", url="https://t.me/torion_bot?start=content_bot")]
+                        ])
+
+                        # Отправка
+                        if item['image_url'] and item['image_url'].startswith('http'):
+                            msg = await current_bot.send_photo(
+                                chat_id=channel_id,
+                                photo=item['image_url'],
+                                caption=text,
+                                reply_markup=keyboard,
+                                parse_mode="HTML"
+                            )
+                        else:
+                            msg = await current_bot.send_message(
+                                chat_id=channel_id,
+                                text=text,
+                                reply_markup=keyboard,
+                                parse_mode="HTML"
+                            )
+
+                        # Сохраняем результат в план/лог
+                        async with db.conn.cursor() as cursor:
+                            # Обновляем статус айтема (считаем опубликованным если хотя бы в один канал ушло)
+                            await cursor.execute(
+                                "UPDATE content_items SET status = 'published', updated_at = ? WHERE id = ?",
+                                (datetime.now(), item_id)
+                            )
+                            # Добавляем запись в content_plan (фиксируем факт публикации в конкретный канал)
+                            await cursor.execute(
+                                """INSERT INTO content_plan (content_item_id, published_at, published, channel_id)
+                                   VALUES (?, ?, 1, ?)""",
+                                (item_id, datetime.now(), channel_id)
+                            )
+                            await db.conn.commit()
+
+                        await db.log_action(0, "published_to_tg", f"Bot: {bot_name}, Channel: {channel_id} ({channel_alias}), Item ID: {item_id}, Msg ID: {msg.message_id}", bot_name=bot_name, channel_id=channel_id, status="success")
+                        overall_success = True
+                        logging.info(f"Successfully published item {item_id} to channel {channel_alias} ({channel_id})")
+
+                except Exception as e:
+                    logging.error(f"Ошибка публикации Item {item_id} в канал {channel_alias} ({channel_id}): {e}")
+                    await db.log_action(0, "publish_error", f"Bot: {bot_name}, Channel: {channel_id}, Item ID: {item_id}, Error: {str(e)}", bot_name=bot_name, status="error")
+
+            return overall_success
 
         except Exception as e:
-            logging.error(f"Ошибка публикации Item {item_id} через {bot_name}: {e}")
-            if bot_name:
-                await db.update_bot_status(bot_name, f"error: {str(e)}")
-            await db.log_action(0, "publish_error", f"Bot: {bot_name}, Item ID: {item_id}, Error: {str(e)}", bot_name=bot_name, status="error")
+            logging.error(f"Глобальная ошибка публикации Item {item_id}: {e}")
             return False

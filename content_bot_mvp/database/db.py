@@ -26,11 +26,11 @@ class ContentDatabase:
                 )
             """)
 
-            # Таблица ботов и каналов для публикации (Обновлено по ТЗ)
+            # Таблица ботов и каналов для публикации (Обновлено по ТЗ №6)
             await cursor.execute("""
                 CREATE TABLE IF NOT EXISTS bots_channels (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    bot_name TEXT UNIQUE NOT NULL,
+                    bot_name TEXT NOT NULL,
                     bot_token TEXT NOT NULL,
                     tg_channel_id TEXT,
                     vk_group_id TEXT,
@@ -40,6 +40,8 @@ class ContentDatabase:
                     status TEXT DEFAULT 'active',
                     is_archived BOOLEAN DEFAULT 0,
                     notes TEXT,
+                    channel_alias TEXT,
+                    brand TEXT,
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                 )
@@ -76,6 +78,7 @@ class ContentDatabase:
                     published_at TIMESTAMP,
                     published BOOLEAN DEFAULT 0,
                     error_log TEXT,
+                    target_channel_alias TEXT,
                     FOREIGN KEY (content_item_id) REFERENCES content_items(id)
                 )
             """)
@@ -130,10 +133,11 @@ class ContentDatabase:
             )
             await self.conn.commit()
 
-    async def get_bot_config(self, bot_name: str):
+    async def get_bot_configs(self, bot_name: str):
+        """Возвращает все активные конфигурации каналов для данного бота"""
         async with self.conn.cursor() as cursor:
-            await cursor.execute("SELECT * FROM bots_channels WHERE bot_name = ?", (bot_name,))
-            return await cursor.fetchone()
+            await cursor.execute("SELECT * FROM bots_channels WHERE bot_name = ? AND status = 'active'", (bot_name,))
+            return await cursor.fetchall()
 
     async def update_bot_status(self, bot_name: str, status: str):
         async with self.conn.cursor() as cursor:
