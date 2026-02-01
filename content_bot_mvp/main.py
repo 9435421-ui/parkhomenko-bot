@@ -2,6 +2,7 @@
 import telebot
 from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
 import json
+import re
 import os
 from dotenv import load_dotenv
 from openai import OpenAI
@@ -106,6 +107,16 @@ def save_lead_to_db(user_id, source_bot, lead_data):
         conn = sqlite3.connect(DB_PATH)
         cursor = conn.cursor()
 
+        # Проверяем наличие активного лида за последние 24 часа
+        cursor.execute(
+            """SELECT id FROM unified_leads
+               WHERE user_id = ? AND source_bot = ?
+               AND created_at > datetime('now', '-1 day')
+               ORDER BY created_at DESC LIMIT 1""",
+            (user_id, source_bot)
+        )
+        row = cursor.fetchone()
+
         # Убедимся, что таблицы существуют
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS users (
@@ -137,10 +148,38 @@ def save_lead_to_db(user_id, source_bot, lead_data):
         """)
 
         details = json.dumps(lead_data, ensure_ascii=False)
-        cursor.execute("""
-            INSERT INTO unified_leads (user_id, source_bot, lead_type, name, phone, details)
-            VALUES (?, ?, ?, ?, ?, ?)
-        """, (user_id, source_bot, 'direct_request', lead_data.get('name'), lead_data.get('phone'), details))
+
+        if row:
+            lead_id = row[0]
+            # Обновляем существующий лид
+            update_data = {
+                "name": lead_data.get('name'),
+                "phone": lead_data.get('phone'),
+                "details": details,
+                "lead_type": "quiz_completed" if "area" in lead_data else "initial_contact"
+            }
+            if lead_data.get("consent"):
+                update_data["consent"] = 1
+                update_data["consent_date"] = lead_data.get("consent_date")
+
+            set_clause = ", ".join([f"{k} = ?" for k in update_data.keys()])
+            values = list(update_data.values()) + [lead_id]
+            cursor.execute(f"UPDATE unified_leads SET {set_clause} WHERE id = ?", values)
+        else:
+            # Вставляем новый
+            cursor.execute("""
+                INSERT INTO unified_leads (user_id, source_bot, lead_type, name, phone, details, consent, consent_date)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """, (
+                user_id,
+                source_bot,
+                'initial_contact',
+                lead_data.get('name'),
+                lead_data.get('phone'),
+                details,
+                1 if lead_data.get("consent") else 0,
+                lead_data.get("consent_date")
+            ))
 
         conn.commit()
         conn.close()
@@ -292,8 +331,23 @@ def callback_handler(call):
         bot.send_message(call.message.chat.id, "Введите новый текст для поста:")
         bot.register_next_step_handler(call.message, update_report_text)
     elif call.data == "collect_lead":
-        bot.send_message(call.message.chat.id, "Соглашаетесь ли вы на обработку персональных данных? (да/нет)")
-        bot.register_next_step_handler(call.message, ask_name)
+        markup = InlineKeyboardMarkup()
+        markup.add(InlineKeyboardButton("✅ Я согласен и хочу продолжить", callback_data="consent_quiz"))
+        bot.send_message(
+            call.message.chat.id,
+            "Для начала работы необходимо ваше согласие на обработку персональных данных.",
+            reply_markup=markup
+        )
+    elif call.data == "consent_quiz":
+        user_leads[call.message.chat.id] = {"consent": True, "consent_date": datetime.now().isoformat()}
+        markup = telebot.types.ReplyKeyboardMarkup(resize_keyboard=True, one_time_keyboard=True)
+        markup.add(telebot.types.KeyboardButton("📱 Поделиться контактом", request_contact=True))
+        bot.send_message(
+            call.message.chat.id,
+            "Спасибо! Пожалуйста, поделитесь вашим контактом для сохранения заявки.",
+            reply_markup=markup
+        )
+        # Следующий шаг обработает специальный хендлер для контактов
     elif call.data.startswith("obj_"):
         object_type = call.data.replace("obj_", "")
         if object_type == "kvartira":
@@ -303,14 +357,9 @@ def callback_handler(call):
         elif object_type == "dom":
             obj = "дом"
         user_leads[call.message.chat.id]["object_type"] = obj
-        name = user_leads[call.message.chat.id].get("name", "")
 
-        bot.send_message(
-            call.message.chat.id,
-            f"{get_pb(6)}{name}, из какого вы города? (напишите название)",
-            reply_markup=telebot.types.ReplyKeyboardRemove()
-        )
-        bot.register_next_step_handler(call.message, ask_media_step)
+        # Переходим к вопросу про этаж
+        ask_floor_step(call.message.chat.id)
 
 
 def ask_media_step(message):
@@ -397,7 +446,7 @@ def process_report_description(message, file_id):
 # Сбор лидов (КВИЗ)
 # ==========================
 
-def get_pb(step, total=7):
+def get_pb(step, total=10):
     return f"📍 Шаг {step} из {total}\n"
 
 
@@ -427,76 +476,128 @@ def get_message_text(message):
     return message.text if message.text else ""
 
 
-def ask_name(message):
-    text = get_message_text(message)
-    if text.lower() not in ["да", "yes"]:
-        bot.send_message(message.chat.id, "Без согласия не можем продолжить. Пожалуйста, ответьте «да».")
-        bot.register_next_step_handler(message, ask_name)
+def ask_city_step(message):
+    role = get_message_text(message)
+    if not role:
+        bot.send_message(message.chat.id, "Пожалуйста, укажите вашу роль.")
+        bot.register_next_step_handler(message, ask_city_step)
         return
-    user_leads[message.chat.id] = {"pd_agreed": True}
-    bot.send_message(message.chat.id, f"{get_pb(1)}Введите ваше имя (можно голосом):")
-    bot.register_next_step_handler(message, ask_phone)
-
-
-def ask_phone(message):
-    name = get_message_text(message)
-    if not name:
-        bot.send_message(message.chat.id, "Пожалуйста, введите ваше имя.")
-        bot.register_next_step_handler(message, ask_phone)
-        return
-
-    user_leads[message.chat.id]["name"] = name
-    bot.send_message(message.chat.id, f"{get_pb(2)}{name}, введите ваш номер телефона:")
-    bot.register_next_step_handler(message, ask_stage)
-
-
-def ask_stage(message):
-    phone = get_message_text(message)
-    if not phone:
-        bot.send_message(message.chat.id, "Пожалуйста, введите номер телефона.")
-        bot.register_next_step_handler(message, ask_stage)
-        return
-
-    user_leads[message.chat.id]["phone"] = phone
+    user_leads[message.chat.id]["role"] = role
     name = user_leads[message.chat.id].get("name", "")
+    bot.send_message(message.chat.id, f"{get_pb(2)}{name}, из какого вы города?")
+    bot.register_next_step_handler(message, ask_obj_type_step)
 
-    markup = telebot.types.ReplyKeyboardMarkup(resize_keyboard=True, one_time_keyboard=True)
-    markup.add("Планирую перепланировку", "Уже выполнена")
-    bot.send_message(message.chat.id, f"{get_pb(3)}{name}, на какой стадии перепланировка?", reply_markup=markup)
-    bot.register_next_step_handler(message, ask_area)
-
-
-def ask_area(message):
-    stage = get_message_text(message)
-    if not stage:
-        bot.send_message(message.chat.id, "Пожалуйста, выберите стадию.")
-        bot.register_next_step_handler(message, ask_area)
+def ask_obj_type_step(message):
+    city = get_message_text(message)
+    if not city:
+        bot.send_message(message.chat.id, "Пожалуйста, укажите город.")
+        bot.register_next_step_handler(message, ask_obj_type_step)
         return
-
-    user_leads[message.chat.id]["stage"] = stage
+    user_leads[message.chat.id]["city"] = city
     name = user_leads[message.chat.id].get("name", "")
-
-    bot.send_message(
-        message.chat.id,
-        f"{get_pb(4)}{name}, укажите метраж помещения (кв. м):",
-        reply_markup=telebot.types.ReplyKeyboardRemove()
-    )
-    bot.register_next_step_handler(message, ask_object_type_inline_msg)
-
-
-def ask_object_type_inline_msg(message):
-    area = get_message_text(message)
-    if not area:
-        bot.send_message(message.chat.id, "Укажите метраж помещения.")
-        bot.register_next_step_handler(message, ask_object_type_inline_msg)
-        return
-
-    user_leads[message.chat.id]["area"] = area
     markup = InlineKeyboardMarkup()
     markup.add(InlineKeyboardButton("Квартира", callback_data="obj_kvartira"))
     markup.add(InlineKeyboardButton("Коммерция", callback_data="obj_kommertsia"))
     markup.add(InlineKeyboardButton("Дом", callback_data="obj_dom"))
-    bot.send_message(message.chat.id, f"{get_pb(5)}Выберите тип объекта:", reply_markup=markup)
+    bot.send_message(message.chat.id, f"{get_pb(3)}{name}, выберите тип объекта:", reply_markup=markup)
+
+def ask_floor_step(message_or_id):
+    # Этот метод вызывается из callback_handler
+    chat_id = message_or_id if isinstance(message_or_id, int) else message_or_id.chat.id
+    name = user_leads[chat_id].get("name", "")
+    markup = telebot.types.ReplyKeyboardMarkup(resize_keyboard=True, one_time_keyboard=True)
+    markup.add("Не первый / не последний")
+    markup.add("Первый", "Последний")
+
+    bot.send_message(
+        chat_id,
+        f"{get_pb(4)}{name}, укажите этаж и этажность (например: 5/17) или выберите вариант:",
+        reply_markup=markup
+    )
+    # Используем фейковое сообщение для bot.register_next_step_handler если нужно
+    # Но проще вызвать его отсюда
+    bot.register_next_step_handler_by_chat_id(chat_id, ask_area_step)
+
+def ask_area_step(message):
+    floor = get_message_text(message)
+    if not floor:
+        bot.send_message(message.chat.id, "Укажите этаж.")
+        bot.register_next_step_handler(message, ask_area_step)
+        return
+    user_leads[message.chat.id]["floor"] = floor
+    name = user_leads[message.chat.id].get("name", "")
+    bot.send_message(message.chat.id, f"{get_pb(5)}{name}, укажите метраж помещения (кв. м, только число):", reply_markup=telebot.types.ReplyKeyboardRemove())
+    bot.register_next_step_handler(message, ask_status_step)
+
+def ask_status_step(message):
+    area = get_message_text(message)
+    if not area or not re.match(r'^\d+([.,]\d+)?$', area.strip()):
+        bot.send_message(message.chat.id, "Пожалуйста, введите метраж числом (например: 45).")
+        bot.register_next_step_handler(message, ask_status_step)
+        return
+    user_leads[message.chat.id]["area"] = area.replace(',', '.')
+    name = user_leads[message.chat.id].get("name", "")
+    markup = telebot.types.ReplyKeyboardMarkup(resize_keyboard=True, one_time_keyboard=True)
+    markup.add("Планирую перепланировку", "Уже выполнена")
+    bot.send_message(message.chat.id, f"{get_pb(6)}{name}, на какой стадии перепланировка?", reply_markup=markup)
+    bot.register_next_step_handler(message, ask_complexity_step)
+
+def ask_complexity_step(message):
+    stage = get_message_text(message)
+    if not stage:
+        bot.send_message(message.chat.id, "Пожалуйста, выберите стадию.")
+        bot.register_next_step_handler(message, ask_complexity_step)
+        return
+    user_leads[message.chat.id]["stage"] = stage
+    name = user_leads[message.chat.id].get("name", "")
+    markup = telebot.types.ReplyKeyboardMarkup(resize_keyboard=True, one_time_keyboard=True)
+    markup.add("Стены", "Мокрые зоны")
+    markup.add("Нет")
+    bot.send_message(message.chat.id, f"{get_pb(7)}{name}, есть ли сложные зоны (несущие стены, мокрые зоны)?", reply_markup=markup)
+    bot.register_next_step_handler(message, ask_goal_step)
+
+def ask_goal_step(message):
+    complexity = get_message_text(message)
+    user_leads[message.chat.id]["complexity"] = complexity
+    name = user_leads[message.chat.id].get("name", "")
+    markup = telebot.types.ReplyKeyboardMarkup(resize_keyboard=True, one_time_keyboard=True)
+    markup.add("Инвест", "Для жизни")
+    bot.send_message(message.chat.id, f"{get_pb(8)}{name}, какова цель перепланировки?", reply_markup=markup)
+    bot.register_next_step_handler(message, ask_bti_step)
+
+def ask_bti_step(message):
+    goal = get_message_text(message)
+    user_leads[message.chat.id]["goal"] = goal
+    name = user_leads[message.chat.id].get("name", "")
+    bot.send_message(
+        message.chat.id,
+        f"{get_pb(9)}{name}, прикрепите фото или PDF документов БТИ (или просто напишите «нет»):",
+        reply_markup=telebot.types.ReplyKeyboardRemove()
+    )
+    bot.register_next_step_handler(message, ask_urgency_step)
+
+def ask_urgency_step(message):
+    # Обработка медиа (фото или PDF)
+    file_id = None
+    if message.photo:
+        file_id = message.photo[-1].file_id
+        user_leads[message.chat.id]["bti_status"] = "Загружено фото"
+        user_leads[message.chat.id]["bti_file_id"] = file_id
+        bot.send_message(message.chat.id, "📸 Фото получено.")
+    elif message.document:
+        file_id = message.document.file_id
+        user_leads[message.chat.id]["bti_status"] = f"Загружен файл: {message.document.file_name}"
+        user_leads[message.chat.id]["bti_file_id"] = file_id
+        bot.send_message(message.chat.id, f"📄 Файл «{message.document.file_name}» получен.")
+    else:
+        text = get_message_text(message)
+        user_leads[message.chat.id]["bti_status"] = text if text else "не указано"
+
+    name = user_leads[message.chat.id].get("name", "")
+    markup = telebot.types.ReplyKeyboardMarkup(resize_keyboard=True, one_time_keyboard=True)
+    markup.add("Срочно", "Можно подождать")
+    bot.send_message(message.chat.id, f"{get_pb(10)}{name}, насколько срочно нужно решить вопрос?", reply_markup=markup)
+    bot.register_next_step_handler(message, finalize_lead)
 
 
 
@@ -528,14 +629,18 @@ def finalize_lead(message):
         final_info = "🎁 Мы подготовили для вас чек-лист проекта перепланировки."
 
     summary = (
-        f"🚀 НОВАЯ ЗАЯВКА (КВИЗ)\n\n"
+        f"🚀 ЗАВЕРШЕН КВИЗ (Контент-бот)\n\n"
         f"👤 Имя: {lead.get('name')}\n"
         f"📱 Телефон: {lead.get('phone')}\n"
-        f"🏗 Стадия: {lead.get('stage')}\n"
-        f"📏 Метраж: {lead.get('area')} м²\n"
         f"🏙 Город: {lead.get('city')}\n"
+        f"🏗 Стадия: {lead.get('stage')}\n"
         f"🏢 Тип: {lead.get('object_type')}\n"
-        f"📎 БТИ: {lead.get('bti_status')}"
+        f"🏢 Этаж: {lead.get('floor')}\n"
+        f"📏 Метраж: {lead.get('area')} м²\n"
+        f"🧱 Сложность: {lead.get('complexity')}\n"
+        f"🎯 Цель: {lead.get('goal')}\n"
+        f"📎 БТИ: {lead.get('bti_status')}\n"
+        f"🔥 Срочность: {lead.get('urgency')}"
     )
 
     send_lead_to_group(summary, lead.get("object_type", "дом"), user_id=message.chat.id, lead_data=lead)
@@ -545,6 +650,40 @@ def finalize_lead(message):
         f"✅ Спасибо! Информация получена.\n\n{final_info}\n\nНаш эксперт свяжется с вами в ближайшее время."
     )
     del user_leads[message.chat.id]
+
+
+@bot.message_handler(content_types=["contact"])
+def handle_contact_quiz(message):
+    if message.chat.id in user_leads and user_leads[message.chat.id].get("consent"):
+        phone = message.contact.phone_number
+        name = message.from_user.full_name
+        user_id = message.chat.id
+
+        user_leads[user_id]["phone"] = phone
+        user_leads[user_id]["name"] = name
+
+        # Сохраняем первичный лид
+        try:
+            save_lead_to_db(user_id, "content_bot", {
+                "name": name,
+                "phone": phone,
+                "consent": True,
+                "consent_date": user_leads[user_id].get("consent_date")
+            })
+        except Exception as e:
+            print(f"ERROR lead_save_failed: {e}")
+
+        # Уведомляем админа
+        summary = (
+            f"📱 ПОЛУЧЕН КОНТАКТ (Контент-бот)\n\n"
+            f"👤 Имя: {name}\n"
+            f"📱 Телефон: {phone}\n"
+            f"🆔 ID: {user_id}"
+        )
+        send_lead_to_group(summary, "дом", is_new=True)
+
+        bot.send_message(user_id, f"{get_pb(1)}📋 {name}, кто вы? (Собственник/Дизайнер/Инвестор/Другое):", reply_markup=telebot.types.ReplyKeyboardRemove())
+        bot.register_next_step_handler(message, ask_city_step)
 
 
 @bot.message_handler(content_types=["voice"])

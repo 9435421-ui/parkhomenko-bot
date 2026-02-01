@@ -1,8 +1,10 @@
 from aiogram import Router, F
 from aiogram.types import Message, CallbackQuery
 from aiogram.fsm.context import FSMContext
-from handlers.quiz import QuizOrder
-from keyboards.main_menu import get_consent_keyboard, get_main_menu
+from handlers.quiz import QuizOrder, handle_initial_contact
+from keyboards.main_menu import get_consent_keyboard, get_main_menu, get_contact_keyboard
+from database.db import db
+from datetime import datetime
 
 router = Router()
 
@@ -22,27 +24,40 @@ async def handle_start(message: Message, state: FSMContext):
 @router.message(F.text == "✅ Я согласен и хочу продолжить")
 async def handle_consent(message: Message, state: FSMContext):
     """Обработка согласия пользователя"""
+    await state.update_data(consent=True, consent_date=datetime.now().isoformat())
+
+    await message.answer(
+        "Спасибо! Теперь, пожалуйста, поделитесь вашим контактом, чтобы мы могли сохранить вашу заявку и связаться с вами.",
+        reply_markup=get_contact_keyboard()
+    )
+
+
+@router.message(F.contact)
+async def handle_contact_start(message: Message, state: FSMContext):
+    """Первичная обработка контакта после согласия"""
     data = await state.get_data()
+    if not data.get('consent'):
+        await message.answer("Пожалуйста, сначала подтвердите согласие на обработку данных.", reply_markup=get_consent_keyboard())
+        return
+
+    # Сохраняем лид и уведомляем админа
+    await handle_initial_contact(message, state)
+
     payload = data.get('_payload', '')
     
     if payload == 'quiz' or payload == 'terion_main' or payload == 'domgrand':
-        # Запуск квиза
         await state.set_state(QuizOrder.role)
         await message.answer("📋 Кто вы? (Собственник/Дизайнер/Застройщик/Инвестор/Другое)")
     elif payload == 'invest':
-        # Запуск инвестиционного калькулятора
         await state.set_state(QuizOrder.city)
         await message.answer("💰 Давайте оценим капитализацию вашего объекта после перепланировки. Какой город?")
     elif payload == 'expert':
-        # Запуск экспертизы
         await state.set_state(QuizOrder.obj_type)
         await message.answer("🔍 Какой тип недвижимости? (🏠 Жилая/🏢 Коммерческая/💰 Инвестиционная)")
     elif payload == 'price':
-        # Запуск калькулятора стоимости услуг
         await state.set_state(QuizOrder.city)
         await message.answer("🧮 Давайте рассчитаем стоимость наших услуг. Какой тип объекта?")
     else:
-        # Стандартное главное меню
         await message.answer("Выберите действие:", reply_markup=get_main_menu())
 
 

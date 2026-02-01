@@ -24,22 +24,90 @@ def validate_phone(phone: str) -> bool:
 @router.callback_query(F.data == "mode:quiz")
 async def start_quiz_callback(callback: CallbackQuery, state: FSMContext):
     """Запуск квиза из меню"""
+    data = await state.get_data()
+    # Проверяем согласие и наличие контакта
+    if not data.get('consent'):
+        from keyboards.main_menu import get_consent_keyboard
+        await callback.message.answer(
+            "Для начала квиза необходимо подтвердить согласие на обработку данных.",
+            reply_markup=get_consent_keyboard()
+        )
+        await callback.answer()
+        return
+
+    if not data.get('phone'):
+        from keyboards.main_menu import get_contact_keyboard
+        await callback.message.answer(
+            "Для начала квиза, пожалуйста, поделитесь вашим контактом.",
+            reply_markup=get_contact_keyboard()
+        )
+        await callback.answer()
+        return
+
     await state.set_state(QuizOrder.role)
     await callback.message.answer("📋 Кто вы? (Собственник/Дизайнер/Застройщик/Инвестор/Другое)")
     await callback.answer()
+
+
+async def handle_initial_contact(message: Message, state: FSMContext):
+    """Первичное сохранение лида и уведомление админа"""
+    phone = message.contact.phone_number
+    name = message.from_user.full_name
+    username = message.from_user.username
+    user_id = message.from_user.id
+
+    data = await state.get_data()
+    source = data.get('_payload') or 'direct'
+
+    await state.update_data(
+        phone=phone,
+        name=name,
+        username=username
+    )
+
+    # Сохраняем в БД
+    try:
+        await db.upsert_unified_lead(
+            user_id=user_id,
+            source_bot="qualification",
+            phone=phone,
+            name=name,
+            username=username,
+            lead_type="initial_contact",
+            consent=1,
+            consent_date=data.get('consent_date')
+        )
+        print(f"✅ Initial lead saved for {user_id}")
+    except Exception as e:
+        print(f"ERROR lead_save_failed: {e}")
+        await message.answer("Произошла ошибка при сохранении вашей заявки, но вы можете продолжить квиз.")
+
+    # Уведомляем админа
+    summary = (
+        f"📱 <b>ПОЛУЧЕН КОНТАКТ</b>\n\n"
+        f"👤 <b>Имя:</b> {name}\n"
+        f"📱 <b>Телефон:</b> <code>{phone}</code>\n"
+        f"🔗 <b>Источник:</b> {source}\n"
+        f"🆔 <b>ID:</b> <code>{user_id}</code>"
+    )
+
+    try:
+        await message.bot.send_message(chat_id=ADMIN_GROUP_ID, text=summary, parse_mode="HTML")
+    except Exception as e:
+        print(f"Ошибка уведомления админа: {e}")
 
 
 class QuizOrder(StatesGroup):
     role = State()
     city = State()
     obj_type = State()
+    floor = State()
     area = State()
     status = State()
     complexity = State()
     goal = State()
     bti_doc = State()
     urgency = State()
-    phone = State()
 
 
 def get_progress(step: int, total: int = 10) -> str:
@@ -119,20 +187,42 @@ async def ask_obj_type(message: Message, state: FSMContext):
         return
 
     await state.update_data(obj_type=text)
+    await state.set_state(QuizOrder.floor)
+
+    name = message.from_user.first_name or ""
+    markup = ReplyKeyboardMarkup(
+        keyboard=[
+            [KeyboardButton(text="Не первый / не последний")],
+            [KeyboardButton(text="Первый"), KeyboardButton(text="Последний")]
+        ],
+        resize_keyboard=True,
+        one_time_keyboard=True
+    )
+    await message.answer(f"{get_progress(4)}{name}, укажите этаж и этажность дома (например: 5/17) или выберите вариант:", reply_markup=markup)
+
+
+@router.message(QuizOrder.floor)
+async def ask_floor(message: Message, state: FSMContext):
+    text = await get_text_from_message(message)
+    if not text:
+        await message.answer("Пожалуйста, укажите этаж.")
+        return
+
+    await state.update_data(floor=text)
     await state.set_state(QuizOrder.area)
 
     name = message.from_user.first_name or ""
-    await message.answer(f"{get_progress(4)}{name}, укажите метраж помещения (кв. м):", reply_markup=ReplyKeyboardRemove())
+    await message.answer(f"{get_progress(5)}{name}, укажите примерный метраж помещения (кв. м):", reply_markup=ReplyKeyboardRemove())
 
 
 @router.message(QuizOrder.area)
 async def ask_area(message: Message, state: FSMContext):
     text = await get_text_from_message(message)
-    if not text:
-        await message.answer("Пожалуйста, укажите метраж.")
+    if not text or not re.match(r'^\d+([.,]\d+)?$', text.strip()):
+        await message.answer("Пожалуйста, введите метраж числом (например: 45 или 62.5)")
         return
 
-    await state.update_data(area=text)
+    await state.update_data(area=text.replace(',', '.'))
     await state.set_state(QuizOrder.status)
 
     name = message.from_user.first_name or ""
@@ -161,7 +251,7 @@ async def ask_status(message: Message, state: FSMContext):
         ],
         resize_keyboard=True
     )
-    await message.answer(f"{get_progress(6)}{name}, есть ли сложные зоны (затрагивание несущих стен, перенос санузлов)?", reply_markup=markup)
+    await message.answer(f"{get_progress(6)}{name}, есть ли сложные зоны (несущие стены, мокрые зоны)?", reply_markup=markup)
 
 
 @router.message(QuizOrder.complexity)
@@ -233,38 +323,13 @@ async def ask_bti(message: Message, state: FSMContext):
 
 
 @router.message(QuizOrder.urgency)
-async def ask_urgency(message: Message, state: FSMContext):
+async def finish_quiz(message: Message, state: FSMContext):
     text = await get_text_from_message(message)
     if not text:
         await message.answer("Пожалуйста, укажите срочность.")
         return
 
     await state.update_data(urgency=text)
-    await state.set_state(QuizOrder.phone)
-
-    markup = ReplyKeyboardMarkup(
-        keyboard=[[KeyboardButton(text="📱 Поделиться контактом", request_contact=True)]],
-        resize_keyboard=True,
-        one_time_keyboard=True
-    )
-    await message.answer(
-        f"{get_progress(10)}Оставьте, пожалуйста, ваш номер телефона для связи.\n\n"
-        "Вы можете нажать кнопку «Поделиться контактом» ниже или ввести номер вручную.",
-        reply_markup=markup
-    )
-
-
-@router.message(QuizOrder.phone)
-async def finish_quiz(message: Message, state: FSMContext):
-    if message.contact:
-        phone = message.contact.phone_number
-    else:
-        phone = await get_text_from_message(message)
-        if not phone or not validate_phone(phone):
-            await message.answer("Пожалуйста, введите корректный номер телефона (например, +79991234567)")
-            return
-
-    await state.update_data(phone=phone)
     data = await state.get_data()
 
     # Формируем расширенную сводку для админа
@@ -276,8 +341,9 @@ async def finish_quiz(message: Message, state: FSMContext):
         f"🆔 <b>TG ID:</b> <code>{message.from_user.id}</code>\n"
         f"📱 <b>Телефон:</b> {data.get('phone')}\n"
         f"🏙 <b>Город:</b> {data.get('city')}\n"
-        f"📐 <b>Метраж:</b> {data.get('area')} м²\n"
         f"🏢 <b>Тип:</b> {data.get('obj_type')}\n"
+        f"🏢 <b>Этаж:</b> {data.get('floor')}\n"
+        f"📐 <b>Метраж:</b> {data.get('area')} м²\n"
         f"🧱 <b>Сложность:</b> {data.get('complexity')}\n"
         f"🎯 <b>Цель:</b> {data.get('goal')}\n"
         f"📄 <b>БТИ:</b> {data.get('bti_doc')}{file_info}\n"
@@ -299,7 +365,18 @@ async def finish_quiz(message: Message, state: FSMContext):
     except Exception as e:
         print(f"Ошибка отправки уведомления админу: {e}")
         await message.bot.send_message(chat_id=ADMIN_GROUP_ID, text=summary, parse_mode="HTML")
-    
+
+    # Обновляем лид в БД результатами квиза
+    try:
+        await db.upsert_unified_lead(
+            user_id=message.from_user.id,
+            source_bot="qualification",
+            lead_type="quiz_completed",
+            details=json.dumps(data, ensure_ascii=False)
+        )
+    except Exception as e:
+        print(f"Ошибка обновления лида: {e}")
+
     # Ветвление финального контента для пользователя
     status = data.get('status', '').lower()
     name = message.from_user.first_name or "клиент"

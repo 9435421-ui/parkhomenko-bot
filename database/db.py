@@ -291,6 +291,37 @@ class Database:
             await self.conn.commit()
             return cursor.lastrowid
 
+    async def upsert_unified_lead(
+        self,
+        user_id: int,
+        source_bot: str,
+        **kwargs
+    ) -> int:
+        """Обновить или добавить лид в единую таблицу"""
+        async with self.conn.cursor() as cursor:
+            # Проверяем наличие активного лида за последние 24 часа
+            await cursor.execute(
+                """SELECT id FROM unified_leads
+                   WHERE user_id = ? AND source_bot = ?
+                   AND created_at > datetime('now', '-1 day')
+                   ORDER BY created_at DESC LIMIT 1""",
+                (user_id, source_bot)
+            )
+            row = await cursor.fetchone()
+
+            if row:
+                lead_id = row[0]
+                set_clause = ", ".join([f"{k} = ?" for k in kwargs.keys()])
+                values = list(kwargs.values()) + [lead_id]
+                await cursor.execute(
+                    f"UPDATE unified_leads SET {set_clause} WHERE id = ?",
+                    values
+                )
+                await self.conn.commit()
+                return lead_id
+            else:
+                return await self.add_unified_lead(user_id, source_bot, phone=kwargs.get('phone', ''), **kwargs)
+
     async def add_unified_lead(
         self,
         user_id: int,
