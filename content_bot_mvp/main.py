@@ -446,7 +446,7 @@ def process_report_description(message, file_id):
 # Сбор лидов (КВИЗ)
 # ==========================
 
-def get_pb(step, total=10):
+def get_pb(step, total=8):
     return f"📍 Шаг {step} из {total}\n"
 
 
@@ -563,70 +563,36 @@ def ask_goal_step(message):
     markup = telebot.types.ReplyKeyboardMarkup(resize_keyboard=True, one_time_keyboard=True)
     markup.add("Инвест", "Для жизни")
     bot.send_message(message.chat.id, f"{get_pb(8)}{name}, какова цель перепланировки?", reply_markup=markup)
-    bot.register_next_step_handler(message, ask_bti_step)
-
-def ask_bti_step(message):
-    goal = get_message_text(message)
-    user_leads[message.chat.id]["goal"] = goal
-    name = user_leads[message.chat.id].get("name", "")
-    bot.send_message(
-        message.chat.id,
-        f"{get_pb(9)}{name}, прикрепите фото или PDF документов БТИ (или просто напишите «нет»):",
-        reply_markup=telebot.types.ReplyKeyboardRemove()
-    )
-    bot.register_next_step_handler(message, ask_urgency_step)
-
-def ask_urgency_step(message):
-    # Обработка медиа (фото или PDF)
-    file_id = None
-    if message.photo:
-        file_id = message.photo[-1].file_id
-        user_leads[message.chat.id]["bti_status"] = "Загружено фото"
-        user_leads[message.chat.id]["bti_file_id"] = file_id
-        bot.send_message(message.chat.id, "📸 Фото получено.")
-    elif message.document:
-        file_id = message.document.file_id
-        user_leads[message.chat.id]["bti_status"] = f"Загружен файл: {message.document.file_name}"
-        user_leads[message.chat.id]["bti_file_id"] = file_id
-        bot.send_message(message.chat.id, f"📄 Файл «{message.document.file_name}» получен.")
-    else:
-        text = get_message_text(message)
-        user_leads[message.chat.id]["bti_status"] = text if text else "не указано"
-
-    name = user_leads[message.chat.id].get("name", "")
-    markup = telebot.types.ReplyKeyboardMarkup(resize_keyboard=True, one_time_keyboard=True)
-    markup.add("Срочно", "Можно подождать")
-    bot.send_message(message.chat.id, f"{get_pb(10)}{name}, насколько срочно нужно решить вопрос?", reply_markup=markup)
     bot.register_next_step_handler(message, finalize_lead)
 
 
-
-
 def finalize_lead(message):
-    # Обработка медиа (фото или PDF)
-    file_id = None
-    if message.photo:
-        file_id = message.photo[-1].file_id
-        user_leads[message.chat.id]["bti_status"] = "Загружено фото"
-        user_leads[message.chat.id]["bti_file_id"] = file_id
-        bot.send_message(message.chat.id, "📸 Фото получено.")
-    elif message.document:
-        file_id = message.document.file_id
-        user_leads[message.chat.id]["bti_status"] = f"Загружен файл: {message.document.file_name}"
-        user_leads[message.chat.id]["bti_file_id"] = file_id
-        bot.send_message(message.chat.id, f"📄 Файл «{message.document.file_name}» получен.")
-    else:
-        text = get_message_text(message)
-        user_leads[message.chat.id]["bti_status"] = text if text else "не указано"
+    goal = get_message_text(message)
+    user_leads[message.chat.id]["goal"] = goal
 
     lead = user_leads[message.chat.id]
 
     # Ветвление финального контента
     stage = lead.get('stage', '').lower()
+    name = lead.get('name', 'клиент')
     if "уже выполнена" in stage:
-        final_info = "🎁 Для вас подготовлена инструкция по легализации выполненной перепланировки."
+        final_text = (
+            f"✅ <b>Спасибо, {name}! Ваша заявка принята.</b>\n\n"
+            "Так как перепланировка уже выполнена, мы подготовим для вас план легализации:\n"
+            "1️⃣ Проверим допустимость выполненных работ.\n"
+            "2️⃣ Оценим риски штрафов и предписаний.\n"
+            "3️⃣ Подскажем, как узаконить всё без судов.\n\n"
+            "Наш эксперт свяжется с вами в ближайшее рабочее время."
+        )
     else:
-        final_info = "🎁 Мы подготовили для вас чек-лист проекта перепланировки."
+        final_text = (
+            f"✅ <b>Спасибо, {name}! Заявка успешно оформлена.</b>\n\n"
+            "Для вашей будущей перепланировки мы подготовим:\n"
+            "1️⃣ Расчет стоимости проектирования и согласования.\n"
+            "2️⃣ Пошаговый алгоритм действий именно для вашего случая.\n"
+            "3️⃣ Список необходимых документов БТИ и ЕГРН.\n\n"
+            "Эксперт позвонит вам для уточнения деталей."
+        )
 
     summary = (
         f"🚀 ЗАВЕРШЕН КВИЗ (Контент-бот)\n\n"
@@ -638,16 +604,15 @@ def finalize_lead(message):
         f"🏢 Этаж: {lead.get('floor')}\n"
         f"📏 Метраж: {lead.get('area')} м²\n"
         f"🧱 Сложность: {lead.get('complexity')}\n"
-        f"🎯 Цель: {lead.get('goal')}\n"
-        f"📎 БТИ: {lead.get('bti_status')}\n"
-        f"🔥 Срочность: {lead.get('urgency')}"
+        f"🎯 Цель: {lead.get('goal')}"
     )
 
     send_lead_to_group(summary, lead.get("object_type", "дом"), user_id=message.chat.id, lead_data=lead)
 
     bot.send_message(
         message.chat.id,
-        f"✅ Спасибо! Информация получена.\n\n{final_info}\n\nНаш эксперт свяжется с вами в ближайшее время."
+        final_text,
+        parse_mode="HTML"
     )
     del user_leads[message.chat.id]
 

@@ -121,6 +121,8 @@ class Database:
                     extra_contact TEXT,
                     details TEXT, -- JSON или текстовое описание (результаты квиза и т.д.)
                     status TEXT DEFAULT 'new',
+                    consent BOOLEAN DEFAULT 0,
+                    consent_date TEXT,
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                     sent_at TIMESTAMP,
                     FOREIGN KEY (user_id) REFERENCES users(user_id)

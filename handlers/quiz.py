@@ -106,11 +106,9 @@ class QuizOrder(StatesGroup):
     status = State()
     complexity = State()
     goal = State()
-    bti_doc = State()
-    urgency = State()
 
 
-def get_progress(step: int, total: int = 10) -> str:
+def get_progress(step: int, total: int = 8) -> str:
     return f"📍 Шаг {step} из {total}\n\n"
 
 def handle_quiz_start(user_stage="planned"):
@@ -230,7 +228,7 @@ async def ask_area(message: Message, state: FSMContext):
         keyboard=[[KeyboardButton(text="📋 Планируется"), KeyboardButton(text="✅ Уже выполнена")]],
         resize_keyboard=True
     )
-    await message.answer(f"{get_progress(5)}{name}, на какой стадии перепланировка?", reply_markup=markup)
+    await message.answer(f"{get_progress(6)}{name}, на какой стадии перепланировка?", reply_markup=markup)
 
 
 @router.message(QuizOrder.status)
@@ -251,7 +249,7 @@ async def ask_status(message: Message, state: FSMContext):
         ],
         resize_keyboard=True
     )
-    await message.answer(f"{get_progress(6)}{name}, есть ли сложные зоны (несущие стены, мокрые зоны)?", reply_markup=markup)
+    await message.answer(f"{get_progress(7)}{name}, что планируете менять?", reply_markup=markup)
 
 
 @router.message(QuizOrder.complexity)
@@ -269,72 +267,20 @@ async def ask_complexity(message: Message, state: FSMContext):
         keyboard=[[KeyboardButton(text="💰 Инвест"), KeyboardButton(text="🏠 Для жизни")]],
         resize_keyboard=True
     )
-    await message.answer(f"{get_progress(7)}{name}, какова цель перепланировки?", reply_markup=markup)
+    await message.answer(f"{get_progress(8)}{name}, какова цель перепланировки?", reply_markup=markup)
 
 
 @router.message(QuizOrder.goal)
-async def ask_goal(message: Message, state: FSMContext):
+async def finish_quiz(message: Message, state: FSMContext):
     text = await get_text_from_message(message)
     if not text:
         await message.answer("Пожалуйста, выберите цель.")
         return
 
     await state.update_data(goal=text)
-    await state.set_state(QuizOrder.bti_doc)
-
-    markup = ReplyKeyboardMarkup(
-        keyboard=[
-            [KeyboardButton(text="✅ Есть файл/фото")],
-            [KeyboardButton(text="📄 Частично")],
-            [KeyboardButton(text="❌ Нет")]
-        ],
-        resize_keyboard=True
-    )
-    await message.answer(
-        f"{get_progress(8)}Есть ли документы БТИ на руках?\n\n"
-        "Вы можете прикрепить фото или PDF прямо сейчас или просто ответить текстом.",
-        reply_markup=markup
-    )
-
-
-@router.message(QuizOrder.bti_doc)
-async def ask_bti(message: Message, state: FSMContext):
-    # Обработка файлов и фото
-    file_id = None
-    if message.photo:
-        file_id = message.photo[-1].file_id
-        await state.update_data(bti_doc="Загружено фото", bti_file_id=file_id)
-        await message.answer("📸 Фото получено.")
-    elif message.document:
-        file_id = message.document.file_id
-        await state.update_data(bti_doc=f"Загружен документ: {message.document.file_name}", bti_file_id=file_id)
-        await message.answer(f"📄 Файл «{message.document.file_name}» получен.")
-    else:
-        text = await get_text_from_message(message)
-        await state.update_data(bti_doc=text if text else "не указано")
-
-    await state.set_state(QuizOrder.urgency)
-
-    markup = ReplyKeyboardMarkup(
-        keyboard=[[KeyboardButton(text="🔥 Срочно"), KeyboardButton(text="⏳ Можно подождать")]],
-        resize_keyboard=True
-    )
-    await message.answer(f"{get_progress(9)}Насколько срочно нужно решить вопрос?", reply_markup=markup)
-
-
-@router.message(QuizOrder.urgency)
-async def finish_quiz(message: Message, state: FSMContext):
-    text = await get_text_from_message(message)
-    if not text:
-        await message.answer("Пожалуйста, укажите срочность.")
-        return
-
-    await state.update_data(urgency=text)
     data = await state.get_data()
 
-    # Формируем расширенную сводку для админа
-    file_info = f"\n📎 <b>Файл:</b> Да (ID: {data.get('bti_file_id')})" if data.get('bti_file_id') else "\n📎 <b>Файл:</b> Нет"
-
+    # Формируем сводку для админа
     summary = (
         f"🚀 <b>НОВАЯ ЗАЯВКА (КВИЗ {data.get('status')})</b>\n\n"
         f"👤 <b>Клиент:</b> {message.from_user.full_name}\n"
@@ -346,8 +292,6 @@ async def finish_quiz(message: Message, state: FSMContext):
         f"📐 <b>Метраж:</b> {data.get('area')} м²\n"
         f"🧱 <b>Сложность:</b> {data.get('complexity')}\n"
         f"🎯 <b>Цель:</b> {data.get('goal')}\n"
-        f"📄 <b>БТИ:</b> {data.get('bti_doc')}{file_info}\n"
-        f"🔥 <b>Срочность:</b> {data.get('urgency')}\n"
         f"🔗 <b>Источник:</b> <code>{data.get('_payload') or 'direct'}</code>"
     )
 
@@ -371,6 +315,9 @@ async def finish_quiz(message: Message, state: FSMContext):
         await db.upsert_unified_lead(
             user_id=message.from_user.id,
             source_bot="qualification",
+            phone=data.get('phone'),
+            name=message.from_user.full_name,
+            username=message.from_user.username,
             lead_type="quiz_completed",
             details=json.dumps(data, ensure_ascii=False)
         )
@@ -409,19 +356,5 @@ async def finish_quiz(message: Message, state: FSMContext):
     
     await message.answer(final_text, parse_mode="HTML", reply_markup=ReplyKeyboardRemove())
     await message.answer("Вы также можете написать нашему эксперту напрямую в Telegram:", reply_markup=markup)
-
-    # Сохранение в единую базу лидов
-    try:
-        await db.add_unified_lead(
-            user_id=message.from_user.id,
-            source_bot="qualification",
-            phone=data.get('phone'),
-            name=message.from_user.full_name,
-            username=message.from_user.username,
-            lead_type="quiz",
-            details=json.dumps(data, ensure_ascii=False)
-        )
-    except Exception as e:
-        print(f"Ошибка сохранения лида: {e}")
 
     await state.clear()
