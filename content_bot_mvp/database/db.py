@@ -13,16 +13,15 @@ class Database:
 
     async def connect(self):
         """Подключение к базе данных"""
-        db_path = os.getenv("DB_PATH", "db/parkhomenko_bot.db")
-        if not db_path:
-            raise RuntimeError("DB_PATH must be set in .env")
+        db_url = os.getenv("DATABASE_URL", "sqlite:///parkhomenko_bot.db")
+        if not db_url:
+            raise RuntimeError("DATABASE_URL must be set in .env")
 
-        # Автоматическое создание папки для БД
-        DB_DIR = os.path.dirname(db_path)
-        if DB_DIR and not os.path.exists(DB_DIR):
-            os.makedirs(DB_DIR)
+        if not db_url.startswith('sqlite:///'):
+            raise RuntimeError("Only SQLite is supported for now")
 
         import aiosqlite
+        db_path = db_url.replace('sqlite:///', '')
         logger.info(f"🔄 Using SQLite database: {db_path}")
         self.conn = await aiosqlite.connect(db_path)
         # Enable foreign keys for SQLite
@@ -80,36 +79,6 @@ class Database:
                     notes TEXT
                 )
             """
-            user_states_sql = """
-                CREATE TABLE IF NOT EXISTS user_states (
-                    user_id INTEGER PRIMARY KEY,
-                    state_data TEXT NOT NULL,
-                    consent_data TEXT,
-                    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-                    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
-                )
-            """
-            holidays_sql = """
-                CREATE TABLE IF NOT EXISTS holidays (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    date TEXT NOT NULL,  -- Format: YYYY-MM-DD
-                    name TEXT NOT NULL,
-                    message_template TEXT NOT NULL,
-                    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
-                )
-            """
-            scheduled_posts_sql = """
-                CREATE TABLE IF NOT EXISTS scheduled_posts (
-                    id           INTEGER PRIMARY KEY AUTOINCREMENT,
-                    channel_id   TEXT NOT NULL,
-                    text         TEXT NOT NULL,
-                    image_path   TEXT,
-                    scheduled_at TEXT NOT NULL,
-                    status       TEXT NOT NULL,
-                    created_at   TEXT NOT NULL,
-                    sent_at      TEXT
-                )
-            """
         else:
             # PostgreSQL syntax
             leads_sql = """
@@ -155,26 +124,20 @@ class Database:
             await cur.execute(leads_sql)
             await cur.execute(content_sql)
             await cur.execute(subscribers_sql)
-            await cur.execute(user_states_sql)
-            await cur.execute(holidays_sql)
-            await cur.execute(scheduled_posts_sql)
         await self.conn.commit()
 
     # Функции для работы с лидами
     async def save_lead(self, name, phone, extra_contact=None, object_type=None,
-                       city=None, change_plan=None, bti_status=None,
-                       house_material=None, commercial_purpose=None, source=None):
+                       city=None, change_plan=None, bti_status=None):
         """Сохранить лид"""
         query = """
-            INSERT INTO leads (name, phone, extra_contact, object_type, city, change_plan, bti_status, house_material, commercial_purpose, source)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            INSERT INTO leads (name, phone, extra_contact, object_type, city, change_plan, bti_status)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
         """
         async with self.conn.cursor() as cur:
             await cur.execute(query, (name, phone, extra_contact, object_type,
-                                    city, change_plan, bti_status, house_material, commercial_purpose, source))
-            lead_id = cur.lastrowid
+                                    city, change_plan, bti_status))
         await self.conn.commit()
-        return lead_id
 
     # Функции для работы с контент-планом
     async def save_post(self, post_type, title, body, cta, publish_date, image_prompt=None, image_url=None):
@@ -386,172 +349,6 @@ class Database:
         query = "UPDATE subscribers SET birthday=? WHERE user_id=?"
         async with self.conn.cursor() as cur:
             await cur.execute(query, (birthday, user_id))
-        await self.conn.commit()
-
-    # ==========================================
-    # USER STATES - сохранение состояний
-    # ==========================================
-
-    async def save_user_state(self, user_id: int, state: dict, consent: dict = None):
-        """
-        Сохранить состояние пользователя в БД
-
-        Args:
-            user_id: Telegram ID пользователя
-            state: Словарь с данными UserState
-            consent: Словарь с данными UserConsent (опционально)
-        """
-        import json
-        from datetime import datetime, date
-
-        def json_serial(obj):
-            if isinstance(obj, (datetime, date)):
-                return obj.isoformat()
-            raise TypeError(f"Type {type(obj)} not serializable")
-
-        state_json = json.dumps(state, ensure_ascii=False, default=json_serial)
-        consent_json = json.dumps(consent, ensure_ascii=False, default=json_serial) if consent else None
-
-        async with self.conn.cursor() as cur:
-            await cur.execute("""
-                INSERT INTO user_states (user_id, state_data, consent_data, updated_at)
-                VALUES (?, ?, ?, datetime('now'))
-                ON CONFLICT(user_id) DO UPDATE SET
-                    state_data = excluded.state_data,
-                    consent_data = excluded.consent_data,
-                    updated_at = datetime('now')
-            """, (user_id, state_json, consent_json))
-
-        await self.conn.commit()
-
-    async def load_user_state(self, user_id: int) -> tuple:
-        """
-        Загрузить состояние пользователя из БД
-
-        Returns:
-            tuple: (state_dict, consent_dict) или (None, None) если не найдено
-        """
-        import json
-
-        async with self.conn.cursor() as cur:
-            await cur.execute(
-                "SELECT state_data, consent_data FROM user_states WHERE user_id = ?",
-                (user_id,)
-            )
-            row = await cur.fetchone()
-
-        if not row:
-            return None, None
-
-        state = json.loads(row[0]) if row[0] else None
-        consent = json.loads(row[1]) if row[1] else None
-
-        return state, consent
-
-    async def clear_user_state(self, user_id: int):
-        """Удалить состояние пользователя (при завершении/сбросе)"""
-        async with self.conn.cursor() as cur:
-            await cur.execute(
-                "DELETE FROM user_states WHERE user_id = ?",
-                (user_id,)
-            )
-        await self.conn.commit()
-
-    # ==========================================
-    # HOLIDAYS - праздничный календарь
-    # ==========================================
-
-    async def get_today_holidays(self) -> list:
-        """
-        Получить все праздники на сегодняшнюю дату
-
-        Returns:
-            list: Список словарей с полями id, date, name, message_template
-        """
-        from datetime import datetime
-
-        today = datetime.now().strftime("%Y-%m-%d")
-
-        async with self.conn.cursor() as cur:
-            await cur.execute(
-                "SELECT id, date, name, message_template FROM holidays WHERE date = ?",
-                (today,)
-            )
-            rows = await cur.fetchall()
-
-        return [dict(row) for row in rows]
-
-    async def get_all_holidays(self) -> list:
-        """
-        Получить все праздники
-
-        Returns:
-            list: Список всех праздников
-        """
-        async with self.conn.cursor() as cur:
-            await cur.execute(
-                "SELECT id, date, name, message_template, created_at FROM holidays ORDER BY date"
-            )
-            rows = await cur.fetchall()
-
-        return [dict(row) for row in rows]
-
-    async def add_holiday(self, date: str, name: str, message_template: str):
-        """
-        Добавить новый праздник
-
-        Args:
-            date: Дата в формате YYYY-MM-DD
-            name: Название праздника
-            message_template: Шаблон поздравительного сообщения
-        """
-        async with self.conn.cursor() as cur:
-            await cur.execute(
-                "INSERT INTO holidays (date, name, message_template) VALUES (?, ?, ?)",
-                (date, name, message_template)
-            )
-        await self.conn.commit()
-
-    # ==========================================
-    # SCHEDULED POSTS - автопостинг
-    # ==========================================
-
-    async def get_scheduled_posts_to_send(self):
-        """
-        Получить запланированные посты, которые нужно отправить
-
-        Returns:
-            list: Список словарей с записями scheduled_posts
-        """
-        import pytz
-        moscow_tz = pytz.timezone('Europe/Moscow')
-        now_moscow = datetime.now(moscow_tz).isoformat()
-
-        query = """
-            SELECT id, channel_id, text, image_path, scheduled_at, status, created_at, sent_at
-            FROM scheduled_posts
-            WHERE status = 'planned' AND scheduled_at <= ?
-            ORDER BY scheduled_at
-        """
-        async with self.conn.cursor() as cur:
-            await cur.execute(query, (now_moscow,))
-            rows = await cur.fetchall()
-            return [dict(row) for row in rows]
-
-    async def mark_scheduled_post_as_sent(self, post_id: int):
-        """
-        Отметить запланированный пост как отправленный
-
-        Args:
-            post_id: ID поста
-        """
-        import pytz
-        moscow_tz = pytz.timezone('Europe/Moscow')
-        now_moscow = datetime.now(moscow_tz).isoformat()
-
-        query = "UPDATE scheduled_posts SET status='sent', sent_at=? WHERE id=?"
-        async with self.conn.cursor() as cur:
-            await cur.execute(query, (now_moscow, post_id))
         await self.conn.commit()
 
 # Глобальный экземпляр базы данных

@@ -16,6 +16,10 @@ class KnowledgeBaseRAG:
             return
 
         for root, dirs, files in os.walk(self.knowledge_dir):
+            # Пропустить папку с внутренними брифами
+            if "internal_briefs" in root:
+                continue
+
             for filename in files:
                 if filename.endswith(('.md', '.txt')):
                     filepath = os.path.join(root, filename)

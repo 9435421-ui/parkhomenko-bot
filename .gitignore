@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 # Python
 __pycache__/
 *.py[cod]
@@ -59,3 +60,17 @@ nohup.out
 # Backups
 *.bak
 *.backup
+=======
+venv/
+__pycache__/
+*.pyc
+
+# Базы данных
+data/*.db
+
+# Логи
+logs/*.log
+
+# Локальные env
+.env
+>>>>>>> 04faaaec929f79a35479144e71cef6fcf49cf331
