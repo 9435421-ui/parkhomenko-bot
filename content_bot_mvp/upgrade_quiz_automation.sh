@@ -1,7 +1,9 @@
 #!/bin/bash
 # upgrade_quiz_automation.sh — Патчер логики квиза ТОРИОН (Идемпотентный)
 
-QUIZ_FILE="../handlers/quiz.py"
+# Путь к файлу квиза относительно корня проекта
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+QUIZ_FILE="$SCRIPT_DIR/../handlers/quiz.py"
 
 echo "[AUTO] Начало патчинга $QUIZ_FILE..."
 
