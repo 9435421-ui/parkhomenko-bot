@@ -44,7 +44,11 @@ def get_progress(step: int, total: int = 10) -> str:
 
 def handle_quiz_start(user_stage="planned"):
     """Placeholder for automation script"""
-    # STAGE_LOGIC
+    # Внедренная логика ветвления
+    if user_stage == "planned":
+        print("Ветка: Чек-лист")
+    else:
+        print("Ветка: Легализация")
     pass
 
 
