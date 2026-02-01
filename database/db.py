@@ -10,7 +10,10 @@ from datetime import datetime
 class Database:
     """Класс для работы с SQLite базой данных"""
     
-    def __init__(self, db_path: str = "database/bot.db"):
+    def __init__(self, db_path: str = None):
+        if db_path is None:
+            db_url = os.getenv("DATABASE_URL", "sqlite:///parkhomenko_bot.db")
+            db_path = db_url.replace("sqlite:///", "")
         self.db_path = db_path
         self.conn: Optional[aiosqlite.Connection] = None
     
@@ -97,6 +100,27 @@ class Database:
                     bti_status TEXT,
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                     sent_to_group BOOLEAN DEFAULT 0,
+                    source_bot TEXT DEFAULT 'qualification',
+                    lead_type TEXT DEFAULT 'quiz',
+                    FOREIGN KEY (user_id) REFERENCES users(user_id)
+                )
+            """)
+
+            # Единая таблица лидов для всех ботов (расширенная версия)
+            await cursor.execute("""
+                CREATE TABLE IF NOT EXISTS unified_leads (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    user_id INTEGER,
+                    source_bot TEXT NOT NULL, -- 'qualification' или 'content'
+                    lead_type TEXT, -- 'quiz', 'direct_request', 'report'
+                    name TEXT,
+                    username TEXT,
+                    phone TEXT,
+                    extra_contact TEXT,
+                    details TEXT, -- JSON или текстовое описание (результаты квиза и т.д.)
+                    status TEXT DEFAULT 'new',
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    sent_at TIMESTAMP,
                     FOREIGN KEY (user_id) REFERENCES users(user_id)
                 )
             """)
@@ -260,6 +284,35 @@ class Database:
             await cursor.execute(
                 f"""INSERT INTO leads ({', '.join(columns)})
                     VALUES ({placeholders})""",
+                values
+            )
+            await self.conn.commit()
+            return cursor.lastrowid
+
+    async def add_unified_lead(
+        self,
+        user_id: int,
+        source_bot: str,
+        phone: str,
+        name: Optional[str] = None,
+        username: Optional[str] = None,
+        lead_type: str = 'direct',
+        details: Optional[str] = None,
+        **kwargs
+    ) -> int:
+        """Добавить лид в единую таблицу"""
+        async with self.conn.cursor() as cursor:
+            columns = ['user_id', 'source_bot', 'phone', 'name', 'username', 'lead_type', 'details']
+            values = [user_id, source_bot, phone, name, username, lead_type, details]
+
+            for k, v in kwargs.items():
+                if k not in columns:
+                    columns.append(k)
+                    values.append(v)
+
+            placeholders = ", ".join(["?" for _ in columns])
+            await cursor.execute(
+                f"INSERT INTO unified_leads ({', '.join(columns)}) VALUES ({placeholders})",
                 values
             )
             await self.conn.commit()

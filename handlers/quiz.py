@@ -1,13 +1,24 @@
 from aiogram import Router, F
-from aiogram.types import Message
+from aiogram.types import Message, CallbackQuery
 from aiogram.fsm.state import StatesGroup, State
 from aiogram.fsm.context import FSMContext
 from config import ADMIN_GROUP_ID
+from database.db import db
+import json
 
 router = Router()
 
 
+@router.callback_query(F.data == "mode:quiz")
+async def start_quiz_callback(callback: CallbackQuery, state: FSMContext):
+    """Запуск квиза из меню"""
+    await state.set_state(QuizOrder.role)
+    await callback.message.answer("📋 Кто вы? (Собственник/Дизайнер/Застройщик/Инвестор/Другое)")
+    await callback.answer()
+
+
 class QuizOrder(StatesGroup):
+    role = State()
     city = State()
     obj_type = State()
     status = State()
@@ -16,6 +27,13 @@ class QuizOrder(StatesGroup):
     bti_doc = State()
     urgency = State()
     phone = State()
+
+
+@router.message(QuizOrder.role)
+async def ask_role(message: Message, state: FSMContext):
+    await state.update_data(role=message.text)
+    await state.set_state(QuizOrder.city)
+    await message.answer("Из какого вы города?")
 
 
 @router.message(QuizOrder.city)
@@ -97,5 +115,20 @@ async def finish_quiz(message: Message, state: FSMContext):
     )
     
     await message.answer(checklist, parse_mode="HTML")
-    await message.answer("Спасибо! Юлия Пархоменко свяжется с вами для анализа.")
+
+    # Сохранение в единую базу лидов
+    try:
+        await db.add_unified_lead(
+            user_id=message.from_user.id,
+            source_bot="qualification",
+            phone=data.get('phone'),
+            name=message.from_user.full_name,
+            username=message.from_user.username,
+            lead_type="quiz",
+            details=json.dumps(data, ensure_ascii=False)
+        )
+    except Exception as e:
+        print(f"Ошибка сохранения лида: {e}")
+
+    await message.answer("Спасибо! Наш эксперт свяжется с вами для анализа.")
     await state.clear()

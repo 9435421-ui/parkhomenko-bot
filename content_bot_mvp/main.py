@@ -8,6 +8,8 @@ from openai import OpenAI
 import schedule
 import time
 import threading
+import sqlite3
+from datetime import datetime
 
 load_dotenv()
 
@@ -74,7 +76,7 @@ def generate_text(prompt: str) -> str:
 def generate_image(prompt: str) -> str:
     try:
         resp = client.images.generate(
-            model="gpt-image-1",
+            model="openai/dall-e-3",
             prompt=prompt,
             size="1024x1024"
         )
@@ -87,11 +89,63 @@ def generate_video(prompt: str) -> str:
     return "Генерация видео временно недоступна."
 
 # ==========================
+# База данных лидов
+# ==========================
+DB_PATH = os.path.join(os.path.dirname(os.path.dirname(__file__)), "parkhomenko_bot.db")
+
+
+def save_lead_to_db(user_id, source_bot, lead_data):
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        cursor = conn.cursor()
+
+        # Убедимся, что таблицы существуют
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS users (
+                user_id INTEGER PRIMARY KEY,
+                username TEXT,
+                first_name TEXT,
+                last_name TEXT,
+                phone TEXT,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                last_interaction TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS unified_leads (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER,
+                source_bot TEXT NOT NULL,
+                lead_type TEXT,
+                name TEXT,
+                username TEXT,
+                phone TEXT,
+                extra_contact TEXT,
+                details TEXT,
+                status TEXT DEFAULT 'new',
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                sent_at TIMESTAMP,
+                FOREIGN KEY (user_id) REFERENCES users(user_id)
+            )
+        """)
+
+        details = json.dumps(lead_data, ensure_ascii=False)
+        cursor.execute("""
+            INSERT INTO unified_leads (user_id, source_bot, lead_type, name, phone, details)
+            VALUES (?, ?, ?, ?, ?, ?)
+        """, (user_id, source_bot, 'direct_request', lead_data.get('name'), lead_data.get('phone'), details))
+
+        conn.commit()
+        conn.close()
+    except Exception as e:
+        print(f"Ошибка сохранения лида в БД: {e}")
+
+# ==========================
 # Отправка лидов в группу
 # ==========================
 
 
-def send_lead_to_group(summary_text: str, object_type: str, is_new: bool = True):
+def send_lead_to_group(summary_text: str, object_type: str, is_new: bool = True, user_id=None, lead_data=None):
     if object_type == "квартира":
         thread_id = THREAD_ID_KVARTIRY
     elif object_type == "коммерция":
@@ -108,6 +162,9 @@ def send_lead_to_group(summary_text: str, object_type: str, is_new: bool = True)
         text=f"{prefix}\n\n{summary_text}",
         message_thread_id=thread_id
     )
+
+    if user_id and lead_data:
+        save_lead_to_db(user_id, "content_bot", lead_data)
 
 # ==========================
 # Автопостинг по расписанию
@@ -154,6 +211,7 @@ def start(message):
     markup = InlineKeyboardMarkup()
     markup.add(InlineKeyboardButton("Создать пост", callback_data="create_post"))
     markup.add(InlineKeyboardButton("Просмотреть контент-план", callback_data="view_plan"))
+    markup.add(InlineKeyboardButton("Репортажный режим (Фото + ИИ)", callback_data="report_mode"))
     markup.add(InlineKeyboardButton("Генерация изображения", callback_data="gen_image"))
     markup.add(InlineKeyboardButton("Генерация видео", callback_data="gen_video"))
     markup.add(InlineKeyboardButton("Собрать лид", callback_data="collect_lead"))
@@ -179,9 +237,29 @@ def callback_handler(call):
     elif call.data == "gen_image":
         bot.send_message(call.message.chat.id, "Введите описание изображения:")
         bot.register_next_step_handler(call.message, generate_image_handler)
+    elif call.data == "report_mode":
+        bot.send_message(call.message.chat.id, "Пришлите фото с объекта, и я составлю описание для поста.")
+        bot.register_next_step_handler(call.message, handle_report_photo)
     elif call.data == "gen_video":
         bot.send_message(call.message.chat.id, "Введите описание видео:")
         bot.register_next_step_handler(call.message, generate_video_handler)
+    elif call.data == "approve_report":
+        data = user_leads.get(call.message.chat.id)
+        if data:
+            posts = load_posts()
+            posts.append({
+                "text": data["temp_text"],
+                "file_id": data["temp_file_id"],
+                "status": "scheduled"
+            })
+            save_posts(posts)
+            bot.send_message(call.message.chat.id, "Пост запланирован!")
+            del user_leads[call.message.chat.id]
+        else:
+            bot.send_message(call.message.chat.id, "Ошибка: данные не найдены.")
+    elif call.data == "edit_report":
+        bot.send_message(call.message.chat.id, "Введите новый текст для поста:")
+        bot.register_next_step_handler(call.message, update_report_text)
     elif call.data == "collect_lead":
         bot.send_message(call.message.chat.id, "Соглашаетесь ли вы на обработку персональных данных? (да/нет)")
         bot.register_next_step_handler(call.message, ask_name)
@@ -205,6 +283,17 @@ def add_post(message):
     bot.send_message(message.chat.id, "Пост добавлен в контент-план!")
 
 
+def update_report_text(message):
+    data = user_leads.get(message.chat.id)
+    if data:
+        data["temp_text"] = message.text
+        markup = InlineKeyboardMarkup()
+        markup.add(InlineKeyboardButton("✅ Одобрить и запланировать", callback_data="approve_report"))
+        bot.send_message(message.chat.id, f"Новый текст:\n\n{message.text}", reply_markup=markup)
+    else:
+        bot.send_message(message.chat.id, "Ошибка сессии.")
+
+
 def generate_image_handler(message):
     url = generate_image(message.text)
     bot.send_message(message.chat.id, f"Ссылка на изображение: {url}")
@@ -213,6 +302,41 @@ def generate_image_handler(message):
 def generate_video_handler(message):
     url = generate_video(message.text)
     bot.send_message(message.chat.id, f"Ссылка на видео: {url}")
+
+
+def handle_report_photo(message):
+    if not message.photo:
+        bot.send_message(message.chat.id, "Пожалуйста, отправьте именно фото.")
+        return
+
+    file_id = message.photo[-1].file_id
+    bot.send_message(message.chat.id, "Принял фото. Опишите кратко, что на нем происходит (или просто нажмите /skip для авто-генерации):")
+    bot.register_next_step_handler(message, process_report_description, file_id)
+
+
+def process_report_description(message, file_id):
+    context = message.text if message.text != "/skip" else "работа на объекте"
+    prompt = (
+        f"Напиши профессиональный и вовлекающий пост для Telegram-канала компании ТОРИОН "
+        f"(эксперты по перепланировкам). Тема: Репортаж с объекта. Контекст: {context}. "
+        f"Стиль: деловой, экспертный, но доступный. Обязательно добавь призыв к действию: "
+        f"пройти квиз по ссылке @torion_bot?start=report_mode"
+    )
+
+    bot.send_message(message.chat.id, "Генерирую описание...")
+    ai_text = generate_text(prompt)
+
+    markup = InlineKeyboardMarkup()
+    markup.add(InlineKeyboardButton("✅ Одобрить и запланировать", callback_data="approve_report"))
+    markup.add(InlineKeyboardButton("✏️ Изменить текст", callback_data="edit_report"))
+
+    # Сохраняем временные данные
+    user_leads[message.chat.id] = {
+        "temp_text": ai_text,
+        "temp_file_id": file_id
+    }
+
+    bot.send_photo(message.chat.id, file_id, caption=ai_text, reply_markup=markup)
 
 # ==========================
 # Сбор лидов
@@ -275,7 +399,7 @@ def finalize_lead(message):
         f"Что хочет изменить: {lead.get('change_plan')}\n"
         f"Статус документов БТИ: {lead.get('bti_status')}"
     )
-    send_lead_to_group(summary, lead["object_type"])
+    send_lead_to_group(summary, lead["object_type"], user_id=message.chat.id, lead_data=lead)
     bot.send_message(
         message.chat.id,
         "Спасибо, информация получена. Лид отправлен специалисту. "

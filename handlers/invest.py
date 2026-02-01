@@ -17,8 +17,8 @@ async def start_invest_calc(callback: CallbackQuery):
     # Устанавливаем режим инвест-калькулятора
     await db.update_user_state(user_id, mode="invest")
     
-    state = await db.get_user_state(user_id)
-    name = state.get('name', 'дорогой клиент')
+    user_data = await db.get_or_create_user(user_id)
+    name = user_data.get('first_name', 'дорогой клиент')
     
     await callback.message.edit_text(
         f"💰 <b>Инвест-калькулятор</b>\n\n"
