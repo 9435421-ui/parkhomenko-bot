@@ -18,8 +18,9 @@ while true; do
     echo "$(date): Запуск бота..." >> bot.log
     # Переходим в директорию бота для корректной загрузки .env и файлов
     cd content_bot_mvp
-    python3 -u main.py >> ../bot.log 2>&1
+    # stdout в bot.log, stderr в bot_error_log.txt
+    python3 -u main.py >> ../bot.log 2>> ../bot_error_log.txt
     cd ..
-    echo "$(date): Бот упал, перезапуск через 5 секунд..." >> bot.log
+    echo "$(date): Бот упал (см. bot_error_log.txt), перезапуск через 5 секунд..." >> bot.log
     sleep 5
 done

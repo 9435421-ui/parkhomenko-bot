@@ -1,5 +1,9 @@
 # Telegram Bot Framework
 aiogram==3.13.1
+pyTelegramBotAPI==4.20.0
+
+# Scheduling
+schedule==1.2.1
 
 # Environment variables
 python-dotenv==1.0.0

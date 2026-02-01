@@ -37,12 +37,11 @@ database/*.db
 
 # Logs
 *.log
-content_bot_mvp/bot_full_report.txt
+bot_error_log.txt
+content_bot_mvp/bot_error_log.txt
 bot_full_report.txt
-content_bot_mvp/bot_test.log
 content_bot_mvp/bot.pid
 logs/
-bot.log
 
 # IDE
 .vscode/
@@ -64,3 +63,6 @@ nohup.out
 # Backups
 *.bak
 *.backup
+handlers/quiz_backup*.py
+backups/
+**/backups/
