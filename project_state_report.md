@@ -17,7 +17,74 @@
 - `utils/` — утилиты (YandexGPT Client, Knowledge Base)
 - `mini_app/` — Telegram Mini App (Invest Calculator)
 
-Полный список файлов зафиксирован в `report_files.txt`.
+### Полное дерево проекта (без venv):
+```
+.
+./бот_по_перепланировкам
+./бот_по_перепланировкам/knowledge_base
+./auto_poster.py
+./mini_app
+./mini_app/index.html
+./mini_app/README.md
+./requirements.txt
+./config
+./knowledge_base
+./BRIEF_перепланировки.md
+./database.py
+./migrations
+./handlers
+./handlers/dialog.py
+./handlers/__init__.py
+./handlers/start.py
+./handlers/invest.py
+./handlers/quiz.py
+./docs
+./kb_rag.py
+./README.md
+./DEPLOY.md
+./utils
+./utils/knowledge_base.py
+./utils/__init__.py
+./utils/yandex_gpt.py
+./database
+./database/models.py
+./database/__init__.py
+./database/db.py
+./docker-compose.yml
+./backup_db.py
+./next_steps_recommendation.md
+./start.sh
+./full_check_bot_report.sh
+./BRIEF_бот_консультант.md
+./keyboards
+./keyboards/__init__.py
+./keyboards/main_menu.py
+./BRIEF_content_agent_channel_pereplanirovki.md
+./parkhomenko_bot.db
+./content_bot_mvp
+./content_bot_mvp/bot.pid
+./content_bot_mvp/main.py
+./bot.log
+./project_state_report.md
+./QUICKSTART.md
+./config.py
+./apply_migration.py
+./functional_matrix.md
+./run_bot.sh
+./agents
+./agents/image_agent.py
+./Dockerfile
+./BRIEF_agents_map_pereplanirovki.md
+./bot_unified.py
+./BRIEF_pereplanirovki.md
+./main.py
+./content_agent.py
+./services
+./services/__init__.py
+./services/lead_service.py
+./services/vk_service.py
+./services/yandex_rag.py
+```
 
 ## 2. Точки входа и активные процессы
 
