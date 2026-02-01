@@ -15,7 +15,10 @@ echo $$ > "$PID_FILE"
 
 while true; do
     echo "$(date): Запуск бота..." >> bot.log
-    python3 -u content_bot_mvp/main.py >> bot.log 2>&1
+    # Переходим в директорию бота для корректной загрузки .env и файлов
+    cd content_bot_mvp
+    python3 -u main.py >> ../bot.log 2>&1
+    cd ..
     echo "$(date): Бот упал, перезапуск через 5 секунд..." >> bot.log
     sleep 5
 done

@@ -23,7 +23,8 @@ ADMIN_ID = int(os.getenv("ADMIN_ID", "0"))
 if not BOT_TOKEN or not OPENAI_API_KEY:
     raise RuntimeError("BOT_TOKEN and OPENAI_API_KEY must be set in .env")
 
-client = OpenAI(api_key=OPENAI_API_KEY, base_url="https://openrouter.ai/api/v1")
+OPENAI_BASE_URL = os.getenv("OPENAI_BASE_URL", "https://openrouter.ai/api/v1")
+client = OpenAI(api_key=OPENAI_API_KEY, base_url=OPENAI_BASE_URL)
 
 user_leads = {}
 
