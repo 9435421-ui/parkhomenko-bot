@@ -1,5 +1,5 @@
 #!/bin/bash
-# upgrade_quiz_automation.sh — Патчер логики квиза ТОРИОН (Идемпотентный)
+# upgrade_quiz_automation.sh — Патчер логики квиза ТЕРИОН (Идемпотентный)
 
 # Путь к файлу квиза относительно корня проекта
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"

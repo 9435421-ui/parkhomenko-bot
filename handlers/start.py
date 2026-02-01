@@ -25,7 +25,7 @@ async def handle_consent(message: Message, state: FSMContext):
     data = await state.get_data()
     payload = data.get('_payload', '')
     
-    if payload == 'quiz' or payload == 'torion_main' or payload == 'domgrand':
+    if payload == 'quiz' or payload == 'terion_main' or payload == 'domgrand':
         # Запуск квиза
         await state.set_state(QuizOrder.role)
         await message.answer("📋 Кто вы? (Собственник/Дизайнер/Застройщик/Инвестор/Другое)")

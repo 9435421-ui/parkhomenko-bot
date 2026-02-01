@@ -249,7 +249,7 @@ async def finish_quiz(message: Message, state: FSMContext):
     # Кнопка для записи на консультацию
     markup = InlineKeyboardMarkup(
         inline_keyboard=[
-            [InlineKeyboardButton(text="📅 Выбрать время консультации", url="https://t.me/torion_expert")]
+            [InlineKeyboardButton(text="📅 Выбрать время консультации", url="https://t.me/terion_expert")]
         ]
     )
     

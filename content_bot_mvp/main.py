@@ -325,10 +325,10 @@ def handle_report_photo(message):
 def process_report_description(message, file_id):
     context = message.text if message.text != "/skip" else "работа на объекте"
     prompt = (
-        f"Напиши профессиональный и вовлекающий пост для Telegram-канала компании ТОРИОН "
+        f"Напиши профессиональный и вовлекающий пост для Telegram-канала компании ТЕРИОН "
         f"(эксперты по перепланировкам). Тема: Репортаж с объекта. Контекст: {context}. "
         f"Стиль: деловой, экспертный, но доступный. Обязательно добавь призыв к действию: "
-        f"пройти квиз по ссылке @torion_bot?start=report_mode"
+        f"пройти квиз по ссылке @terion_bot?start=report_mode"
     )
 
     bot.send_message(message.chat.id, "Генерирую описание...")

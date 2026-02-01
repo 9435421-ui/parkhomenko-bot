@@ -2,7 +2,7 @@
 # full_check_bot_report.sh - Безопасная проверка content_bot_mvp
 
 REPORT_FILE="content_bot_mvp/bot_full_report.txt"
-echo "=== Полная проверка контент-бота ТОРИОН ===" > "$REPORT_FILE"
+echo "=== Полная проверка контент-бота ТЕРИОН ===" > "$REPORT_FILE"
 echo "Дата проверки: $(date)" >> "$REPORT_FILE"
 
 echo -e "\n=== 1. Структура проекта ===" >> "$REPORT_FILE"
