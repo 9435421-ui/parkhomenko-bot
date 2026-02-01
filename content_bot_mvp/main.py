@@ -272,8 +272,16 @@ def callback_handler(call):
         elif object_type == "dom":
             obj = "дом"
         user_leads[call.message.chat.id]["object_type"] = obj
-        bot.send_message(call.message.chat.id, "Введите город:")
-        bot.register_next_step_handler(call.message, ask_address)
+        bot.send_message(call.message.chat.id, f"{get_pb(6)}Введите город:")
+        bot.register_next_step_handler(call.message, ask_media_step)
+
+def ask_media_step(message):
+    user_leads[message.chat.id]["city"] = message.text
+    bot.send_message(
+        message.chat.id,
+        f"{get_pb(7)}Прикрепите фото или PDF документов БТИ (или просто напишите «нет», если документов нет):"
+    )
+    bot.register_next_step_handler(message, finalize_lead)
 
 
 def add_post(message):
@@ -339,71 +347,88 @@ def process_report_description(message, file_id):
     bot.send_photo(message.chat.id, file_id, caption=ai_text, reply_markup=markup)
 
 # ==========================
-# Сбор лидов
+# Сбор лидов (КВИЗ)
 # ==========================
 
+def get_pb(step, total=7):
+    return f"📍 Шаг {step} из {total}\n"
 
 def ask_name(message):
     if message.text.lower() not in ["да", "yes"]:
         bot.send_message(message.chat.id, "Без согласия не можем продолжить.")
         return
     user_leads[message.chat.id] = {"pd_agreed": True}
-    bot.send_message(message.chat.id, "Введите ваше имя:")
+    bot.send_message(message.chat.id, f"{get_pb(1)}Введите ваше имя:")
     bot.register_next_step_handler(message, ask_phone)
 
 
 def ask_phone(message):
     user_leads[message.chat.id]["name"] = message.text
-    bot.send_message(message.chat.id, "Введите ваш телефон:")
-    bot.register_next_step_handler(message, ask_object_type_inline)
+    bot.send_message(message.chat.id, f"{get_pb(2)}Введите ваш телефон:")
+    bot.register_next_step_handler(message, ask_stage)
 
-
-def ask_object_type_inline(message):
+def ask_stage(message):
     user_leads[message.chat.id]["phone"] = message.text
+    markup = telebot.types.ReplyKeyboardMarkup(resize_keyboard=True, one_time_keyboard=True)
+    markup.add("Планирую перепланировку", "Уже выполнена")
+    bot.send_message(message.chat.id, f"{get_pb(3)}На какой стадии перепланировка?", reply_markup=markup)
+    bot.register_next_step_handler(message, ask_area)
+
+def ask_area(message):
+    user_leads[message.chat.id]["stage"] = message.text
+    bot.send_message(message.chat.id, f"{get_pb(4)}Укажите метраж помещения (кв. м):", reply_markup=telebot.types.ReplyKeyboardRemove())
+    bot.register_next_step_handler(message, ask_object_type_inline_msg)
+
+def ask_object_type_inline_msg(message):
+    user_leads[message.chat.id]["area"] = message.text
     markup = InlineKeyboardMarkup()
     markup.add(InlineKeyboardButton("Квартира", callback_data="obj_kvartira"))
     markup.add(InlineKeyboardButton("Коммерция", callback_data="obj_kommertsia"))
     markup.add(InlineKeyboardButton("Дом", callback_data="obj_dom"))
-    bot.send_message(message.chat.id, "Выберите тип объекта:", reply_markup=markup)
+    bot.send_message(message.chat.id, f"{get_pb(5)}Выберите тип объекта:", reply_markup=markup)
 
 
-def ask_address(message):
-    user_leads[message.chat.id]["city"] = message.text
-    bot.send_message(
-        message.chat.id,
-        "Кратко опишите, что хотите изменить в перепланировке "
-        "(объединить комнаты, перенести санузел, расширить кухню и т.п.)."
-    )
-    bot.register_next_step_handler(message, ask_params)
-
-
-def ask_params(message):
-    user_leads[message.chat.id]["change_plan"] = message.text
-    bot.send_message(
-        message.chat.id,
-        "Есть ли сейчас у вас на руках документы БТИ по этому объекту "
-        "(поэтажный план, экспликация, техпаспорт)? "
-        "Кратко опишите: есть/нет, в каком виде."
-    )
-    bot.register_next_step_handler(message, finalize_lead)
 
 
 def finalize_lead(message):
-    user_leads[message.chat.id]["bti_status"] = message.text
+    # Обработка медиа (фото или PDF)
+    file_id = None
+    if message.photo:
+        file_id = message.photo[-1].file_id
+        user_leads[message.chat.id]["bti_status"] = "Загружено фото"
+        user_leads[message.chat.id]["bti_file_id"] = file_id
+    elif message.document:
+        file_id = message.document.file_id
+        user_leads[message.chat.id]["bti_status"] = f"Загружен файл: {message.document.file_name}"
+        user_leads[message.chat.id]["bti_file_id"] = file_id
+    else:
+        user_leads[message.chat.id]["bti_status"] = message.text
+
     lead = user_leads[message.chat.id]
+
+    # Ветвление финального контента
+    stage = lead.get('stage', '').lower()
+    if "уже выполнена" in stage:
+        final_info = "🎁 Для вас подготовлена инструкция по легализации выполненной перепланировки."
+    else:
+        final_info = "🎁 Мы подготовили для вас чек-лист проекта перепланировки."
+
     summary = (
-        f"Имя: {lead.get('name')}\n"
-        f"Телефон: {lead.get('phone')}\n"
-        f"Тип объекта: {lead.get('object_type')}\n"
-        f"Город/регион: {lead.get('city')}\n"
-        f"Что хочет изменить: {lead.get('change_plan')}\n"
-        f"Статус документов БТИ: {lead.get('bti_status')}"
+        f"🚀 НОВАЯ ЗАЯВКА (КВИЗ)\n\n"
+        f"👤 Имя: {lead.get('name')}\n"
+        f"📱 Телефон: {lead.get('phone')}\n"
+        f"🏗 Стадия: {lead.get('stage')}\n"
+        f"📏 Метраж: {lead.get('area')} м²\n"
+        f"🏙 Город: {lead.get('city')}\n"
+        f"🏢 Тип: {lead.get('object_type')}\n"
+        f"📎 БТИ: {lead.get('bti_status')}"
     )
-    send_lead_to_group(summary, lead["object_type"], user_id=message.chat.id, lead_data=lead)
+
+    send_lead_to_group(summary, lead.get("object_type", "дом"), user_id=message.chat.id, lead_data=lead)
+
     bot.send_message(
         message.chat.id,
-        "Спасибо, информация получена. Лид отправлен специалисту. "
-        "Адрес и детали по документам уточним уже на следующем шаге общения."
+        f"✅ Спасибо! Информация получена.\n\n{final_info}\n\nНаш эксперт свяжется с вами в ближайшее время."
     )
     del user_leads[message.chat.id]
 
@@ -413,4 +438,3 @@ def finalize_lead(message):
 # ==========================
 print("Бот запущен...")
 bot.polling(non_stop=True)
-

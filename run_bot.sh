@@ -2,7 +2,8 @@
 # run_bot.sh - Запуск бота с авто-рестартом
 PID_FILE="content_bot_mvp/bot.pid"
 
-# Убиваем предыдущий процесс, если он есть
+# Убиваем предыдущие процессы бота
+pkill -f "python3.*main.py" || true
 if [ -f "$PID_FILE" ]; then
     kill $(cat "$PID_FILE") 2>/dev/null
     rm "$PID_FILE"

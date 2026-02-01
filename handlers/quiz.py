@@ -7,6 +7,9 @@ from database.db import db
 import json
 import re
 
+def get_progress_bar(step, total=10):
+    return f"📊 Шаг {step} из {total}\n" + "—" * 20 + "\n"
+
 router = Router()
 
 def validate_phone(phone: str) -> bool:
@@ -39,15 +42,9 @@ class QuizOrder(StatesGroup):
 def get_progress(step: int, total: int = 10) -> str:
     return f"📍 Шаг {step} из {total}\n\n"
 
-def handle_quiz_start():
+def handle_quiz_start(user_stage="planned"):
     """Placeholder for automation script"""
-
-    # Логика ветвления (авто-апгрейд)
-    if user_stage == "planned":
-        pass
-    elif user_stage == "done":
-        pass
-
+    # STAGE_LOGIC
     pass
 
 
@@ -198,7 +195,7 @@ async def finish_quiz(message: Message, state: FSMContext):
         f"🆔 <b>TG ID:</b> <code>{message.from_user.id}</code>\n"
         f"📱 <b>Телефон:</b> {data.get('phone')}\n"
         f"🏙 <b>Город:</b> {data.get('city')}\n"
-        f"📐 <b>Метраж:</b> {data.get('area')} кв.м\n"
+        f"📐 <b>Метраж:</b> {data.get('area')} м²\n"
         f"🏢 <b>Тип:</b> {data.get('obj_type')}\n"
         f"🧱 <b>Сложность:</b> {data.get('complexity')}\n"
         f"🎯 <b>Цель:</b> {data.get('goal')}\n"
