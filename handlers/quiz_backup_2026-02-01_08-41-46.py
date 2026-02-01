@@ -41,13 +41,7 @@ def get_progress(step: int, total: int = 10) -> str:
 
 def handle_quiz_start():
     """Placeholder for automation script"""
-
-    # Логика ветвления (авто-апгрейд)
-    if user_stage == "planned":
-        pass
-    elif user_stage == "done":
-        pass
-
+    #STAGE_LOGIC
     pass
 
 
@@ -221,7 +215,7 @@ async def finish_quiz(message: Message, state: FSMContext):
     except Exception as e:
         print(f"Ошибка отправки уведомления админу: {e}")
         await message.bot.send_message(chat_id=ADMIN_GROUP_ID, text=summary, parse_mode="HTML")
-    
+
     # Ветвление финального контента для пользователя
     status = data.get('status', '').lower()
     name = message.from_user.first_name or "клиент"
@@ -251,7 +245,7 @@ async def finish_quiz(message: Message, state: FSMContext):
             [InlineKeyboardButton(text="📅 Выбрать время консультации", url="https://t.me/torion_expert")]
         ]
     )
-    
+
     await message.answer(final_text, parse_mode="HTML", reply_markup=ReplyKeyboardRemove())
     await message.answer("Вы также можете написать нашему эксперту напрямую в Telegram:", reply_markup=markup)
 

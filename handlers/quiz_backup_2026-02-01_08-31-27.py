@@ -18,9 +18,16 @@ def validate_phone(phone: str) -> bool:
 @router.callback_query(F.data == "mode:quiz")
 async def start_quiz_callback(callback: CallbackQuery, state: FSMContext):
     """Запуск квиза из меню"""
+    # [START_MARKER]
+    #STAGE_LOGIC
     await state.set_state(QuizOrder.role)
     await callback.message.answer("📋 Кто вы? (Собственник/Дизайнер/Застройщик/Инвестор/Другое)")
     await callback.answer()
+
+def handle_quiz_start():
+    """Вспомогательная функция для автоматизации"""
+    #STAGE_LOGIC
+    pass
 
 
 class QuizOrder(StatesGroup):
@@ -39,24 +46,16 @@ class QuizOrder(StatesGroup):
 def get_progress(step: int, total: int = 10) -> str:
     return f"📍 Шаг {step} из {total}\n\n"
 
-def handle_quiz_start():
-    """Placeholder for automation script"""
-
-    # Логика ветвления (авто-апгрейд)
-    if user_stage == "planned":
-        pass
-    elif user_stage == "done":
-        pass
-
-    pass
-
 
 @router.message(QuizOrder.role)
 async def ask_role(message: Message, state: FSMContext):
     await state.update_data(role=message.text)
     await state.set_state(QuizOrder.city)
     name = message.from_user.first_name or ""
-    await message.answer(f"{get_progress(2)}{name}, из какого вы города?", reply_markup=ReplyKeyboardRemove())
+    await message.answer(
+        f"{get_progress(2)}{name}, из какого вы города?",
+        reply_markup=ReplyKeyboardRemove()
+    )
 
 
 @router.message(QuizOrder.city)
@@ -75,7 +74,10 @@ async def ask_city(message: Message, state: FSMContext):
 async def ask_obj_type(message: Message, state: FSMContext):
     await state.update_data(obj_type=message.text)
     await state.set_state(QuizOrder.area)
-    await message.answer(f"{get_progress(4)}Укажите примерный метраж помещения (кв. м):", reply_markup=ReplyKeyboardRemove())
+    await message.answer(
+        f"{get_progress(4)}Укажите примерный метраж помещения (кв. м):",
+        reply_markup=ReplyKeyboardRemove()
+    )
 
 
 @router.message(QuizOrder.area)
@@ -102,7 +104,10 @@ async def ask_status(message: Message, state: FSMContext):
         ],
         resize_keyboard=True
     )
-    await message.answer(f"{get_progress(6)}Есть ли сложные зоны (затрагивание несущих стен, перенос санузлов)?", reply_markup=markup)
+    await message.answer(
+        f"{get_progress(6)}Есть ли сложные зоны (затрагивание несущих стен, перенос санузлов)?",
+        reply_markup=markup
+    )
 
 
 @router.message(QuizOrder.complexity)
@@ -210,6 +215,7 @@ async def finish_quiz(message: Message, state: FSMContext):
     # Отправка в админ-группу
     try:
         if data.get('bti_file_id'):
+            # Если есть файл, отправляем его вместе с описанием
             await message.bot.send_document(
                 chat_id=ADMIN_GROUP_ID,
                 document=data.get('bti_file_id'),
@@ -220,8 +226,9 @@ async def finish_quiz(message: Message, state: FSMContext):
             await message.bot.send_message(chat_id=ADMIN_GROUP_ID, text=summary, parse_mode="HTML")
     except Exception as e:
         print(f"Ошибка отправки уведомления админу: {e}")
+        # Фолбэк на простое сообщение
         await message.bot.send_message(chat_id=ADMIN_GROUP_ID, text=summary, parse_mode="HTML")
-    
+
     # Ветвление финального контента для пользователя
     status = data.get('status', '').lower()
     name = message.from_user.first_name or "клиент"
@@ -251,7 +258,7 @@ async def finish_quiz(message: Message, state: FSMContext):
             [InlineKeyboardButton(text="📅 Выбрать время консультации", url="https://t.me/torion_expert")]
         ]
     )
-    
+
     await message.answer(final_text, parse_mode="HTML", reply_markup=ReplyKeyboardRemove())
     await message.answer("Вы также можете написать нашему эксперту напрямую в Telegram:", reply_markup=markup)
 
