@@ -13,7 +13,10 @@ async def main():
     # Подключение к базе данных
     await db.connect()
 
-    bot = Bot(token=BOT_TOKEN, parse_mode="HTML")
+    bot = Bot(
+        token=BOT_TOKEN,
+        default=DefaultBotProperties(parse_mode="HTML")
+    )
     dp = Dispatcher(storage=MemoryStorage())
 
     dp.include_router(start.router)

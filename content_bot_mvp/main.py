@@ -13,11 +13,12 @@ from datetime import datetime
 import asyncio
 import sys
 
+load_dotenv()
+
 # Добавляем корень проекта в путь для импорта сервисов
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from services.vk_service import vk_service
-
-load_dotenv()
+from utils.voice_handler import voice_handler
 
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 CHANNEL_ID = int(os.getenv("CHANNEL_ID"))
@@ -163,11 +164,19 @@ def send_lead_to_group(summary_text: str, object_type: str, is_new: bool = True,
 
     prefix = "🔥 НОВЫЙ ЛИД" if is_new else "🔄 Обновление лида"
 
-    bot.send_message(
-        chat_id=LEADS_GROUP_CHAT_ID,
-        text=f"{prefix}\n\n{summary_text}",
-        message_thread_id=thread_id
-    )
+    try:
+        bot.send_message(
+            chat_id=LEADS_GROUP_CHAT_ID,
+            text=f"{prefix}\n\n{summary_text}",
+            message_thread_id=thread_id
+        )
+    except Exception as e:
+        print(f"Ошибка отправки лида в группу {LEADS_GROUP_CHAT_ID}: {e}")
+        # Попытка отправить без thread_id
+        try:
+            bot.send_message(chat_id=LEADS_GROUP_CHAT_ID, text=f"{prefix}\n\n{summary_text}")
+        except Exception as e2:
+            print(f"Критическая ошибка отправки лида: {e2}")
 
     if user_id and lead_data:
         save_lead_to_db(user_id, "content_bot", lead_data)
@@ -294,14 +303,30 @@ def callback_handler(call):
         elif object_type == "dom":
             obj = "дом"
         user_leads[call.message.chat.id]["object_type"] = obj
-        bot.send_message(call.message.chat.id, f"{get_pb(6)}Введите город:")
+        name = user_leads[call.message.chat.id].get("name", "")
+
+        bot.send_message(
+            call.message.chat.id,
+            f"{get_pb(6)}{name}, из какого вы города? (напишите название)",
+            reply_markup=telebot.types.ReplyKeyboardRemove()
+        )
         bot.register_next_step_handler(call.message, ask_media_step)
 
+
 def ask_media_step(message):
-    user_leads[message.chat.id]["city"] = message.text
+    city = get_message_text(message)
+    if not city:
+        bot.send_message(message.chat.id, "Пожалуйста, укажите город.")
+        bot.register_next_step_handler(message, ask_media_step)
+        return
+
+    user_leads[message.chat.id]["city"] = city
+    name = user_leads[message.chat.id].get("name", "")
+
     bot.send_message(
         message.chat.id,
-        f"{get_pb(7)}Прикрепите фото или PDF документов БТИ (или просто напишите «нет», если документов нет):"
+        f"{get_pb(7)}{name}, прикрепите фото или PDF документов БТИ (или просто напишите «нет», если документов нет):",
+        reply_markup=telebot.types.ReplyKeyboardRemove()
     )
     bot.register_next_step_handler(message, finalize_lead)
 
@@ -375,34 +400,98 @@ def process_report_description(message, file_id):
 def get_pb(step, total=7):
     return f"📍 Шаг {step} из {total}\n"
 
+
+def get_message_text(message):
+    """Извлекает текст из сообщения или транскрибирует голос"""
+    if message.voice:
+        try:
+            file_info = bot.get_file(message.voice.file_id)
+            downloaded_file = bot.download_file(file_info.file_path)
+
+            # Временный файл
+            import tempfile
+            with tempfile.NamedTemporaryFile(suffix=".oga", delete=False) as temp:
+                temp.write(downloaded_file)
+                temp_path = temp.name
+
+            text = voice_handler.transcribe(temp_path)
+            os.unlink(temp_path)
+
+            if text:
+                bot.send_message(message.chat.id, f"🎤 Распознано: «{text}»")
+                return text
+            return ""
+        except Exception as e:
+            print(f"Ошибка транскрибации в контент-боте: {e}")
+            return ""
+    return message.text if message.text else ""
+
+
 def ask_name(message):
-    if message.text.lower() not in ["да", "yes"]:
-        bot.send_message(message.chat.id, "Без согласия не можем продолжить.")
+    text = get_message_text(message)
+    if text.lower() not in ["да", "yes"]:
+        bot.send_message(message.chat.id, "Без согласия не можем продолжить. Пожалуйста, ответьте «да».")
+        bot.register_next_step_handler(message, ask_name)
         return
     user_leads[message.chat.id] = {"pd_agreed": True}
-    bot.send_message(message.chat.id, f"{get_pb(1)}Введите ваше имя:")
+    bot.send_message(message.chat.id, f"{get_pb(1)}Введите ваше имя (можно голосом):")
     bot.register_next_step_handler(message, ask_phone)
 
 
 def ask_phone(message):
-    user_leads[message.chat.id]["name"] = message.text
-    bot.send_message(message.chat.id, f"{get_pb(2)}Введите ваш телефон:")
+    name = get_message_text(message)
+    if not name:
+        bot.send_message(message.chat.id, "Пожалуйста, введите ваше имя.")
+        bot.register_next_step_handler(message, ask_phone)
+        return
+
+    user_leads[message.chat.id]["name"] = name
+    bot.send_message(message.chat.id, f"{get_pb(2)}{name}, введите ваш номер телефона:")
     bot.register_next_step_handler(message, ask_stage)
 
+
 def ask_stage(message):
-    user_leads[message.chat.id]["phone"] = message.text
+    phone = get_message_text(message)
+    if not phone:
+        bot.send_message(message.chat.id, "Пожалуйста, введите номер телефона.")
+        bot.register_next_step_handler(message, ask_stage)
+        return
+
+    user_leads[message.chat.id]["phone"] = phone
+    name = user_leads[message.chat.id].get("name", "")
+
     markup = telebot.types.ReplyKeyboardMarkup(resize_keyboard=True, one_time_keyboard=True)
     markup.add("Планирую перепланировку", "Уже выполнена")
-    bot.send_message(message.chat.id, f"{get_pb(3)}На какой стадии перепланировка?", reply_markup=markup)
+    bot.send_message(message.chat.id, f"{get_pb(3)}{name}, на какой стадии перепланировка?", reply_markup=markup)
     bot.register_next_step_handler(message, ask_area)
 
+
 def ask_area(message):
-    user_leads[message.chat.id]["stage"] = message.text
-    bot.send_message(message.chat.id, f"{get_pb(4)}Укажите метраж помещения (кв. м):", reply_markup=telebot.types.ReplyKeyboardRemove())
+    stage = get_message_text(message)
+    if not stage:
+        bot.send_message(message.chat.id, "Пожалуйста, выберите стадию.")
+        bot.register_next_step_handler(message, ask_area)
+        return
+
+    user_leads[message.chat.id]["stage"] = stage
+    name = user_leads[message.chat.id].get("name", "")
+
+    bot.send_message(
+        message.chat.id,
+        f"{get_pb(4)}{name}, укажите метраж помещения (кв. м):",
+        reply_markup=telebot.types.ReplyKeyboardRemove()
+    )
     bot.register_next_step_handler(message, ask_object_type_inline_msg)
 
+
 def ask_object_type_inline_msg(message):
-    user_leads[message.chat.id]["area"] = message.text
+    area = get_message_text(message)
+    if not area:
+        bot.send_message(message.chat.id, "Укажите метраж помещения.")
+        bot.register_next_step_handler(message, ask_object_type_inline_msg)
+        return
+
+    user_leads[message.chat.id]["area"] = area
     markup = InlineKeyboardMarkup()
     markup.add(InlineKeyboardButton("Квартира", callback_data="obj_kvartira"))
     markup.add(InlineKeyboardButton("Коммерция", callback_data="obj_kommertsia"))
@@ -419,12 +508,15 @@ def finalize_lead(message):
         file_id = message.photo[-1].file_id
         user_leads[message.chat.id]["bti_status"] = "Загружено фото"
         user_leads[message.chat.id]["bti_file_id"] = file_id
+        bot.send_message(message.chat.id, "📸 Фото получено.")
     elif message.document:
         file_id = message.document.file_id
         user_leads[message.chat.id]["bti_status"] = f"Загружен файл: {message.document.file_name}"
         user_leads[message.chat.id]["bti_file_id"] = file_id
+        bot.send_message(message.chat.id, f"📄 Файл «{message.document.file_name}» получен.")
     else:
-        user_leads[message.chat.id]["bti_status"] = message.text
+        text = get_message_text(message)
+        user_leads[message.chat.id]["bti_status"] = text if text else "не указано"
 
     lead = user_leads[message.chat.id]
 
@@ -453,6 +545,14 @@ def finalize_lead(message):
         f"✅ Спасибо! Информация получена.\n\n{final_info}\n\nНаш эксперт свяжется с вами в ближайшее время."
     )
     del user_leads[message.chat.id]
+
+
+@bot.message_handler(content_types=["voice"])
+def handle_voice_global(message):
+    """Глобальный обработчик голоса для транскрибации вне квиза"""
+    text = get_message_text(message)
+    if text:
+        bot.send_message(message.chat.id, "Я услышал вас. Чем я могу помочь? Используйте меню или кнопки.")
 
 
 # ==========================

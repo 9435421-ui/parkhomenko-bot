@@ -4,8 +4,11 @@ from aiogram.fsm.state import StatesGroup, State
 from aiogram.fsm.context import FSMContext
 from config import ADMIN_GROUP_ID
 from database.db import db
+from utils.voice_handler import voice_handler
 import json
 import re
+import os
+import tempfile
 
 def get_progress_bar(step, total=10):
     return f"📊 Шаг {step} из {total}\n" + "—" * 20 + "\n"
@@ -52,50 +55,105 @@ def handle_quiz_start(user_stage="planned"):
     pass
 
 
+async def get_text_from_message(message: Message):
+    """Извлекает текст или транскрибирует голос в Aiogram"""
+    if message.voice:
+        try:
+            file_id = message.voice.file_id
+            file = await message.bot.get_file(file_id)
+            file_path = file.file_path
+
+            # Скачиваем файл
+            dest = tempfile.NamedTemporaryFile(suffix=".oga", delete=False)
+            await message.bot.download_file(file_path, dest.name)
+
+            text = voice_handler.transcribe(dest.name)
+            os.unlink(dest.name)
+
+            if text:
+                await message.answer(f"🎤 Распознано: «{text}»")
+                return text
+        except Exception as e:
+            print(f"Ошибка транскрибации: {e}")
+            return None
+    return message.text
+
+
 @router.message(QuizOrder.role)
 async def ask_role(message: Message, state: FSMContext):
-    await state.update_data(role=message.text)
+    text = await get_text_from_message(message)
+    if not text:
+        await message.answer("Пожалуйста, укажите вашу роль (Собственник/Дизайнер и т.д.)")
+        return
+
+    await state.update_data(role=text)
     await state.set_state(QuizOrder.city)
     name = message.from_user.first_name or ""
-    await message.answer(f"{get_progress(2)}{name}, из какого вы города?", reply_markup=ReplyKeyboardRemove())
+
+    await message.answer(f"{get_progress(2)}{name}, из какого вы города? (напишите название)", reply_markup=ReplyKeyboardRemove())
 
 
 @router.message(QuizOrder.city)
 async def ask_city(message: Message, state: FSMContext):
-    await state.update_data(city=message.text)
+    text = await get_text_from_message(message)
+    if not text:
+        await message.answer("Пожалуйста, укажите город.")
+        return
+
+    await state.update_data(city=text)
     await state.set_state(QuizOrder.obj_type)
 
+    name = message.from_user.first_name or ""
     markup = ReplyKeyboardMarkup(
         keyboard=[[KeyboardButton(text="🏠 Жилое"), KeyboardButton(text="🏢 Нежилое")]],
         resize_keyboard=True
     )
-    await message.answer(f"{get_progress(3)}Какой тип объекта?", reply_markup=markup)
+    await message.answer(f"{get_progress(3)}{name}, какой тип объекта?", reply_markup=markup)
 
 
 @router.message(QuizOrder.obj_type)
 async def ask_obj_type(message: Message, state: FSMContext):
-    await state.update_data(obj_type=message.text)
+    text = await get_text_from_message(message)
+    if not text:
+        await message.answer("Пожалуйста, выберите тип объекта.")
+        return
+
+    await state.update_data(obj_type=text)
     await state.set_state(QuizOrder.area)
-    await message.answer(f"{get_progress(4)}Укажите примерный метраж помещения (кв. м):", reply_markup=ReplyKeyboardRemove())
+
+    name = message.from_user.first_name or ""
+    await message.answer(f"{get_progress(4)}{name}, укажите метраж помещения (кв. м):", reply_markup=ReplyKeyboardRemove())
 
 
 @router.message(QuizOrder.area)
 async def ask_area(message: Message, state: FSMContext):
-    await state.update_data(area=message.text)
+    text = await get_text_from_message(message)
+    if not text:
+        await message.answer("Пожалуйста, укажите метраж.")
+        return
+
+    await state.update_data(area=text)
     await state.set_state(QuizOrder.status)
 
+    name = message.from_user.first_name or ""
     markup = ReplyKeyboardMarkup(
         keyboard=[[KeyboardButton(text="📋 Планируется"), KeyboardButton(text="✅ Уже выполнена")]],
         resize_keyboard=True
     )
-    await message.answer(f"{get_progress(5)}На какой стадии перепланировка?", reply_markup=markup)
+    await message.answer(f"{get_progress(5)}{name}, на какой стадии перепланировка?", reply_markup=markup)
 
 
 @router.message(QuizOrder.status)
 async def ask_status(message: Message, state: FSMContext):
-    await state.update_data(status=message.text)
+    text = await get_text_from_message(message)
+    if not text:
+        await message.answer("Пожалуйста, выберите стадию.")
+        return
+
+    await state.update_data(status=text)
     await state.set_state(QuizOrder.complexity)
 
+    name = message.from_user.first_name or ""
     markup = ReplyKeyboardMarkup(
         keyboard=[
             [KeyboardButton(text="🧱 Стены"), KeyboardButton(text="🚿 Мокрые зоны")],
@@ -103,24 +161,35 @@ async def ask_status(message: Message, state: FSMContext):
         ],
         resize_keyboard=True
     )
-    await message.answer(f"{get_progress(6)}Есть ли сложные зоны (затрагивание несущих стен, перенос санузлов)?", reply_markup=markup)
+    await message.answer(f"{get_progress(6)}{name}, есть ли сложные зоны (затрагивание несущих стен, перенос санузлов)?", reply_markup=markup)
 
 
 @router.message(QuizOrder.complexity)
 async def ask_complexity(message: Message, state: FSMContext):
-    await state.update_data(complexity=message.text)
+    text = await get_text_from_message(message)
+    if not text:
+        await message.answer("Пожалуйста, выберите вариант.")
+        return
+
+    await state.update_data(complexity=text)
     await state.set_state(QuizOrder.goal)
 
+    name = message.from_user.first_name or ""
     markup = ReplyKeyboardMarkup(
         keyboard=[[KeyboardButton(text="💰 Инвест"), KeyboardButton(text="🏠 Для жизни")]],
         resize_keyboard=True
     )
-    await message.answer(f"{get_progress(7)}Какова цель перепланировки?", reply_markup=markup)
+    await message.answer(f"{get_progress(7)}{name}, какова цель перепланировки?", reply_markup=markup)
 
 
 @router.message(QuizOrder.goal)
 async def ask_goal(message: Message, state: FSMContext):
-    await state.update_data(goal=message.text)
+    text = await get_text_from_message(message)
+    if not text:
+        await message.answer("Пожалуйста, выберите цель.")
+        return
+
+    await state.update_data(goal=text)
     await state.set_state(QuizOrder.bti_doc)
 
     markup = ReplyKeyboardMarkup(
@@ -145,11 +214,14 @@ async def ask_bti(message: Message, state: FSMContext):
     if message.photo:
         file_id = message.photo[-1].file_id
         await state.update_data(bti_doc="Загружено фото", bti_file_id=file_id)
+        await message.answer("📸 Фото получено.")
     elif message.document:
         file_id = message.document.file_id
         await state.update_data(bti_doc=f"Загружен документ: {message.document.file_name}", bti_file_id=file_id)
+        await message.answer(f"📄 Файл «{message.document.file_name}» получен.")
     else:
-        await state.update_data(bti_doc=message.text)
+        text = await get_text_from_message(message)
+        await state.update_data(bti_doc=text if text else "не указано")
 
     await state.set_state(QuizOrder.urgency)
 
@@ -162,7 +234,12 @@ async def ask_bti(message: Message, state: FSMContext):
 
 @router.message(QuizOrder.urgency)
 async def ask_urgency(message: Message, state: FSMContext):
-    await state.update_data(urgency=message.text)
+    text = await get_text_from_message(message)
+    if not text:
+        await message.answer("Пожалуйста, укажите срочность.")
+        return
+
+    await state.update_data(urgency=text)
     await state.set_state(QuizOrder.phone)
 
     markup = ReplyKeyboardMarkup(
@@ -182,8 +259,8 @@ async def finish_quiz(message: Message, state: FSMContext):
     if message.contact:
         phone = message.contact.phone_number
     else:
-        phone = message.text
-        if not validate_phone(phone):
+        phone = await get_text_from_message(message)
+        if not phone or not validate_phone(phone):
             await message.answer("Пожалуйста, введите корректный номер телефона (например, +79991234567)")
             return
 
