@@ -10,6 +10,12 @@ import time
 import threading
 import sqlite3
 from datetime import datetime
+import asyncio
+import sys
+
+# Добавляем корень проекта в путь для импорта сервисов
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from services.vk_service import vk_service
 
 load_dotenv()
 
@@ -186,7 +192,23 @@ def post_scheduler():
         if video_url:
             msg += f"\n\nВидео: {video_url}"
 
+        # Публикация в Telegram
         bot.send_message(CHANNEL_ID, msg)
+
+        # Дублирование в VK (если настроено)
+        if os.getenv("VK_API_TOKEN"):
+            try:
+                # Т.к. мы в отдельном потоке threading, создаем новый loop
+                loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(loop)
+                attachments = []
+                if img_url:
+                    attachments.append(img_url)
+
+                loop.run_until_complete(vk_service.send_to_community(msg, attachments))
+                loop.close()
+            except Exception as e:
+                print(f"Ошибка дублирования в VK: {e}")
 
 
 # Запускаем автопостинг в 12:00 каждый день
