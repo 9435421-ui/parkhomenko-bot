@@ -20,7 +20,9 @@ class Database:
     async def connect(self):
         """Подключение к базе данных"""
         # Создаём директорию если не существует
-        os.makedirs(os.path.dirname(self.db_path), exist_ok=True)
+        db_dir = os.path.dirname(self.db_path)
+        if db_dir:
+            os.makedirs(db_dir, exist_ok=True)
         
         self.conn = await aiosqlite.connect(self.db_path)
         self.conn.row_factory = aiosqlite.Row
