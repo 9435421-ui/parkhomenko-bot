@@ -24,6 +24,7 @@ from content_bot_mvp.database.db import init_db
 from content_bot_mvp.handlers import start, dialog, quiz, invest
 from content_bot_mvp.utils.yandex_gpt import generate_text, generate_image, generate_video
 from content_bot_mvp.services.lead_service import send_lead_to_group
+from content_bot_mvp.database.db import init_db
 
 # Глобальные переменные
 LEADS_GROUP_CHAT_ID = int(os.getenv("LEADS_GROUP_CHAT_ID", "-1003370698977"))
@@ -282,5 +283,8 @@ def finalize_lead(message):
 # ==========================
 # Запуск бота
 # ==========================
+# Инициализация БД
+init_db()
+
 print("Бот запущен...")
 bot.polling(non_stop=True)

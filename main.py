@@ -3,11 +3,15 @@ import logging
 from aiogram import Bot, Dispatcher
 from aiogram.fsm.storage.memory import MemoryStorage
 from config import BOT_TOKEN
+from database import init_db
 from handlers import start as common, quiz, dialog, invest, expert, price
 
 logging.basicConfig(level=logging.INFO)
 
 async def main():
+    # Инициализация БД
+    init_db()
+
     bot = Bot(token=BOT_TOKEN, parse_mode="HTML")
     dp = Dispatcher(storage=MemoryStorage())
 
