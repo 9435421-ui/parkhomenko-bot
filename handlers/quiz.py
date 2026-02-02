@@ -106,9 +106,11 @@ class QuizOrder(StatesGroup):
     status = State()
     complexity = State()
     goal = State()
+    bti = State()
+    urgency = State()
 
 
-def get_progress(step: int, total: int = 8) -> str:
+def get_progress(step: int, total: int = 10) -> str:
     return f"📍 Шаг {step} из {total}\n\n"
 
 def handle_quiz_start(user_stage="planned"):
@@ -271,13 +273,57 @@ async def ask_complexity(message: Message, state: FSMContext):
 
 
 @router.message(QuizOrder.goal)
-async def finish_quiz(message: Message, state: FSMContext):
+async def ask_bti(message: Message, state: FSMContext):
     text = await get_text_from_message(message)
     if not text:
         await message.answer("Пожалуйста, выберите цель.")
         return
 
     await state.update_data(goal=text)
+    await state.set_state(QuizOrder.bti)
+
+    name = message.from_user.first_name or ""
+    await message.answer(
+        f"{get_progress(9)}{name}, прикрепите фото или PDF документов БТИ (или просто напишите «нет», если документов нет):",
+        reply_markup=ReplyKeyboardRemove()
+    )
+
+
+@router.message(QuizOrder.bti)
+async def ask_urgency(message: Message, state: FSMContext):
+    # Проверяем наличие файла или текста
+    if message.document:
+        await state.update_data(bti_file_id=message.document.file_id)
+        await state.update_data(bti_text="Файл прикреплен")
+    elif message.photo:
+        await state.update_data(bti_file_id=message.photo[-1].file_id)
+        await state.update_data(bti_text="Фото прикреплено")
+    else:
+        text = await get_text_from_message(message)
+        await state.update_data(bti_text=text or "нет")
+
+    await state.set_state(QuizOrder.urgency)
+
+    name = message.from_user.first_name or ""
+    markup = ReplyKeyboardMarkup(
+        keyboard=[
+            [KeyboardButton(text="🔥 Срочно"), KeyboardButton(text="📅 В течение месяца")],
+            [KeyboardButton(text="🔍 Просто прицениваюсь")]
+        ],
+        resize_keyboard=True,
+        one_time_keyboard=True
+    )
+    await message.answer(f"{get_progress(10)}{name}, когда планируете начинать?", reply_markup=markup)
+
+
+@router.message(QuizOrder.urgency)
+async def finish_quiz(message: Message, state: FSMContext):
+    text = await get_text_from_message(message)
+    if not text:
+        await message.answer("Пожалуйста, выберите вариант.")
+        return
+
+    await state.update_data(urgency=text)
     data = await state.get_data()
 
     # Формируем сводку для админа
@@ -292,6 +338,8 @@ async def finish_quiz(message: Message, state: FSMContext):
         f"📐 <b>Метраж:</b> {data.get('area')} м²\n"
         f"🧱 <b>Сложность:</b> {data.get('complexity')}\n"
         f"🎯 <b>Цель:</b> {data.get('goal')}\n"
+        f"📂 <b>БТИ:</b> {data.get('bti_text')}\n"
+        f"⏳ <b>Срочность:</b> {data.get('urgency')}\n"
         f"🔗 <b>Источник:</b> <code>{data.get('_payload') or 'direct'}</code>"
     )
 

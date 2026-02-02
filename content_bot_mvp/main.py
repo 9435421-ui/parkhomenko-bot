@@ -57,7 +57,7 @@ def load_posts():
     try:
         with open(POSTS_FILE, "r", encoding="utf-8") as f:
             return json.load(f)
-    except BaseException:
+    except Exception:
         return []
 
 
@@ -143,6 +143,8 @@ def save_lead_to_db(user_id, source_bot, lead_data):
                 status TEXT DEFAULT 'new',
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 sent_at TIMESTAMP,
+                consent INTEGER DEFAULT 0,
+                consent_date TIMESTAMP,
                 FOREIGN KEY (user_id) REFERENCES users(user_id)
             )
         """)
@@ -362,22 +364,6 @@ def callback_handler(call):
         ask_floor_step(call.message.chat.id)
 
 
-def ask_media_step(message):
-    city = get_message_text(message)
-    if not city:
-        bot.send_message(message.chat.id, "Пожалуйста, укажите город.")
-        bot.register_next_step_handler(message, ask_media_step)
-        return
-
-    user_leads[message.chat.id]["city"] = city
-    name = user_leads[message.chat.id].get("name", "")
-
-    bot.send_message(
-        message.chat.id,
-        f"{get_pb(7)}{name}, прикрепите фото или PDF документов БТИ (или просто напишите «нет», если документов нет):",
-        reply_markup=telebot.types.ReplyKeyboardRemove()
-    )
-    bot.register_next_step_handler(message, finalize_lead)
 
 
 def add_post(message):
@@ -446,7 +432,7 @@ def process_report_description(message, file_id):
 # Сбор лидов (КВИЗ)
 # ==========================
 
-def get_pb(step, total=8):
+def get_pb(step, total=10):
     return f"📍 Шаг {step} из {total}\n"
 
 
@@ -563,12 +549,47 @@ def ask_goal_step(message):
     markup = telebot.types.ReplyKeyboardMarkup(resize_keyboard=True, one_time_keyboard=True)
     markup.add("Инвест", "Для жизни")
     bot.send_message(message.chat.id, f"{get_pb(8)}{name}, какова цель перепланировки?", reply_markup=markup)
+    bot.register_next_step_handler(message, ask_bti_step)
+
+
+def ask_bti_step(message):
+    goal = get_message_text(message)
+    if not goal:
+        bot.send_message(message.chat.id, "Пожалуйста, выберите цель.")
+        bot.register_next_step_handler(message, ask_bti_step)
+        return
+    user_leads[message.chat.id]["goal"] = goal
+    name = user_leads[message.chat.id].get("name", "")
+
+    bot.send_message(
+        message.chat.id,
+        f"{get_pb(9)}{name}, прикрепите фото или PDF документов БТИ (или просто напишите «нет», если документов нет):",
+        reply_markup=telebot.types.ReplyKeyboardRemove()
+    )
+    bot.register_next_step_handler(message, ask_urgency_step)
+
+
+def ask_urgency_step(message):
+    # Проверка на медиа
+    if message.content_type in ['photo', 'document']:
+        user_leads[message.chat.id]["bti_text"] = "Файл/Фото прикреплено"
+        # В телеботе сохранение file_id для пересылки сложнее в упрощенном ТЗ,
+        # но мы пометим текст для админа.
+    else:
+        bti = get_message_text(message)
+        user_leads[message.chat.id]["bti_text"] = bti or "нет"
+
+    name = user_leads[message.chat.id].get("name", "")
+    markup = telebot.types.ReplyKeyboardMarkup(resize_keyboard=True, one_time_keyboard=True)
+    markup.add("🔥 Срочно", "📅 В течение месяца")
+    markup.add("🔍 Просто прицениваюсь")
+    bot.send_message(message.chat.id, f"{get_pb(10)}{name}, когда планируете начинать?", reply_markup=markup)
     bot.register_next_step_handler(message, finalize_lead)
 
 
 def finalize_lead(message):
-    goal = get_message_text(message)
-    user_leads[message.chat.id]["goal"] = goal
+    urgency = get_message_text(message)
+    user_leads[message.chat.id]["urgency"] = urgency
 
     lead = user_leads[message.chat.id]
 
@@ -604,7 +625,9 @@ def finalize_lead(message):
         f"🏢 Этаж: {lead.get('floor')}\n"
         f"📏 Метраж: {lead.get('area')} м²\n"
         f"🧱 Сложность: {lead.get('complexity')}\n"
-        f"🎯 Цель: {lead.get('goal')}"
+        f"🎯 Цель: {lead.get('goal')}\n"
+        f"📂 БТИ: {lead.get('bti_text')}\n"
+        f"⏳ Срочность: {lead.get('urgency')}"
     )
 
     send_lead_to_group(summary, lead.get("object_type", "дом"), user_id=message.chat.id, lead_data=lead)
@@ -612,7 +635,8 @@ def finalize_lead(message):
     bot.send_message(
         message.chat.id,
         final_text,
-        parse_mode="HTML"
+        parse_mode="HTML",
+        reply_markup=telebot.types.ReplyKeyboardRemove()
     )
     del user_leads[message.chat.id]
 

@@ -1,5 +1,5 @@
 """
-Обработчик диалогового режима с RAG (консультант Антон)
+Обработчик диалогового режима с RAG (консультант ТЕРИОН)
 """
 from aiogram import Router, F
 from aiogram.types import Message, CallbackQuery
