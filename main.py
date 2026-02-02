@@ -4,7 +4,7 @@ from aiogram import Bot, Dispatcher
 from aiogram.fsm.storage.memory import MemoryStorage
 from config import BOT_TOKEN
 from database import init_db
-from handlers import start as common, quiz, dialog, invest, expert, price
+from handlers import start as common, quiz, dialog, invest
 
 logging.basicConfig(level=logging.INFO)
 
