@@ -6,6 +6,9 @@ from config import BOT_TOKEN
 from database import init_db
 from handlers import start as common, quiz, dialog, invest
 
+# Импорт квиза
+from handlers.quiz import start_quiz
+
 logging.basicConfig(level=logging.INFO)
 
 async def main():
@@ -14,6 +17,14 @@ async def main():
 
     bot = Bot(token=BOT_TOKEN, parse_mode="HTML")
     dp = Dispatcher(storage=MemoryStorage())
+
+    # Обработчик команды /start с квизом
+    @dp.message_handler(commands=["start"])
+    async def start_handler(message: types.Message):
+        if "quiz" in message.text.lower():
+            await start_quiz(message)
+        else:
+            await common.start(message)
 
     dp.include_router(common.router)
     dp.include_router(quiz.router)
