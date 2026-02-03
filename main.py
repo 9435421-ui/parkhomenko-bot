@@ -26,10 +26,8 @@ async def main():
         else:
             await common.start(message)
 
-    dp.include_router(common.router)
+dp.include_router(common.router)
     dp.include_router(quiz.router)
-    dp.include_router(expert.router)
-    dp.include_router(price.router)
     dp.include_router(invest.router)
     dp.include_router(dialog.router)
     dp.include_router(quiz.router)
