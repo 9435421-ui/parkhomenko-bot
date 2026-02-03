@@ -19,6 +19,8 @@ THREAD_ID_KVARTIRY = int(os.getenv("THREAD_ID_KVARTIRY", "0"))
 THREAD_ID_KOMMERCIA = int(os.getenv("THREAD_ID_KOMMERCIA", "0"))
 THREAD_ID_DOMA = int(os.getenv("THREAD_ID_DOMA", "0"))
 
+# Удаляем конфликт слияния
+
 # Content Agent Topics
 THREAD_ID_DRAFTS = int(os.getenv("THREAD_ID_DRAFTS", "85"))
 THREAD_ID_SEASONAL = int(os.getenv("THREAD_ID_SEASONAL", "87"))
@@ -41,6 +43,8 @@ if not BOT_TOKEN:
     raise RuntimeError("BOT_TOKEN must be set in .env")
 if not YANDEX_API_KEY or not FOLDER_ID:
     raise RuntimeError("YANDEX_API_KEY and FOLDER_ID must be set in .env")
+
+# Удаляем конфликт слияния
 
 bot = telebot.TeleBot(BOT_TOKEN)
 
@@ -229,6 +233,9 @@ def show_main_menu(chat_id: int):
     markup = types.InlineKeyboardMarkup()
     markup.add(
         types.InlineKeyboardButton("📝 Оставить заявку", callback_data="mode_quiz")
+    )
+    markup.add(
+        types.InlineKeyboardButton("📊 Получить аналитику эксперта", url="https://t.me/terion_bot?start=quiz")
     )
     bot.send_message(chat_id, "Чем бот может вам помочь?", reply_markup=markup)
 
