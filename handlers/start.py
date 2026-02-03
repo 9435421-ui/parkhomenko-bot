@@ -1,1 +1,3 @@
-# пустой файл-заглушка
+from aiogram import Router
+
+router = Router()
