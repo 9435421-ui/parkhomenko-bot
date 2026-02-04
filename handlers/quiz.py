@@ -2,7 +2,7 @@ from aiogram import Router, F
 from aiogram.types import Message, CallbackQuery, ReplyKeyboardMarkup, KeyboardButton, ReplyKeyboardRemove, InlineKeyboardMarkup, InlineKeyboardButton
 from aiogram.fsm.state import StatesGroup, State
 from aiogram.fsm.context import FSMContext
-from config import LEADS_GROUP_CHAT_ID as ADMIN_GROUP_ID
+from config import LEADS_GROUP_CHAT_ID as ADMIN_GROUP_ID, THREAD_ID_KVARTIRY, THREAD_ID_KOMMERCIA, THREAD_ID_DOMA, THREAD_ID_LOGS
 from database.db import db
 from utils.voice_handler import voice_handler
 from utils.notifications import notify_admin_new_lead
@@ -41,7 +41,7 @@ async def get_text_from_message(message: Message):
             dest = tempfile.NamedTemporaryFile(suffix=".oga", delete=False)
             await message.bot.download_file(file_path, dest.name)
 
-            text = voice_handler.transcribe(dest.name)
+            text = await voice_handler.transcribe(dest.name)
             os.unlink(dest.name)
 
             if text:
@@ -84,7 +84,12 @@ async def handle_initial_contact(message: Message, state: FSMContext):
     )
 
     try:
-        await message.bot.send_message(chat_id=ADMIN_GROUP_ID, text=summary, parse_mode="HTML")
+        await message.bot.send_message(
+            chat_id=ADMIN_GROUP_ID,
+            text=summary,
+            parse_mode="HTML",
+            message_thread_id=THREAD_ID_LOGS
+        )
         # Дублируем "карточкой" в ЛС админу
         lead_data = {
             'user_id': user_id,
@@ -109,7 +114,10 @@ async def ask_city(message: Message, state: FSMContext):
     await state.set_state(QuizOrder.obj_type)
 
     markup = ReplyKeyboardMarkup(
-        keyboard=[[KeyboardButton(text="Квартира"), KeyboardButton(text="Коммерция")]],
+        keyboard=[
+            [KeyboardButton(text="Квартира"), KeyboardButton(text="Коммерция")],
+            [KeyboardButton(text="Дом")]
+        ],
         resize_keyboard=True
     )
     await message.answer("2. Тип объекта:", reply_markup=markup)
@@ -117,7 +125,7 @@ async def ask_city(message: Message, state: FSMContext):
 @router.message(QuizOrder.obj_type)
 async def ask_obj_type(message: Message, state: FSMContext):
     text = await get_text_from_message(message)
-    if text not in ["Квартира", "Коммерция"]:
+    if text not in ["Квартира", "Коммерция", "Дом"]:
         await message.answer("Пожалуйста, выберите тип объекта из списка.")
         return
 
@@ -198,6 +206,15 @@ async def finalize_quiz(message: Message, state: FSMContext):
     data = await state.get_data()
     user_id = message.from_user.id
 
+    # Определяем тред
+    obj_type = data.get('obj_type', '').lower()
+    if 'квартира' in obj_type:
+        thread_id = THREAD_ID_KVARTIRY
+    elif 'коммерция' in obj_type:
+        thread_id = THREAD_ID_KOMMERCIA
+    else:
+        thread_id = THREAD_ID_DOMA
+
     # Сводка для админа
     summary = (
         f"🚀 <b>ЗАВЕРШЕН КВИЗ (7 вопросов)</b>\n\n"
@@ -228,10 +245,16 @@ async def finalize_quiz(message: Message, state: FSMContext):
                 chat_id=ADMIN_GROUP_ID,
                 document=data.get('plan_file_id'),
                 caption=summary,
-                parse_mode="HTML"
+                parse_mode="HTML",
+                message_thread_id=thread_id
             )
         else:
-            await message.bot.send_message(chat_id=ADMIN_GROUP_ID, text=summary, parse_mode="HTML")
+            await message.bot.send_message(
+                chat_id=ADMIN_GROUP_ID,
+                text=summary,
+                parse_mode="HTML",
+                message_thread_id=thread_id
+            )
 
         # Уведомление в ЛС админу карточкой
         lead_data = {
@@ -275,13 +298,25 @@ async def handle_extra_info(message: Message, state: FSMContext):
     if text:
         info_text += f"💬 {text}"
 
+    # Тред для доп. инфо (используем тот же, что и для квиза, если есть в data, иначе в LOGS)
+    data = await state.get_data()
+    obj_type = data.get('obj_type', '').lower()
+    if 'квартира' in obj_type:
+        thread_id = THREAD_ID_KVARTIRY
+    elif 'коммерция' in obj_type:
+        thread_id = THREAD_ID_KOMMERCIA
+    elif 'дом' in obj_type:
+        thread_id = THREAD_ID_DOMA
+    else:
+        thread_id = THREAD_ID_LOGS
+
     try:
         if message.photo:
-            await message.bot.send_photo(ADMIN_GROUP_ID, message.photo[-1].file_id, caption=info_text, parse_mode="HTML")
+            await message.bot.send_photo(ADMIN_GROUP_ID, message.photo[-1].file_id, caption=info_text, parse_mode="HTML", message_thread_id=thread_id)
         elif message.document:
-            await message.bot.send_document(ADMIN_GROUP_ID, message.document.file_id, caption=info_text, parse_mode="HTML")
+            await message.bot.send_document(ADMIN_GROUP_ID, message.document.file_id, caption=info_text, parse_mode="HTML", message_thread_id=thread_id)
         elif message.voice or message.text:
-            await message.bot.send_message(ADMIN_GROUP_ID, info_text, parse_mode="HTML")
+            await message.bot.send_message(ADMIN_GROUP_ID, info_text, parse_mode="HTML", message_thread_id=thread_id)
 
         await message.answer("Информация передана эксперту. Спасибо!")
     except Exception as e:
