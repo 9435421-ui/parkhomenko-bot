@@ -53,7 +53,6 @@ async def main():
     asyncio.create_task(loyalty.run_daily_check(db))
 
     # Регистрация роутеров
-    # Каждый роутер регистрируется строго один раз для избежания RuntimeError
     dp.include_router(admin_router)
     dp.include_router(start_router)
     dp.include_router(quiz_router)
@@ -63,7 +62,6 @@ async def main():
     logger.info("🚀 Бот «ТЕРИОН» успешно запущен и начинает опрос обновлений...")
 
     try:
-        # Удаляем вебхук перед запуском polling (на всякий случай)
         await bot.delete_webhook(drop_pending_updates=True)
         await dp.start_polling(bot)
     except Exception as e:
