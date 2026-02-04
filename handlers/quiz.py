@@ -4,7 +4,7 @@ from aiogram.fsm.state import StatesGroup, State
 from aiogram.fsm.context import FSMContext
 from config import ADMIN_GROUP_ID
 from datetime import datetime, time
-from utils.yandex_gpt import YandexGPT
+from utils.yandex_gpt import yandex_gpt
 
 quiz_router = Router()
 
@@ -183,7 +183,7 @@ async def handle_text(message: Message, state: FSMContext):
 
 async def convert_voice_to_text(file_id: str) -> str:
     """Преобразует голосовое сообщение в текст с помощью Яндекс.ГПТ"""
-    yandex_gpt = YandexGPT()
+    yandex_gpt = yandex_gpt
     # Получаем файл голосового сообщения
     file_path = await yandex_gpt.bot.download_file_by_id(file_id)
     # Конвертируем в текст
