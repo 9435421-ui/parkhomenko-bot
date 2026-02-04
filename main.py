@@ -1,15 +1,10 @@
 import asyncio
 import logging
 from aiogram import Bot, Dispatcher, types
-logging.basicConfig(level=logging.INFO)
 from aiogram.fsm.storage.memory import MemoryStorage
 from config import BOT_TOKEN
 from database import init_db
 from handlers import start as common, quiz, dialog, invest
-# Ребрендинг на ТЕРИОН
-
-# Импорт квиза
-from handlers.quiz import start_quiz
 
 logging.basicConfig(level=logging.INFO)
 
@@ -24,7 +19,7 @@ async def main():
     @dp.message_handler(commands=["start"])
     async def start_handler(message: types.Message):
         if "quiz" in message.text.lower():
-            await start_quiz(message)
+            await quiz.start_quiz(message)
         else:
             await common.start(message)
 
