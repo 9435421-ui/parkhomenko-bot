@@ -22,6 +22,7 @@ class QuizOrder(StatesGroup):
     goal = State()
     urgency = State()
     contact = State()
+    phone = State()
     bti_doc = State()
     legal_doc = State()
 
