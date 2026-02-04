@@ -14,7 +14,7 @@ class VKService:
     """
     
     def __init__(self):
-        self.vk_token = os.getenv("VK_API_TOKEN", "")
+        self.vk_token = os.getenv("VK_TOKEN") or os.getenv("VK_API_TOKEN", "")
         self.vk_group_id = os.getenv("VK_GROUP_ID", "")
         self.api_version = "5.131"
         self.base_url = "https://api.vk.com/method/"

@@ -24,16 +24,12 @@ wheels/
 *.egg
 
 # Environment variables
-.env
-content_bot_mvp/.env
 .env.local
 .env.*.local
 
 # Database
-*.db
 *.sqlite
 *.sqlite3
-database/*.db
 
 # Logs
 *.log
@@ -53,8 +49,6 @@ logs/
 .DS_Store
 
 # Uploads
-uploads/
-uploads_plans/
 temp/
 tmp/
 
@@ -67,3 +61,5 @@ nohup.out
 handlers/quiz_backup*.py
 backups/
 **/backups/
+.env
+*.db

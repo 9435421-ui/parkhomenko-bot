@@ -3,7 +3,7 @@
 PID_FILE="content_bot_mvp/bot.pid"
 
 # Убиваем предыдущие процессы конкретно этого бота
-pkill -f "python3.*content_bot_mvp/main.py" || true
+pgrep -f "python3.*content_bot_mvp/main.py" | xargs kill 2>/dev/null || true
 if [ -f "$PID_FILE" ]; then
     kill $(cat "$PID_FILE") 2>/dev/null
     rm "$PID_FILE"

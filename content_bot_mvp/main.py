@@ -21,8 +21,8 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from services.vk_service import vk_service
 from utils.voice_handler import voice_handler
 
-BOT_TOKEN = os.getenv("BOT_TOKEN")
-CHANNEL_ID = int(os.getenv("CHANNEL_ID"))
+BOT_TOKEN = os.getenv("CONTENT_BOT_TOKEN") or os.getenv("BOT_TOKEN")
+CHANNEL_ID = int(os.getenv("CHANNEL_ID", "-1003612599428"))
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY") or os.getenv("OPENROUTER_API_KEY")
 LEADS_GROUP_CHAT_ID = int(os.getenv("LEADS_GROUP_CHAT_ID", "-1003370698977"))
 THREAD_ID_KVARTIRY = int(os.getenv("THREAD_ID_KVARTIRY", "2"))
@@ -71,10 +71,23 @@ def save_posts(posts):
 
 
 def generate_text(prompt: str) -> str:
+    system_prompt = (
+        "Ты — креативный копирайтер компании ТЕРИОН. Твоя специализация — недвижимость и перепланировки.\n\n"
+        "ПРАВИЛА КОНТЕНТА:\n"
+        "1. ФОКУС: Перепланировки (кейсы, нормы, советы), профильные новости (законодательство РФ, ЖКХ, рынок), "
+        "интересные факты об архитектуре, истории строений и инженерных решениях.\n"
+        "2. СТИЛЬ: Storytelling — живой язык, примеры из жизни, четкие советы 'что можно, а что нельзя'.\n"
+        "3. ЗАПРЕТЫ: Никакого стороннего контента, юмора, политики или тем, не связанных с недвижимостью.\n"
+        "4. ПРИЗЫВ: Обязательно добавь призыв пройти квиз для аналитики объекта.\n\n"
+        "В конце всегда добавляй ссылку: https://t.me/terion_bot?start=quiz"
+    )
     try:
         resp = client.chat.completions.create(
             model="openai/gpt-4o-mini",
-            messages=[{"role": "user", "content": prompt}]
+            messages=[
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": prompt}
+            ]
         )
         return resp.choices[0].message.content
     except Exception as e:
@@ -125,6 +138,7 @@ def save_lead_to_db(user_id, source_bot, lead_data):
                 first_name TEXT,
                 last_name TEXT,
                 phone TEXT,
+                birthday TEXT,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 last_interaction TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
@@ -242,11 +256,14 @@ def post_scheduler():
         if video_url:
             msg += f"\n\nВидео: {video_url}"
 
-        # Публикация в Telegram
-        bot.send_message(CHANNEL_ID, msg)
+        # Публикация в Telegram с кнопкой аналитики
+        markup = InlineKeyboardMarkup()
+        markup.add(InlineKeyboardButton("📊 Получить аналитику объекта", url="https://t.me/terion_bot?start=quiz"))
+
+        bot.send_message(CHANNEL_ID, msg, reply_markup=markup)
 
         # Дублирование в VK (если настроено)
-        if os.getenv("VK_API_TOKEN"):
+        if os.getenv("VK_TOKEN") or os.getenv("VK_API_TOKEN"):
             try:
                 # Т.к. мы в отдельном потоке threading, создаем новый loop
                 loop = asyncio.new_event_loop()
@@ -281,13 +298,14 @@ threading.Thread(target=run_schedule, daemon=True).start()
 @bot.message_handler(commands=["start"])
 def start(message):
     markup = InlineKeyboardMarkup()
-    markup.add(InlineKeyboardButton("Создать пост", callback_data="create_post"))
-    markup.add(InlineKeyboardButton("Просмотреть контент-план", callback_data="view_plan"))
-    markup.add(InlineKeyboardButton("Репортажный режим (Фото + ИИ)", callback_data="report_mode"))
-    markup.add(InlineKeyboardButton("Генерация изображения", callback_data="gen_image"))
-    markup.add(InlineKeyboardButton("Генерация видео", callback_data="gen_video"))
-    markup.add(InlineKeyboardButton("Собрать лид", callback_data="collect_lead"))
-    bot.send_message(message.chat.id, "Привет! Выберите действие:", reply_markup=markup)
+    markup.add(InlineKeyboardButton("📝 Создать пост", callback_data="create_post"))
+    markup.add(InlineKeyboardButton("🏗 Интересный факт", callback_data="fact_mode"))
+    markup.add(InlineKeyboardButton("📸 Репортажный режим", callback_data="report_mode"))
+    markup.add(InlineKeyboardButton("💡 Идеи для контента", callback_data="suggest_topics"))
+    markup.add(InlineKeyboardButton("📂 Собрать лид (Квиз)", callback_data="collect_lead"))
+    markup.add(InlineKeyboardButton("🖼 Генерация изображения", callback_data="gen_image"))
+    markup.add(InlineKeyboardButton("🎁 Подарок на День Рождения", callback_data="set_birthday"))
+    bot.send_message(message.chat.id, "Привет! Я Антон-Креативщик. Помогу создать контент для ТЕРИОН.", reply_markup=markup)
 
 # ==========================
 # Обработка кнопок
@@ -296,7 +314,15 @@ def start(message):
 
 @bot.callback_query_handler(func=lambda call: True)
 def callback_handler(call):
-    if call.data == "create_post":
+    if call.data == "fact_mode":
+        bot.send_message(call.message.chat.id, "Генерирую интересный факт об архитектуре или инженерии...")
+        text = generate_text("Напиши интересный факт об архитектуре, истории строений или необычном инженерном решении.")
+        bot.send_message(call.message.chat.id, text)
+    elif call.data == "suggest_topics":
+        bot.send_message(call.message.chat.id, "Генерирую идеи тем...")
+        ideas = generate_text("Предложи 5 актуальных тем: 2 по перепланировкам, 1 по новостям рынка/ЖКХ и 2 интересных факта об архитектуре.")
+        bot.send_message(call.message.chat.id, f"Идеи от ИИ:\n\n{ideas}")
+    elif call.data == "create_post":
         bot.send_message(call.message.chat.id, "Отправьте текст поста:")
         bot.register_next_step_handler(call.message, add_post)
     elif call.data == "view_plan":
@@ -350,6 +376,9 @@ def callback_handler(call):
             reply_markup=markup
         )
         # Следующий шаг обработает специальный хендлер для контактов
+    elif call.data == "set_birthday":
+        bot.send_message(call.message.chat.id, "🎂 Укажите вашу дату рождения в формате ДД.ММ (например: 15.05):")
+        bot.register_next_step_handler(call.message, save_birthday_content)
     elif call.data.startswith("obj_"):
         object_type = call.data.replace("obj_", "")
         if object_type == "kvartira":
@@ -603,7 +632,7 @@ def finalize_lead(message):
             "1️⃣ Проверим допустимость выполненных работ.\n"
             "2️⃣ Оценим риски штрафов и предписаний.\n"
             "3️⃣ Подскажем, как узаконить всё без судов.\n\n"
-            "Наш эксперт свяжется с вами в ближайшее рабочее время."
+            "Наш специалист свяжется с вами в ближайшее рабочее время."
         )
     else:
         final_text = (
@@ -612,7 +641,7 @@ def finalize_lead(message):
             "1️⃣ Расчет стоимости проектирования и согласования.\n"
             "2️⃣ Пошаговый алгоритм действий именно для вашего случая.\n"
             "3️⃣ Список необходимых документов БТИ и ЕГРН.\n\n"
-            "Эксперт позвонит вам для уточнения деталей."
+            "Эксперт компании позвонит вам для уточнения деталей."
         )
 
     summary = (
@@ -682,6 +711,59 @@ def handle_voice_global(message):
     if text:
         bot.send_message(message.chat.id, "Я услышал вас. Чем я могу помочь? Используйте меню или кнопки.")
 
+
+def save_birthday_content(message):
+    text = message.text.strip()
+    if re.match(r'^\d{2}\.\d{2}$', text):
+        try:
+            conn = sqlite3.connect(DB_PATH)
+            cursor = conn.cursor()
+            cursor.execute("UPDATE users SET birthday = ? WHERE user_id = ?", (text, message.chat.id))
+            conn.commit()
+            conn.close()
+            bot.send_message(message.chat.id, f"✅ Дата рождения {text} сохранена! 🎁")
+        except Exception as e:
+            bot.send_message(message.chat.id, f"Ошибка сохранения: {e}")
+    else:
+        bot.send_message(message.chat.id, "⚠️ Неверный формат. Используйте ДД.ММ")
+
+# ==========================
+# Модуль «Шпион» (Мониторинг групп)
+# ==========================
+
+@bot.message_handler(func=lambda message: message.chat.type in ['group', 'supergroup'])
+def monitor_groups(message):
+    if not message.text:
+        return
+
+    keywords = ['снос стены', 'газ', 'узаконить', 'перепланировка', 'проем', 'несущая']
+    text_lower = message.text.lower()
+
+    if any(word in text_lower for word in keywords):
+        # Формируем уведомление для топика 88
+        chat_name = message.chat.title or "Группа"
+        user_name = f"@{message.from_user.username}" if message.from_user.username else message.from_user.first_name
+
+        # Ссылка на сообщение (работает для публичных групп и супергрупп)
+        msg_link = f"https://t.me/{message.chat.username}/{message.message_id}" if message.chat.username else "Приватная группа"
+
+        alert_text = (
+            f"🕵️‍♂️ <b>ШПИОН: ОБНАРУЖЕН ИНТЕРЕС ({chat_name})</b>\n\n"
+            f"👤 <b>Клиент:</b> {user_name}\n"
+            f"💬 <b>Текст:</b> {message.text[:200]}...\n\n"
+            f"🔗 <a href='{msg_link}'>Перейти к сообщению</a>"
+        )
+
+        try:
+            bot.send_message(
+                LEADS_GROUP_CHAT_ID,
+                alert_text,
+                message_thread_id=THREAD_ID_LOGS,
+                parse_mode="HTML",
+                disable_web_page_preview=True
+            )
+        except Exception as e:
+            print(f"Ошибка шпиона: {e}")
 
 # ==========================
 # Запуск бота

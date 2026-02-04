@@ -2,13 +2,17 @@ from aiogram import Router, F
 from aiogram.types import Message, CallbackQuery, ReplyKeyboardMarkup, KeyboardButton, ReplyKeyboardRemove, InlineKeyboardMarkup, InlineKeyboardButton
 from aiogram.fsm.state import StatesGroup, State
 from aiogram.fsm.context import FSMContext
-from config import ADMIN_GROUP_ID
+from config import LEADS_GROUP_CHAT_ID as ADMIN_GROUP_ID
 from database.db import db
 from utils.voice_handler import voice_handler
+from utils.notifications import notify_admin_new_lead
 import json
 import re
 import os
 import tempfile
+import logging
+
+logger = logging.getLogger(__name__)
 
 def get_progress_bar(step, total=10):
     return f"📊 Шаг {step} из {total}\n" + "—" * 20 + "\n"
@@ -21,32 +25,42 @@ def validate_phone(phone: str) -> bool:
     return bool(re.match(r'^(\+7|8|7)\d{10}$', clean_phone))
 
 
-@router.callback_query(F.data == "mode:quiz")
-async def start_quiz_callback(callback: CallbackQuery, state: FSMContext):
-    """Запуск квиза из меню"""
+async def start_quiz(event: Message | CallbackQuery, state: FSMContext):
+    """Общая функция для запуска квиза"""
     data = await state.get_data()
+    message = event if isinstance(event, Message) else event.message
+
     # Проверяем согласие и наличие контакта
     if not data.get('consent'):
         from keyboards.main_menu import get_consent_keyboard
-        await callback.message.answer(
+        await message.answer(
             "Для начала квиза необходимо подтвердить согласие на обработку данных.",
             reply_markup=get_consent_keyboard()
         )
-        await callback.answer()
+        if isinstance(event, CallbackQuery):
+            await event.answer()
         return
 
     if not data.get('phone'):
         from keyboards.main_menu import get_contact_keyboard
-        await callback.message.answer(
+        await message.answer(
             "Для начала квиза, пожалуйста, поделитесь вашим контактом.",
             reply_markup=get_contact_keyboard()
         )
-        await callback.answer()
+        if isinstance(event, CallbackQuery):
+            await event.answer()
         return
 
     await state.set_state(QuizOrder.role)
-    await callback.message.answer("📋 Кто вы? (Собственник/Дизайнер/Застройщик/Инвестор/Другое)")
-    await callback.answer()
+    await message.answer("📋 Кто вы? (Собственник/Дизайнер/Застройщик/Инвестор/Другое)")
+    if isinstance(event, CallbackQuery):
+        await event.answer()
+
+
+@router.callback_query(F.data == "mode:quiz")
+async def start_quiz_callback(callback: CallbackQuery, state: FSMContext):
+    """Запуск квиза из меню"""
+    await start_quiz(callback, state)
 
 
 async def handle_initial_contact(message: Message, state: FSMContext):
@@ -66,8 +80,9 @@ async def handle_initial_contact(message: Message, state: FSMContext):
     )
 
     # Сохраняем в БД
+    lead_id = None
     try:
-        await db.upsert_unified_lead(
+        lead_id = await db.upsert_unified_lead(
             user_id=user_id,
             source_bot="qualification",
             phone=phone,
@@ -75,11 +90,12 @@ async def handle_initial_contact(message: Message, state: FSMContext):
             username=username,
             lead_type="initial_contact",
             consent=1,
-            consent_date=data.get('consent_date')
+            consent_date=data.get('consent_date'),
+            details=json.dumps(data, ensure_ascii=False)
         )
-        print(f"✅ Initial lead saved for {user_id}")
+        logger.info(f"✅ Initial lead saved for {user_id}, ID: {lead_id}")
     except Exception as e:
-        print(f"ERROR lead_save_failed: {e}")
+        logger.error(f"❌ Ошибка сохранения лида {user_id}: {e}")
         await message.answer("Произошла ошибка при сохранении вашей заявки, но вы можете продолжить квиз.")
 
     # Уведомляем админа
@@ -93,8 +109,19 @@ async def handle_initial_contact(message: Message, state: FSMContext):
 
     try:
         await message.bot.send_message(chat_id=ADMIN_GROUP_ID, text=summary, parse_mode="HTML")
+        if lead_id:
+            lead_data = {
+                'id': lead_id,
+                'user_id': user_id,
+                'name': name,
+                'phone': phone,
+                'source_bot': 'qualification',
+                'lead_type': 'initial_contact',
+                'details': data
+            }
+            await notify_admin_new_lead(message.bot, lead_id, lead_data)
     except Exception as e:
-        print(f"Ошибка уведомления админа: {e}")
+        logger.error(f"❌ Ошибка уведомления админа о контакте {user_id}: {e}")
 
 
 class QuizOrder(StatesGroup):
@@ -355,12 +382,15 @@ async def finish_quiz(message: Message, state: FSMContext):
         else:
             await message.bot.send_message(chat_id=ADMIN_GROUP_ID, text=summary, parse_mode="HTML")
     except Exception as e:
-        print(f"Ошибка отправки уведомления админу: {e}")
-        await message.bot.send_message(chat_id=ADMIN_GROUP_ID, text=summary, parse_mode="HTML")
+        logger.error(f"❌ Ошибка отправки уведомления админу (квиз завершен): {e}")
+        try:
+            await message.bot.send_message(chat_id=ADMIN_GROUP_ID, text=summary, parse_mode="HTML")
+        except:
+            pass
 
     # Обновляем лид в БД результатами квиза
     try:
-        await db.upsert_unified_lead(
+        lead_id = await db.upsert_unified_lead(
             user_id=message.from_user.id,
             source_bot="qualification",
             phone=data.get('phone'),
@@ -369,8 +399,20 @@ async def finish_quiz(message: Message, state: FSMContext):
             lead_type="quiz_completed",
             details=json.dumps(data, ensure_ascii=False)
         )
+
+        # Персональное уведомление админу
+        lead_data_for_notify = {
+            'user_id': message.from_user.id,
+            'name': message.from_user.full_name,
+            'phone': data.get('phone'),
+            'source_bot': 'qualification',
+            'lead_type': 'quiz_completed',
+            'details': data
+        }
+        await notify_admin_new_lead(message.bot, lead_id, lead_data_for_notify)
+
     except Exception as e:
-        print(f"Ошибка обновления лида: {e}")
+        logger.error(f"❌ Ошибка обновления лида в БД (квиз завершен): {e}")
 
     # Ветвление финального контента для пользователя
     status = data.get('status', '').lower()
@@ -383,7 +425,7 @@ async def finish_quiz(message: Message, state: FSMContext):
             "1️⃣ Проверим допустимость выполненных работ.\n"
             "2️⃣ Оценим риски штрафов и предписаний.\n"
             "3️⃣ Подскажем, как узаконить всё без судов.\n\n"
-            "Наш эксперт свяжется с вами в ближайшее рабочее время."
+            "Наш специалист свяжется с вами в ближайшее рабочее время."
         )
     else:
         final_text = (
@@ -392,7 +434,7 @@ async def finish_quiz(message: Message, state: FSMContext):
             "1️⃣ Расчет стоимости проектирования и согласования.\n"
             "2️⃣ Пошаговый алгоритм действий именно для вашего случая.\n"
             "3️⃣ Список необходимых документов БТИ и ЕГРН.\n\n"
-            "Эксперт позвонит вам для уточнения деталей."
+            "Эксперт компании позвонит вам для уточнения деталей."
         )
 
     # Кнопка для записи на консультацию
@@ -403,6 +445,6 @@ async def finish_quiz(message: Message, state: FSMContext):
     )
     
     await message.answer(final_text, parse_mode="HTML", reply_markup=ReplyKeyboardRemove())
-    await message.answer("Вы также можете написать нашему эксперту напрямую в Telegram:", reply_markup=markup)
+    await message.answer("Вы также можете написать нашему специалисту напрямую в Telegram:", reply_markup=markup)
 
     await state.clear()

@@ -45,6 +45,7 @@ class Database:
                     first_name TEXT,
                     last_name TEXT,
                     phone TEXT,
+                    birthday TEXT, -- Формат: DD.MM
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                     last_interaction TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                 )
@@ -68,6 +69,7 @@ class Database:
                     bti_status TEXT,
                     consent_given BOOLEAN DEFAULT 0,
                     contact_received BOOLEAN DEFAULT 0,
+                    dialog_count INTEGER DEFAULT 0,
                     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                     FOREIGN KEY (user_id) REFERENCES users(user_id)
                 )
@@ -121,6 +123,7 @@ class Database:
                     extra_contact TEXT,
                     details TEXT, -- JSON или текстовое описание (результаты квиза и т.д.)
                     status TEXT DEFAULT 'new',
+                    comment TEXT,
                     consent BOOLEAN DEFAULT 0,
                     consent_date TEXT,
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
@@ -268,6 +271,20 @@ class Database:
                 "DELETE FROM dialog_history WHERE user_id = ?",
                 (user_id,)
             )
+            # Также сбрасываем счетчик диалогов
+            await cursor.execute(
+                "UPDATE user_states SET dialog_count = 0 WHERE user_id = ?",
+                (user_id,)
+            )
+            await self.conn.commit()
+
+    async def increment_dialog_count(self, user_id: int):
+        """Увеличить счетчик вопросов в диалоге"""
+        async with self.conn.cursor() as cursor:
+            await cursor.execute(
+                "UPDATE user_states SET dialog_count = dialog_count + 1 WHERE user_id = ?",
+                (user_id,)
+            )
             await self.conn.commit()
     
     # ============= ЛИДЫ =============
@@ -385,6 +402,73 @@ class Database:
             await cursor.execute(
                 "UPDATE leads SET sent_to_group = 1 WHERE id = ?",
                 (lead_id,)
+            )
+            await self.conn.commit()
+
+    # ============= АДМИН-ФУНКЦИИ =============
+
+    async def get_stats(self) -> Dict:
+        """Получить статистику по лидам"""
+        async with self.conn.cursor() as cursor:
+            # Всего пользователей
+            await cursor.execute("SELECT COUNT(*) FROM users")
+            total_users = (await cursor.fetchone())[0]
+
+            # Начали квиз (есть запись в user_states)
+            await cursor.execute("SELECT COUNT(*) FROM user_states")
+            quiz_started = (await cursor.fetchone())[0]
+
+            # Оставили контакт (есть запись в unified_leads)
+            await cursor.execute("SELECT COUNT(DISTINCT user_id) FROM unified_leads")
+            contacts_left = (await cursor.fetchone())[0]
+
+            # Завершили квиз
+            await cursor.execute("SELECT COUNT(*) FROM unified_leads WHERE lead_type = 'quiz_completed'")
+            quiz_completed = (await cursor.fetchone())[0]
+
+            # По статусам
+            await cursor.execute("SELECT COUNT(*) FROM unified_leads WHERE status = 'new'")
+            status_new = (await cursor.fetchone())[0]
+
+            await cursor.execute("SELECT COUNT(*) FROM unified_leads WHERE status = 'in_progress'")
+            status_progress = (await cursor.fetchone())[0]
+
+            return {
+                "total_users": total_users,
+                "quiz_started": quiz_started,
+                "contacts_left": contacts_left,
+                "quiz_completed": quiz_completed,
+                "status_new": status_new,
+                "status_progress": status_progress
+            }
+
+    async def get_all_unified_leads(self) -> List[Dict]:
+        """Получить все лиды из единой таблицы для экспорта"""
+        async with self.conn.cursor() as cursor:
+            await cursor.execute("SELECT * FROM unified_leads ORDER BY created_at DESC")
+            rows = await cursor.fetchall()
+            return [dict(row) for row in rows]
+
+    async def get_all_users(self) -> List[Dict]:
+        """Получить всех пользователей"""
+        async with self.conn.cursor() as cursor:
+            await cursor.execute("SELECT user_id, first_name FROM users")
+            rows = await cursor.fetchall()
+            return [dict(row) for row in rows]
+
+    async def get_users_with_birthday(self, date_str: str) -> List[Dict]:
+        """Получить пользователей с днем рождения в указанную дату (DD.MM)"""
+        async with self.conn.cursor() as cursor:
+            await cursor.execute("SELECT user_id, first_name FROM users WHERE birthday = ?", (date_str,))
+            rows = await cursor.fetchall()
+            return [dict(row) for row in rows]
+
+    async def update_user_birthday(self, user_id: int, birthday: str):
+        """Обновить дату рождения пользователя"""
+        async with self.conn.cursor() as cursor:
+            await cursor.execute(
+                "UPDATE users SET birthday = ? WHERE user_id = ?",
+                (birthday, user_id)
             )
             await self.conn.commit()
 

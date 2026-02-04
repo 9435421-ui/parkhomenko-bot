@@ -1,22 +1,34 @@
 from aiogram import Router, F
 from aiogram.types import Message, CallbackQuery
 from aiogram.fsm.context import FSMContext
-from handlers.quiz import QuizOrder, handle_initial_contact
+from aiogram.fsm.state import StatesGroup, State
+from .quiz import QuizOrder, handle_initial_contact, start_quiz
 from keyboards.main_menu import get_consent_keyboard, get_main_menu, get_contact_keyboard
 from database.db import db
 from datetime import datetime
+import re
 
 router = Router()
 
+class UserProfile(StatesGroup):
+    waiting_for_birthday = State()
+
 @router.message(F.text.startswith("/start"))
 async def handle_start(message: Message, state: FSMContext):
-    payload = message.text.split(maxsplit=1)[1] if len(message.text.split()) > 1 else ""
+    parts = message.text.split()
+    payload = parts[1] if len(parts) > 1 else ""
+
+    if payload == 'quiz':
+        await start_quiz(message, state)
+        return
+
     await message.answer(
-        "Здравствуйте! Я — ваш цифровой помощник по вопросам перепланировок.\n\n"
+        "Здравствуйте! Я — Антон, ваш личный <b>ИИ-помощник</b> по вопросам перепланировок. Работаю от имени ведущего эксперта компании ТЕРИОН.\n\n"
         "Нажимая кнопку \"✅ Я согласен и хочу продолжить\", вы даете согласие на обработку персональных данных, "
         "принимаете условия политики конфиденциальности, а также соглашаетесь на получение информационных сообщений.\n\n"
         "Все консультации в автоматическом режиме носят ознакомительный характер, финальное решение всегда подтверждает наш эксперт.",
-        reply_markup=get_consent_keyboard()
+        reply_markup=get_consent_keyboard(),
+        parse_mode="HTML"
     )
     await state.update_data(_payload=payload)
 
@@ -67,3 +79,29 @@ async def back_to_menu(callback: CallbackQuery, state: FSMContext):
     await state.clear()
     await callback.message.answer("Главное меню:", reply_markup=get_main_menu())
     await callback.answer()
+
+
+@router.callback_query(F.data == "set_birthday")
+async def ask_birthday(callback: CallbackQuery, state: FSMContext):
+    await callback.message.answer(
+        "🎂 Укажите вашу дату рождения в формате <b>ДД.ММ</b> (например: 15.05),\n"
+        "чтобы мы могли поздравить вас и подарить специальный бонус от ТЕРИОН!",
+        parse_mode="HTML"
+    )
+    await state.set_state(UserProfile.waiting_for_birthday)
+    await callback.answer()
+
+
+@router.message(UserProfile.waiting_for_birthday)
+async def save_birthday(message: Message, state: FSMContext):
+    text = message.text.strip()
+    if re.match(r'^\d{2}\.\d{2}$', text):
+        await db.update_user_birthday(message.from_user.id, text)
+        await message.answer(
+            f"✅ Дата рождения {text} сохранена!\n\n"
+            "В этот день мы обязательно пришлем вам подарок. 🎁",
+            reply_markup=get_main_menu()
+        )
+        await state.clear()
+    else:
+        await message.answer("⚠️ Неверный формат. Пожалуйста, укажите дату как <b>ДД.ММ</b> (например, 01.12).")
