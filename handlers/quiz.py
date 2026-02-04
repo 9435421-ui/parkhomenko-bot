@@ -28,6 +28,15 @@ class QuizOrder(StatesGroup):
     final = State()
     bti_doc = State()
     legal_doc = State()
+    total_floors = State()
+    changes = State()
+    has_plan = State()
+    complexity = State()
+    goal = State()
+    urgency = State()
+    phone = State()
+    name = State()
+    email = State()
 
 
 @quiz_router.message(QuizOrder.city)
