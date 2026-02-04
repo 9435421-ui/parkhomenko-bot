@@ -19,6 +19,9 @@ class QuizOrder(StatesGroup):
     changes = State()
     has_plan = State()
     complexity = State()
+    goal = State()
+    urgency = State()
+    contact = State()
 
 
 @quiz_router.message(QuizOrder.city)
