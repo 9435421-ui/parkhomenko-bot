@@ -1,6 +1,6 @@
 import asyncio
 import logging
-from aiogram import Bot, Dispatcher
+from aiogram import Bot, Dispatcher, types
 from aiogram.fsm.storage.memory import MemoryStorage
 from config import BOT_TOKEN
 from database import init_db
@@ -26,14 +26,10 @@ async def main():
         else:
             await common.start(message)
 
-dp.include_router(common.router)
+    dp.include_router(common.router)
     dp.include_router(quiz.router)
     dp.include_router(invest.router)
     dp.include_router(dialog.router)
-    dp.include_router(quiz.router)
-    dp.include_router(dialog.router)
-    dp.include_router(invest.router)
-
     await dp.start_polling(bot)
 
 if __name__ == "__main__":
