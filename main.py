@@ -1,10 +1,12 @@
 import asyncio
 import logging
 from aiogram import Bot, Dispatcher, types
+logging.basicConfig(level=logging.INFO)
 from aiogram.fsm.storage.memory import MemoryStorage
 from config import BOT_TOKEN
 from database import init_db
 from handlers import start as common, quiz, dialog, invest
+# Ребрендинг на ТЕРИОН
 
 # Импорт квиза
 from handlers.quiz import start_quiz
