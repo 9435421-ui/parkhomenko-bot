@@ -23,6 +23,9 @@ class QuizOrder(StatesGroup):
     urgency = State()
     contact = State()
     phone = State()
+    name = State()
+    email = State()
+    final = State()
     bti_doc = State()
     legal_doc = State()
 
