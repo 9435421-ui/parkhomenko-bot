@@ -22,6 +22,8 @@ class QuizOrder(StatesGroup):
     goal = State()
     urgency = State()
     contact = State()
+    bti_doc = State()
+    legal_doc = State()
 
 
 @quiz_router.message(QuizOrder.city)
