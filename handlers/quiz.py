@@ -125,6 +125,8 @@ async def handle_initial_contact(message: Message, state: FSMContext):
 
 
 class QuizOrder(StatesGroup):
+    name = State()
+    phone = State()
     role = State()
     city = State()
     obj_type = State()
@@ -134,6 +136,7 @@ class QuizOrder(StatesGroup):
     complexity = State()
     goal = State()
     bti = State()
+    bti_doc = State()
     urgency = State()
 
 
