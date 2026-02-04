@@ -103,9 +103,9 @@ async def dialog_message_handler(message: Message, state: FSMContext):
             parse_mode="HTML"
         )
         
-        await state.set_state(QuizOrder.role)
+        await state.set_state(QuizOrder.city)
 
-        await message.answer("📋 Кто вы? (Собственник/Дизайнер/Застройщик/Инвестор/Другое)")
+        await message.answer("📋 <b>Начинаем квиз</b>\n\n1. Укажите город / населенный пункт.", parse_mode="HTML")
         return
     
     # Генерируем ответ через YandexGPT с RAG

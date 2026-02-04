@@ -11,147 +11,23 @@ import re
 import os
 import tempfile
 import logging
+from utils.time_utils import is_working_hours
+from utils.moderation import contains_bad_words
 
 logger = logging.getLogger(__name__)
 
-def get_progress_bar(step, total=10):
-    return f"📊 Шаг {step} из {total}\n" + "—" * 20 + "\n"
-
 router = Router()
 
-def validate_phone(phone: str) -> bool:
-    """Простая валидация номера телефона"""
-    clean_phone = re.sub(r'[\s\-\(\)]', '', phone)
-    return bool(re.match(r'^(\+7|8|7)\d{10}$', clean_phone))
-
-
-async def start_quiz(event: Message | CallbackQuery, state: FSMContext):
-    """Общая функция для запуска квиза"""
-    data = await state.get_data()
-    message = event if isinstance(event, Message) else event.message
-
-    # Проверяем согласие и наличие контакта
-    if not data.get('consent'):
-        from keyboards.main_menu import get_consent_keyboard
-        await message.answer(
-            "Для начала квиза необходимо подтвердить согласие на обработку данных.",
-            reply_markup=get_consent_keyboard()
-        )
-        if isinstance(event, CallbackQuery):
-            await event.answer()
-        return
-
-    if not data.get('phone'):
-        from keyboards.main_menu import get_contact_keyboard
-        await message.answer(
-            "Для начала квиза, пожалуйста, поделитесь вашим контактом.",
-            reply_markup=get_contact_keyboard()
-        )
-        if isinstance(event, CallbackQuery):
-            await event.answer()
-        return
-
-    await state.set_state(QuizOrder.role)
-    await message.answer("📋 Кто вы? (Собственник/Дизайнер/Застройщик/Инвестор/Другое)")
-    if isinstance(event, CallbackQuery):
-        await event.answer()
-
-
-@router.callback_query(F.data == "mode:quiz")
-async def start_quiz_callback(callback: CallbackQuery, state: FSMContext):
-    """Запуск квиза из меню"""
-    await start_quiz(callback, state)
-
-
-async def handle_initial_contact(message: Message, state: FSMContext):
-    """Первичное сохранение лида и уведомление админа"""
-    phone = message.contact.phone_number
-    name = message.from_user.full_name
-    username = message.from_user.username
-    user_id = message.from_user.id
-
-    data = await state.get_data()
-    source = data.get('_payload') or 'direct'
-
-    await state.update_data(
-        phone=phone,
-        name=name,
-        username=username
-    )
-
-    # Сохраняем в БД
-    lead_id = None
-    try:
-        lead_id = await db.upsert_unified_lead(
-            user_id=user_id,
-            source_bot="qualification",
-            phone=phone,
-            name=name,
-            username=username,
-            lead_type="initial_contact",
-            consent=1,
-            consent_date=data.get('consent_date'),
-            details=json.dumps(data, ensure_ascii=False)
-        )
-        logger.info(f"✅ Initial lead saved for {user_id}, ID: {lead_id}")
-    except Exception as e:
-        logger.error(f"❌ Ошибка сохранения лида {user_id}: {e}")
-        await message.answer("Произошла ошибка при сохранении вашей заявки, но вы можете продолжить квиз.")
-
-    # Уведомляем админа
-    summary = (
-        f"📱 <b>ПОЛУЧЕН КОНТАКТ</b>\n\n"
-        f"👤 <b>Имя:</b> {name}\n"
-        f"📱 <b>Телефон:</b> <code>{phone}</code>\n"
-        f"🔗 <b>Источник:</b> {source}\n"
-        f"🆔 <b>ID:</b> <code>{user_id}</code>"
-    )
-
-    try:
-        await message.bot.send_message(chat_id=ADMIN_GROUP_ID, text=summary, parse_mode="HTML")
-        if lead_id:
-            lead_data = {
-                'id': lead_id,
-                'user_id': user_id,
-                'name': name,
-                'phone': phone,
-                'source_bot': 'qualification',
-                'lead_type': 'initial_contact',
-                'details': data
-            }
-            await notify_admin_new_lead(message.bot, lead_id, lead_data)
-    except Exception as e:
-        logger.error(f"❌ Ошибка уведомления админа о контакте {user_id}: {e}")
-
-
 class QuizOrder(StatesGroup):
-    name = State()
-    phone = State()
-    role = State()
     city = State()
     obj_type = State()
-    floor = State()
+    floor_info = State()
     area = State()
     status = State()
-    complexity = State()
-    goal = State()
-    bti = State()
-    bti_doc = State()
-    urgency = State()
-
-
-def get_progress(step: int, total: int = 10) -> str:
-    return f"📍 Шаг {step} из {total}\n\n"
-
-def handle_quiz_start(user_stage="planned"):
-    """Placeholder for automation script"""
-    # Внедренная логика ветвления
-    if user_stage == "planned":
-        print("Ветка: Чек-лист")
-    else:
-        print("Ветка: Легализация")
-    pass
-
+    changes_desc = State()
+    has_plan = State()
+    plan_file = State()
+    extra_info = State()  # Для приема данных после финала
 
 async def get_text_from_message(message: Message):
     """Извлекает текст или транскрибирует голос в Aiogram"""
@@ -172,24 +48,55 @@ async def get_text_from_message(message: Message):
                 await message.answer(f"🎤 Распознано: «{text}»")
                 return text
         except Exception as e:
-            print(f"Ошибка транскрибации: {e}")
+            logger.error(f"Ошибка транскрибации: {e}")
             return None
     return message.text
 
+async def handle_initial_contact(message: Message, state: FSMContext):
+    """Первичное сохранение лида и уведомление админа"""
+    phone = message.contact.phone_number
+    name = message.from_user.full_name
+    username = message.from_user.username
+    user_id = message.from_user.id
 
-@router.message(QuizOrder.role)
-async def ask_role(message: Message, state: FSMContext):
-    text = await get_text_from_message(message)
-    if not text:
-        await message.answer("Пожалуйста, укажите вашу роль (Собственник/Дизайнер и т.д.)")
-        return
+    await state.update_data(
+        phone=phone,
+        name=name,
+        username=username
+    )
 
-    await state.update_data(role=text)
-    await state.set_state(QuizOrder.city)
-    name = message.from_user.first_name or ""
+    # Сохраняем первичный лид в БД
+    lead_id = await db.upsert_unified_lead(
+        user_id=user_id,
+        source_bot="qualification",
+        phone=phone,
+        name=name,
+        lead_type="initial_contact",
+        details=json.dumps({"username": username}, ensure_ascii=False)
+    )
 
-    await message.answer(f"{get_progress(2)}{name}, из какого вы города? (напишите название)", reply_markup=ReplyKeyboardRemove())
+    # Уведомляем админа (в группу и в ЛС через утилиту)
+    summary = (
+        f"📱 <b>ПОЛУЧЕН КОНТАКТ</b>\n\n"
+        f"👤 <b>Имя:</b> {name}\n"
+        f"📱 <b>Телефон:</b> <code>{phone}</code>\n"
+        f"🆔 <b>ID:</b> <code>{user_id}</code>"
+    )
 
+    try:
+        await message.bot.send_message(chat_id=ADMIN_GROUP_ID, text=summary, parse_mode="HTML")
+        # Дублируем "карточкой" в ЛС админу
+        lead_data = {
+            'user_id': user_id,
+            'name': name,
+            'phone': phone,
+            'source_bot': 'qualification',
+            'lead_type': 'initial_contact',
+            'details': {}
+        }
+        await notify_admin_new_lead(message.bot, lead_id, lead_data)
+    except Exception as e:
+        logger.error(f"❌ Ошибка уведомления админа о контакте {user_id}: {e}")
 
 @router.message(QuizOrder.city)
 async def ask_city(message: Message, state: FSMContext):
@@ -201,253 +108,181 @@ async def ask_city(message: Message, state: FSMContext):
     await state.update_data(city=text)
     await state.set_state(QuizOrder.obj_type)
 
-    name = message.from_user.first_name or ""
     markup = ReplyKeyboardMarkup(
-        keyboard=[[KeyboardButton(text="🏠 Жилое"), KeyboardButton(text="🏢 Нежилое")]],
+        keyboard=[[KeyboardButton(text="Квартира"), KeyboardButton(text="Коммерция")]],
         resize_keyboard=True
     )
-    await message.answer(f"{get_progress(3)}{name}, какой тип объекта?", reply_markup=markup)
-
+    await message.answer("2. Тип объекта:", reply_markup=markup)
 
 @router.message(QuizOrder.obj_type)
 async def ask_obj_type(message: Message, state: FSMContext):
     text = await get_text_from_message(message)
-    if not text:
-        await message.answer("Пожалуйста, выберите тип объекта.")
+    if text not in ["Квартира", "Коммерция"]:
+        await message.answer("Пожалуйста, выберите тип объекта из списка.")
         return
 
     await state.update_data(obj_type=text)
-    await state.set_state(QuizOrder.floor)
+    await state.set_state(QuizOrder.floor_info)
+    await message.answer("3. Этаж и общая этажность дома:", reply_markup=ReplyKeyboardRemove())
 
-    name = message.from_user.first_name or ""
-    markup = ReplyKeyboardMarkup(
-        keyboard=[
-            [KeyboardButton(text="Не первый / не последний")],
-            [KeyboardButton(text="Первый"), KeyboardButton(text="Последний")]
-        ],
-        resize_keyboard=True,
-        one_time_keyboard=True
-    )
-    await message.answer(f"{get_progress(4)}{name}, укажите этаж и этажность дома (например: 5/17) или выберите вариант:", reply_markup=markup)
-
-
-@router.message(QuizOrder.floor)
+@router.message(QuizOrder.floor_info)
 async def ask_floor(message: Message, state: FSMContext):
     text = await get_text_from_message(message)
-    if not text:
-        await message.answer("Пожалуйста, укажите этаж.")
-        return
-
-    await state.update_data(floor=text)
+    await state.update_data(floor_info=text)
     await state.set_state(QuizOrder.area)
-
-    name = message.from_user.first_name or ""
-    await message.answer(f"{get_progress(5)}{name}, укажите примерный метраж помещения (кв. м):", reply_markup=ReplyKeyboardRemove())
-
+    await message.answer("4. Площадь объекта (кв/м):")
 
 @router.message(QuizOrder.area)
 async def ask_area(message: Message, state: FSMContext):
     text = await get_text_from_message(message)
-    if not text or not re.match(r'^\d+([.,]\d+)?$', text.strip()):
-        await message.answer("Пожалуйста, введите метраж числом (например: 45 или 62.5)")
-        return
-
-    await state.update_data(area=text.replace(',', '.'))
+    await state.update_data(area=text)
     await state.set_state(QuizOrder.status)
 
-    name = message.from_user.first_name or ""
     markup = ReplyKeyboardMarkup(
-        keyboard=[[KeyboardButton(text="📋 Планируется"), KeyboardButton(text="✅ Уже выполнена")]],
+        keyboard=[[KeyboardButton(text="Планируется"), KeyboardButton(text="Уже выполнена")]],
         resize_keyboard=True
     )
-    await message.answer(f"{get_progress(6)}{name}, на какой стадии перепланировка?", reply_markup=markup)
-
+    await message.answer("5. Статус: Планируется или уже выполнена перепланировка?", reply_markup=markup)
 
 @router.message(QuizOrder.status)
 async def ask_status(message: Message, state: FSMContext):
     text = await get_text_from_message(message)
-    if not text:
-        await message.answer("Пожалуйста, выберите стадию.")
+    if text not in ["Планируется", "Уже выполнена"]:
+        await message.answer("Пожалуйста, выберите статус из списка.")
         return
 
     await state.update_data(status=text)
-    await state.set_state(QuizOrder.complexity)
+    await state.set_state(QuizOrder.changes_desc)
+    await message.answer("6. Описание изменений: Какие правки хотите сделать или уже сделали?", reply_markup=ReplyKeyboardRemove())
 
-    name = message.from_user.first_name or ""
+@router.message(QuizOrder.changes_desc)
+async def ask_changes_desc(message: Message, state: FSMContext):
+    text = await get_text_from_message(message)
+    await state.update_data(changes_desc=text)
+    await state.set_state(QuizOrder.has_plan)
+
     markup = ReplyKeyboardMarkup(
-        keyboard=[
-            [KeyboardButton(text="🧱 Стены"), KeyboardButton(text="🚿 Мокрые зоны")],
-            [KeyboardButton(text="❌ Нет")]
-        ],
+        keyboard=[[KeyboardButton(text="Да"), KeyboardButton(text="Нет")]],
         resize_keyboard=True
     )
-    await message.answer(f"{get_progress(7)}{name}, что планируете менять?", reply_markup=markup)
+    await message.answer("7. У вас есть план помещения?", reply_markup=markup)
 
-
-@router.message(QuizOrder.complexity)
-async def ask_complexity(message: Message, state: FSMContext):
+@router.message(QuizOrder.has_plan)
+async def ask_has_plan(message: Message, state: FSMContext):
     text = await get_text_from_message(message)
-    if not text:
-        await message.answer("Пожалуйста, выберите вариант.")
-        return
-
-    await state.update_data(complexity=text)
-    await state.set_state(QuizOrder.goal)
-
-    name = message.from_user.first_name or ""
-    markup = ReplyKeyboardMarkup(
-        keyboard=[[KeyboardButton(text="💰 Инвест"), KeyboardButton(text="🏠 Для жизни")]],
-        resize_keyboard=True
-    )
-    await message.answer(f"{get_progress(8)}{name}, какова цель перепланировки?", reply_markup=markup)
-
-
-@router.message(QuizOrder.goal)
-async def ask_bti(message: Message, state: FSMContext):
-    text = await get_text_from_message(message)
-    if not text:
-        await message.answer("Пожалуйста, выберите цель.")
-        return
-
-    await state.update_data(goal=text)
-    await state.set_state(QuizOrder.bti)
-
-    name = message.from_user.first_name or ""
-    await message.answer(
-        f"{get_progress(9)}{name}, прикрепите фото или PDF документов БТИ (или просто напишите «нет», если документов нет):",
-        reply_markup=ReplyKeyboardRemove()
-    )
-
-
-@router.message(QuizOrder.bti)
-async def ask_urgency(message: Message, state: FSMContext):
-    # Проверяем наличие файла или текста
-    if message.document:
-        await state.update_data(bti_file_id=message.document.file_id)
-        await state.update_data(bti_text="Файл прикреплен")
-    elif message.photo:
-        await state.update_data(bti_file_id=message.photo[-1].file_id)
-        await state.update_data(bti_text="Фото прикреплено")
+    if text == "Да":
+        await state.update_data(has_plan=True)
+        await state.set_state(QuizOrder.plan_file)
+        await message.answer("Пожалуйста, загрузите файл (фото/PDF):", reply_markup=ReplyKeyboardRemove())
+    elif text == "Нет":
+        await state.update_data(has_plan=False)
+        await finalize_quiz(message, state)
     else:
-        text = await get_text_from_message(message)
-        await state.update_data(bti_text=text or "нет")
+        await message.answer("Пожалуйста, выберите Да или Нет.")
 
-    await state.set_state(QuizOrder.urgency)
-
-    name = message.from_user.first_name or ""
-    markup = ReplyKeyboardMarkup(
-        keyboard=[
-            [KeyboardButton(text="🔥 Срочно"), KeyboardButton(text="📅 В течение месяца")],
-            [KeyboardButton(text="🔍 Просто прицениваюсь")]
-        ],
-        resize_keyboard=True,
-        one_time_keyboard=True
-    )
-    await message.answer(f"{get_progress(10)}{name}, когда планируете начинать?", reply_markup=markup)
-
-
-@router.message(QuizOrder.urgency)
-async def finish_quiz(message: Message, state: FSMContext):
-    text = await get_text_from_message(message)
-    if not text:
-        await message.answer("Пожалуйста, выберите вариант.")
+@router.message(QuizOrder.plan_file)
+async def handle_plan_file(message: Message, state: FSMContext):
+    if message.document:
+        await state.update_data(plan_file_id=message.document.file_id)
+        await state.update_data(plan_file_type="PDF/Doc")
+    elif message.photo:
+        await state.update_data(plan_file_id=message.photo[-1].file_id)
+        await state.update_data(plan_file_type="Photo")
+    else:
+        await message.answer("Пожалуйста, пришлите файл или фото плана.")
         return
 
-    await state.update_data(urgency=text)
-    data = await state.get_data()
+    await finalize_quiz(message, state)
 
-    # Формируем сводку для админа
+async def finalize_quiz(message: Message, state: FSMContext):
+    data = await state.get_data()
+    user_id = message.from_user.id
+
+    # Сводка для админа
     summary = (
-        f"🚀 <b>НОВАЯ ЗАЯВКА (КВИЗ {data.get('status')})</b>\n\n"
+        f"🚀 <b>ЗАВЕРШЕН КВИЗ (7 вопросов)</b>\n\n"
         f"👤 <b>Клиент:</b> {message.from_user.full_name}\n"
-        f"🆔 <b>TG ID:</b> <code>{message.from_user.id}</code>\n"
         f"📱 <b>Телефон:</b> {data.get('phone')}\n"
         f"🏙 <b>Город:</b> {data.get('city')}\n"
         f"🏢 <b>Тип:</b> {data.get('obj_type')}\n"
-        f"🏢 <b>Этаж:</b> {data.get('floor')}\n"
-        f"📐 <b>Метраж:</b> {data.get('area')} м²\n"
-        f"🧱 <b>Сложность:</b> {data.get('complexity')}\n"
-        f"🎯 <b>Цель:</b> {data.get('goal')}\n"
-        f"📂 <b>БТИ:</b> {data.get('bti_text')}\n"
-        f"⏳ <b>Срочность:</b> {data.get('urgency')}\n"
-        f"🔗 <b>Источник:</b> <code>{data.get('_payload') or 'direct'}</code>"
+        f"🏢 <b>Этаж:</b> {data.get('floor_info')}\n"
+        f"📐 <b>Площадь:</b> {data.get('area')}\n"
+        f"🏗 <b>Статус:</b> {data.get('status')}\n"
+        f"📝 <b>Изменения:</b> {data.get('changes_desc')}\n"
+        f"📂 <b>План:</b> {'Да' if data.get('has_plan') else 'Нет'} ({data.get('plan_file_type', 'N/A')})"
     )
 
-    # Отправка в админ-группу
+    # Сохранение в БД
+    lead_id = await db.upsert_unified_lead(
+        user_id=user_id,
+        source_bot="qualification",
+        phone=data.get('phone'),
+        name=message.from_user.full_name,
+        lead_type="quiz_v2_completed",
+        details=json.dumps(data, ensure_ascii=False)
+    )
+
     try:
-        if data.get('bti_file_id'):
+        if data.get('plan_file_id'):
             await message.bot.send_document(
                 chat_id=ADMIN_GROUP_ID,
-                document=data.get('bti_file_id'),
+                document=data.get('plan_file_id'),
                 caption=summary,
                 parse_mode="HTML"
             )
         else:
             await message.bot.send_message(chat_id=ADMIN_GROUP_ID, text=summary, parse_mode="HTML")
-    except Exception as e:
-        logger.error(f"❌ Ошибка отправки уведомления админу (квиз завершен): {e}")
-        try:
-            await message.bot.send_message(chat_id=ADMIN_GROUP_ID, text=summary, parse_mode="HTML")
-        except:
-            pass
 
-    # Обновляем лид в БД результатами квиза
-    try:
-        lead_id = await db.upsert_unified_lead(
-            user_id=message.from_user.id,
-            source_bot="qualification",
-            phone=data.get('phone'),
-            name=message.from_user.full_name,
-            username=message.from_user.username,
-            lead_type="quiz_completed",
-            details=json.dumps(data, ensure_ascii=False)
-        )
-
-        # Персональное уведомление админу
-        lead_data_for_notify = {
-            'user_id': message.from_user.id,
+        # Уведомление в ЛС админу карточкой
+        lead_data = {
+            'user_id': user_id,
             'name': message.from_user.full_name,
             'phone': data.get('phone'),
             'source_bot': 'qualification',
             'lead_type': 'quiz_completed',
             'details': data
         }
-        await notify_admin_new_lead(message.bot, lead_id, lead_data_for_notify)
-
+        await notify_admin_new_lead(message.bot, lead_id, lead_data)
     except Exception as e:
-        logger.error(f"❌ Ошибка обновления лида в БД (квиз завершен): {e}")
+        logger.error(f"Ошибка уведомления админа: {e}")
 
-    # Ветвление финального контента для пользователя
-    status = data.get('status', '').lower()
-    name = message.from_user.first_name or "клиент"
+    # Финальное сообщение пользователю
+    final_text = "Я передал информацию нашему эксперту, он свяжется с вами в ближайшее время."
+    if not is_working_hours():
+        final_text += "\nНаш специалист свяжется с вами в ближайшее рабочее время."
 
-    if "уже выполнена" in status:
-        final_text = (
-            f"✅ <b>Спасибо, {name}! Ваша заявка принята.</b>\n\n"
-            "Так как перепланировка уже выполнена, мы подготовим для вас план легализации:\n"
-            "1️⃣ Проверим допустимость выполненных работ.\n"
-            "2️⃣ Оценим риски штрафов и предписаний.\n"
-            "3️⃣ Подскажем, как узаконить всё без судов.\n\n"
-            "Наш специалист свяжется с вами в ближайшее рабочее время."
-        )
-    else:
-        final_text = (
-            f"✅ <b>Спасибо, {name}! Заявка успешно оформлена.</b>\n\n"
-            "Для вашей будущей перепланировки мы подготовим:\n"
-            "1️⃣ Расчет стоимости проектирования и согласования.\n"
-            "2️⃣ Пошаговый алгоритм действий именно для вашего случая.\n"
-            "3️⃣ Список необходимых документов БТИ и ЕГРН.\n\n"
-            "Эксперт компании позвонит вам для уточнения деталей."
-        )
+    await message.answer(final_text, parse_mode="HTML", reply_markup=ReplyKeyboardRemove())
 
-    # Кнопка для записи на консультацию
-    markup = InlineKeyboardMarkup(
-        inline_keyboard=[
-            [InlineKeyboardButton(text="📅 Выбрать время консультации", url="https://t.me/terion_expert")]
-        ]
+    await message.answer(
+        "Если у вас остались вопросы или вы хотите приложить доп. документы, "
+        "отправьте их в этом чате, также вы можете оставить голосовое сообщение (я его распознаю).",
+        parse_mode="HTML"
     )
     
-    await message.answer(final_text, parse_mode="HTML", reply_markup=ReplyKeyboardRemove())
-    await message.answer("Вы также можете написать нашему специалисту напрямую в Telegram:", reply_markup=markup)
+    # Переводим в состояние приема доп. данных
+    await state.set_state(QuizOrder.extra_info)
 
-    await state.clear()
+@router.message(QuizOrder.extra_info)
+async def handle_extra_info(message: Message, state: FSMContext):
+    """Обработка доп. документов и вопросов после финала"""
+    user_id = message.from_user.id
+
+    # Если голосовое - транскрибируем
+    text = await get_text_from_message(message)
+
+    # Пересылаем админу
+    info_text = f"➕ <b>ДОП. ИНФОРМАЦИЯ ОТ КЛИЕНТА</b>\n\n👤 {message.from_user.full_name}\n🆔 <code>{user_id}</code>\n\n"
+    if text:
+        info_text += f"💬 {text}"
+
+    try:
+        if message.photo:
+            await message.bot.send_photo(ADMIN_GROUP_ID, message.photo[-1].file_id, caption=info_text, parse_mode="HTML")
+        elif message.document:
+            await message.bot.send_document(ADMIN_GROUP_ID, message.document.file_id, caption=info_text, parse_mode="HTML")
+        elif message.voice or message.text:
+            await message.bot.send_message(ADMIN_GROUP_ID, info_text, parse_mode="HTML")
+
+        await message.answer("Информация передана эксперту. Спасибо!")
+    except Exception as e:
+        logger.error(f"Ошибка пересылки доп. инфо: {e}")

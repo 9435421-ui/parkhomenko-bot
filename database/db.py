@@ -46,6 +46,7 @@ class Database:
                     last_name TEXT,
                     phone TEXT,
                     birthday TEXT, -- Формат: DD.MM
+                    is_banned BOOLEAN DEFAULT 0,
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                     last_interaction TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                 )
@@ -174,6 +175,25 @@ class Database:
                 )
                 row = await cursor.fetchone()
                 return dict(row)
+
+    async def ban_user(self, user_id: int):
+        """Заблокировать пользователя"""
+        async with self.conn.cursor() as cursor:
+            await cursor.execute(
+                "UPDATE users SET is_banned = 1 WHERE user_id = ?",
+                (user_id,)
+            )
+            await self.conn.commit()
+
+    async def is_user_banned(self, user_id: int) -> bool:
+        """Проверить, заблокирован ли пользователь"""
+        async with self.conn.cursor() as cursor:
+            await cursor.execute(
+                "SELECT is_banned FROM users WHERE user_id = ?",
+                (user_id,)
+            )
+            row = await cursor.fetchone()
+            return bool(row[0]) if row else False
     
     # ============= СОСТОЯНИЯ =============
     
@@ -422,8 +442,8 @@ class Database:
             await cursor.execute("SELECT COUNT(DISTINCT user_id) FROM unified_leads")
             contacts_left = (await cursor.fetchone())[0]
 
-            # Завершили квиз
-            await cursor.execute("SELECT COUNT(*) FROM unified_leads WHERE lead_type = 'quiz_completed'")
+            # Завершили квиз (поддерживаем оба типа: старый и v2)
+            await cursor.execute("SELECT COUNT(*) FROM unified_leads WHERE lead_type IN ('quiz_completed', 'quiz_v2_completed')")
             quiz_completed = (await cursor.fetchone())[0]
 
             # По статусам

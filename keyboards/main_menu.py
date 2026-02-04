@@ -34,11 +34,10 @@ def get_main_menu() -> InlineKeyboardMarkup:
 
 
 def get_consent_keyboard() -> ReplyKeyboardMarkup:
-    """Клавиатура согласия на обработку данных"""
+    """Клавиатура согласия на обработку данных с запросом контакта"""
     return ReplyKeyboardMarkup(
         keyboard=[
-            [KeyboardButton(text="✅ Я согласен и хочу продолжить")],
-            [KeyboardButton(text="❌ Отказаться")]
+            [KeyboardButton(text="✅ Согласен и хочу продолжить", request_contact=True)]
         ],
         resize_keyboard=True,
         one_time_keyboard=True

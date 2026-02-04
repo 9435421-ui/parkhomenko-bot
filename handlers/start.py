@@ -2,11 +2,13 @@ from aiogram import Router, F
 from aiogram.types import Message, CallbackQuery
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import StatesGroup, State
-from .quiz import QuizOrder, handle_initial_contact, start_quiz
-from keyboards.main_menu import get_consent_keyboard, get_main_menu, get_contact_keyboard
+from .quiz import QuizOrder, handle_initial_contact
+from keyboards.main_menu import get_consent_keyboard, get_main_menu
 from database.db import db
+from aiogram.types import ReplyKeyboardRemove
 from datetime import datetime
 import re
+from utils.moderation import contains_bad_words
 
 router = Router()
 
@@ -17,60 +19,35 @@ class UserProfile(StatesGroup):
 async def handle_start(message: Message, state: FSMContext):
     parts = message.text.split()
     payload = parts[1] if len(parts) > 1 else ""
-
-    if payload == 'quiz':
-        await start_quiz(message, state)
-        return
-
-    await message.answer(
-        "Здравствуйте! Я — Антон, ваш личный <b>ИИ-помощник</b> по вопросам перепланировок. Работаю от имени ведущего эксперта компании ТЕРИОН.\n\n"
-        "Нажимая кнопку \"✅ Я согласен и хочу продолжить\", вы даете согласие на обработку персональных данных, "
-        "принимаете условия политики конфиденциальности, а также соглашаетесь на получение информационных сообщений.\n\n"
-        "Все консультации в автоматическом режиме носят ознакомительный характер, финальное решение всегда подтверждает наш эксперт.",
-        reply_markup=get_consent_keyboard(),
-        parse_mode="HTML"
-    )
     await state.update_data(_payload=payload)
 
-
-@router.message(F.text == "✅ Я согласен и хочу продолжить")
-async def handle_consent(message: Message, state: FSMContext):
-    """Обработка согласия пользователя"""
-    await state.update_data(consent=True, consent_date=datetime.now().isoformat())
-
-    await message.answer(
-        "Спасибо! Теперь, пожалуйста, поделитесь вашим контактом, чтобы мы могли сохранить вашу заявку и связаться с вами.",
-        reply_markup=get_contact_keyboard()
-    )
+    if payload == "quiz":
+        # Пропускаем приветствие, сразу просим контакт
+        await message.answer(
+            "Для начала квалификации и связи с экспертом, пожалуйста, поделитесь вашим контактом.",
+            reply_markup=get_consent_keyboard(),
+            parse_mode="HTML"
+        )
+    else:
+        await message.answer(
+            "Вас приветствует компания ТЕРИОН! Я — Антон, ИИ-помощник.\n\n"
+            "Нажимая кнопку ниже, вы даете согласие на обработку персональных данных, "
+            "получение уведомлений и информационную переписку. "
+            "Все консультации носят информационный характер, финальное решение подтверждает эксперт ТЕРИОН.",
+            reply_markup=get_consent_keyboard(),
+            parse_mode="HTML"
+        )
 
 
 @router.message(F.contact)
 async def handle_contact_start(message: Message, state: FSMContext):
-    """Первичная обработка контакта после согласия"""
-    data = await state.get_data()
-    if not data.get('consent'):
-        await message.answer("Пожалуйста, сначала подтвердите согласие на обработку данных.", reply_markup=get_consent_keyboard())
-        return
-
+    """Первичная обработка контакта"""
     # Сохраняем лид и уведомляем админа
     await handle_initial_contact(message, state)
-
-    payload = data.get('_payload', '')
     
-    if payload == 'quiz' or payload == 'terion_main' or payload == 'domgrand':
-        await state.set_state(QuizOrder.role)
-        await message.answer("📋 Кто вы? (Собственник/Дизайнер/Застройщик/Инвестор/Другое)")
-    elif payload == 'invest':
-        await state.set_state(QuizOrder.city)
-        await message.answer("💰 Давайте оценим капитализацию вашего объекта после перепланировки. Какой город?")
-    elif payload == 'expert':
-        await state.set_state(QuizOrder.obj_type)
-        await message.answer("🔍 Какой тип недвижимости? (🏠 Жилая/🏢 Коммерческая/💰 Инвестиционная)")
-    elif payload == 'price':
-        await state.set_state(QuizOrder.city)
-        await message.answer("🧮 Давайте рассчитаем стоимость наших услуг. Какой тип объекта?")
-    else:
-        await message.answer("Выберите действие:", reply_markup=get_main_menu())
+    # Квиз запускается сразу после получения контакта
+    await state.set_state(QuizOrder.city)
+    await message.answer("📋 <b>Начинаем квиз</b>\n\n1. Укажите город / населенный пункт.", parse_mode="HTML", reply_markup=ReplyKeyboardRemove())
 
 
 @router.callback_query(F.data == "back_to_menu")

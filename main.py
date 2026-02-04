@@ -14,6 +14,7 @@ from config import BOT_TOKEN
 from handlers import start_router, quiz_router, dialog_router, invest_router, admin_router
 from database.db import db
 from services.loyalty_service import LoyaltyService
+from utils.middleware import ModerationMiddleware
 
 # Настройка логирования
 logging.basicConfig(
@@ -47,6 +48,9 @@ async def main():
     )
 
     dp = Dispatcher(storage=MemoryStorage())
+
+    # Регистрация Middleware
+    dp.message.middleware(ModerationMiddleware())
 
     # Инициализация сервисов лояльности
     loyalty = LoyaltyService(bot)

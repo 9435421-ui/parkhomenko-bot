@@ -28,6 +28,7 @@ LEADS_GROUP_CHAT_ID = int(os.getenv("LEADS_GROUP_CHAT_ID", "-1003370698977"))
 THREAD_ID_KVARTIRY = int(os.getenv("THREAD_ID_KVARTIRY", "2"))
 THREAD_ID_KOMMERCIA = int(os.getenv("THREAD_ID_KOMMERCIA", "5"))
 THREAD_ID_DOMA = int(os.getenv("THREAD_ID_DOMA", "8"))
+THREAD_ID_LOGS = int(os.getenv("THREAD_ID_LOGS", "88"))
 ADMIN_ID = int(os.getenv("ADMIN_ID", "0"))
 
 if not BOT_TOKEN or not OPENAI_API_KEY:
@@ -439,7 +440,7 @@ def process_report_description(message, file_id):
         f"Напиши профессиональный и вовлекающий пост для Telegram-канала компании ТЕРИОН "
         f"(эксперты по перепланировкам). Тема: Репортаж с объекта. Контекст: {context}. "
         f"Стиль: деловой, экспертный, но доступный. Обязательно добавь призыв к действию: "
-        f"пройти квиз по ссылке @terion_bot?start=report_mode"
+        f"пройти квиз по ссылке https://t.me/terion_bot?start=quiz"
     )
 
     bot.send_message(message.chat.id, "Генерирую описание...")
@@ -756,8 +757,8 @@ def monitor_groups(message):
 
         try:
             bot.send_message(
-                LEADS_GROUP_CHAT_ID,
-                alert_text,
+                chat_id=LEADS_GROUP_CHAT_ID,
+                text=alert_text,
                 message_thread_id=THREAD_ID_LOGS,
                 parse_mode="HTML",
                 disable_web_page_preview=True
