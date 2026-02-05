@@ -1,79 +1,131 @@
-from aiogram import Router, F
-from aiogram.types import Message, CallbackQuery, ReplyKeyboardRemove
-from aiogram.fsm.state import StatesGroup, State
+import logging
+import os
+from aiogram import Router, F, types
 from aiogram.fsm.context import FSMContext
-from config import LEADS_GROUP_CHAT_ID, THREAD_ID_KVARTIRY, THREAD_ID_KOMMERCIA, THREAD_ID_DOMA
+from aiogram.fsm.state import State, StatesGroup
+from aiogram.types import Message, ReplyKeyboardRemove, FSInputFile
+from database.db import db
 from keyboards.main_menu import get_object_type_keyboard, get_remodeling_status_keyboard
+from services.lead_service import send_lead_to_admin_group
+from utils.voice_handler import transcribe
 
 router = Router()
 
 class QuizOrder(StatesGroup):
     city = State()
-    obj_type = State()
-    floor_info = State()
+    object_type = State()
+    floor = State()
     area = State()
     status = State()
     description = State()
-    plan_file = State()
+    bti_file = State()
 
+# STAGE_LOGIC: 1. City
 @router.message(QuizOrder.city)
-async def handle_city(message: Message, state: FSMContext):
-    await state.update_data(city=message.text)
-    await state.set_state(QuizOrder.obj_type)
-    await message.answer("Какой тип объекта? (Жилая/Коммерческая/Инвестиционная)", reply_markup=get_object_type_keyboard())
+async def process_city(message: Message, state: FSMContext):
+    text = message.text
+    if message.voice:
+        text = await transcribe(message.voice.file_id)
 
-@router.callback_query(QuizOrder.obj_type, F.data.startswith("obj:"))
-async def handle_obj_type(callback: CallbackQuery, state: FSMContext):
-    obj_type = "Квартира" if "kvartira" in callback.data else "Коммерция"
-    await state.update_data(obj_type=obj_type)
-    await state.set_state(QuizOrder.floor_info)
-    await callback.message.edit_text("На каком этаже находится объект? Укажите этаж и этажность (например: 5/9):")
-    await callback.answer()
+    if not text:
+        await message.answer("Пожалуйста, введите город текстом или голосом.")
+        return
 
-@router.message(QuizOrder.floor_info)
-async def handle_floor(message: Message, state: FSMContext):
-    await state.update_data(floor_info=message.text)
+    await state.update_data(city=text)
+    await state.set_state(QuizOrder.object_type)
+    await message.answer("2. Тип объекта (Квартира/Коммерция):", reply_markup=get_object_type_keyboard())
+
+# STAGE_LOGIC: 2. Object Type
+@router.message(QuizOrder.object_type)
+async def process_object_type(message: Message, state: FSMContext):
+    if message.text not in ["Квартира", "Коммерция"]:
+        await message.answer("Пожалуйста, выберите тип объекта из списка.", reply_markup=get_object_type_keyboard())
+        return
+
+    await state.update_data(object_type=message.text)
+    await state.set_state(QuizOrder.floor)
+    await message.answer("3. Укажите этаж:", reply_markup=ReplyKeyboardRemove())
+
+# STAGE_LOGIC: 3. Floor
+@router.message(QuizOrder.floor)
+async def process_floor(message: Message, state: FSMContext):
+    text = message.text
+    if message.voice:
+        text = await transcribe(message.voice.file_id)
+
+    await state.update_data(floor=text)
     await state.set_state(QuizOrder.area)
-    await message.answer("Какая площадь объекта? (в кв.м.)")
+    await message.answer("4. Какая площадь объекта (кв. м)?")
 
+# STAGE_LOGIC: 4. Area
 @router.message(QuizOrder.area)
-async def handle_area(message: Message, state: FSMContext):
-    await state.update_data(area=message.text)
+async def process_area(message: Message, state: FSMContext):
+    text = message.text
+    if message.voice:
+        text = await transcribe(message.voice.file_id)
+
+    try:
+        area_val = float(text.replace(',', '.').split()[0])
+        await state.update_data(area=area_val)
+    except:
+        await state.update_data(area=text) # Keep as text if conversion fails
+
     await state.set_state(QuizOrder.status)
-    await message.answer("Какой статус перепланировки? (Планируется/Уже выполнена/В процессе)", reply_markup=get_remodeling_status_keyboard())
+    await message.answer("5. Статус перепланировки (Планируется/Выполнена):", reply_markup=get_remodeling_status_keyboard())
 
-@router.callback_query(QuizOrder.status, F.data.startswith("remodel:"))
-async def handle_status(callback: CallbackQuery, state: FSMContext):
-    status = "Выполнена" if "done" in callback.data else "Планируется"
-    await state.update_data(status=status)
+# STAGE_LOGIC: 5. Status
+@router.message(QuizOrder.status)
+async def process_status(message: Message, state: FSMContext):
+    if message.text not in ["Планируется", "Выполнена"]:
+        await message.answer("Пожалуйста, выберите статус.", reply_markup=get_remodeling_status_keyboard())
+        return
+
+    await state.update_data(status=message.text)
     await state.set_state(QuizOrder.description)
-    await callback.message.edit_text("Опишите, пожалуйста, что именно вы хотите изменить в планировке?")
-    await callback.answer()
+    await message.answer("6. Описание изменений (что планируете или уже сделали):", reply_markup=ReplyKeyboardRemove())
 
+# STAGE_LOGIC: 6. Description
 @router.message(QuizOrder.description)
-async def handle_description(message: Message, state: FSMContext):
-    await state.update_data(description=message.text)
-    await state.set_state(QuizOrder.plan_file)
-    await message.answer("Прикрепите, пожалуйста, план помещения или фото (JPG/PDF):")
+async def process_description(message: Message, state: FSMContext):
+    text = message.text
+    if message.voice:
+        text = await transcribe(message.voice.file_id)
 
-@router.message(QuizOrder.plan_file, F.photo | F.document)
-async def handle_plan_file(message: Message, state: FSMContext):
+    await state.update_data(description=text)
+    await state.set_state(QuizOrder.bti_file)
+    await message.answer("7. Загрузите файл планировки или фото БТИ (если есть, иначе отправьте '-')")
+
+# STAGE_LOGIC: 7. File & Finish
+@router.message(QuizOrder.bti_file)
+async def process_bti_file(message: Message, state: FSMContext):
+    file_id = None
+    if message.photo:
+        file_id = message.photo[-1].file_id
+    elif message.document:
+        file_id = message.document.file_id
+
     data = await state.get_data()
-    file_id = message.photo[-1].file_id if message.photo else message.document.file_id
-    thread_id = THREAD_ID_KVARTIRY if data.get('obj_type') == 'Квартира' else THREAD_ID_KOMMERCIA
+    user_id = message.from_user.id
 
-    summary = (
-        f"📋 <b>Новая заявка</b>\n\n"
-        f"🏙 Город: {data.get('city')}\n"
-        f"🏗 Тип: {data.get('obj_type')}\n"
-        f"🪜 Этаж: {data.get('floor_info')}\n"
-        f"📏 Площадь: {data.get('area')}\n"
-        f"📅 Статус: {data.get('status')}\n"
-        f"📝 Описание: {data.get('description')}\n"
-        f"👤 Клиент: @{message.from_user.username or message.from_user.id}"
-    )
+    # Update lead in DB
+    db.update_lead(user_id, {
+        "city": data.get("city"),
+        "object_type": data.get("object_type"),
+        "floor": data.get("floor"),
+        "area": data.get("area"),
+        "status": data.get("status"),
+        "description": data.get("description"),
+        "bti_file": file_id
+    })
 
-    await message.bot.send_message(LEADS_GROUP_CHAT_ID, summary, message_thread_id=thread_id, parse_mode="HTML")
-    await message.bot.send_document(LEADS_GROUP_CHAT_ID, file_id, message_thread_id=thread_id)
-    await message.answer("Спасибо! Юлия Пархоменко свяжется с вами для анализа.", reply_markup=ReplyKeyboardRemove())
+    # Send to admin
+    await send_lead_to_admin_group(message.bot, user_id, data, file_id)
+
+    # Final message logic
+    if data.get("status") == "Выполнена":
+        final_text = "Спасибо! Ваша заявка принята. Так как перепланировка уже выполнена, наш специалист свяжется с вами, чтобы обсудить варианты её узаконивания."
+    else:
+        final_text = "Спасибо! Ваша заявка принята. Мы изучим ваши пожелания и предложим оптимальный вариант проекта и согласования."
+
+    await message.answer(final_text, reply_markup=ReplyKeyboardRemove())
     await state.clear()
