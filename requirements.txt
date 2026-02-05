@@ -8,7 +8,7 @@ python-dotenv==1.0.0
 aiosqlite==0.19.0
 
 # HTTP requests
-requests==2.31.0
+requests==2.32.3
 aiohttp==3.9.1
 
 # OpenRouter (for future integrations)
