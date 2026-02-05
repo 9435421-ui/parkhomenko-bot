@@ -221,11 +221,19 @@ def send_lead_to_group(summary_text: str, object_type: str, is_new: bool = True,
 
     prefix = "🔥 НОВЫЙ ЛИД" if is_new else "🔄 Обновление лида"
 
+    # Кнопка связи
+    markup = None
+    if user_id:
+        markup = InlineKeyboardMarkup()
+        markup.add(InlineKeyboardButton("📞 Связаться с клиентом", url=f"tg://user?id={user_id}"))
+
     try:
         bot.send_message(
             chat_id=LEADS_GROUP_CHAT_ID,
             text=f"{prefix}\n\n{summary_text}",
-            message_thread_id=thread_id
+            message_thread_id=thread_id,
+            reply_markup=markup,
+            parse_mode="HTML"
         )
     except Exception as e:
         print(f"Ошибка отправки лида в группу {LEADS_GROUP_CHAT_ID}: {e}")
@@ -612,9 +620,9 @@ def finalize_lead(message):
     lead = user_leads[message.chat.id]
 
     # Ветвление финального контента
-    stage = lead.get('stage', '').lower()
+    status = lead.get('status', '').lower()
     name = lead.get('name', 'клиент')
-    if "уже выполнена" in stage:
+    if "уже выполнена" in status:
         final_text = (
             f"✅ <b>Спасибо, {name}! Ваша заявка принята.</b>\n\n"
             "Так как перепланировка уже выполнена, мы подготовим для вас план легализации:\n"
@@ -680,17 +688,23 @@ def handle_contact_quiz(message):
 
         # Уведомляем админа
         summary = (
-            f"📱 ПОЛУЧЕН КОНТАКТ (Контент-бот)\n\n"
-            f"👤 Имя: {name}\n"
-            f"📱 Телефон: {phone}\n"
-            f"🆔 ID: {user_id}"
+            f"📱 <b>ПОЛУЧЕН КОНТАКТ (Контент-бот)</b>\n\n"
+            f"👤 <b>Имя:</b> {name}\n"
+            f"📱 <b>Телефон:</b> <code>{phone}</code>\n"
+            f"🆔 <b>ID:</b> <code>{user_id}</code>"
         )
+        # Кнопка связи
+        markup = InlineKeyboardMarkup()
+        markup.add(InlineKeyboardButton("💬 Написать", url=f"tg://user?id={user_id}"))
+
         # Первичный контакт всегда в LOGS (88)
         try:
             bot.send_message(
                 chat_id=LEADS_GROUP_CHAT_ID,
                 text=summary,
-                message_thread_id=THREAD_ID_LOGS
+                message_thread_id=THREAD_ID_LOGS,
+                reply_markup=markup,
+                parse_mode="HTML"
             )
         except Exception as e:
             print(f"Ошибка отправки контакта в LOGS: {e}")

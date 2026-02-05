@@ -185,6 +185,17 @@ class Database:
             )
             await self.conn.commit()
 
+    async def update_user(self, user_id: int, **kwargs):
+        """Обновить данные пользователя в основной таблице"""
+        async with self.conn.cursor() as cursor:
+            set_clause = ", ".join([f"{k} = ?" for k in kwargs.keys()])
+            values = list(kwargs.values()) + [user_id]
+            await cursor.execute(
+                f"UPDATE users SET {set_clause} WHERE user_id = ?",
+                values
+            )
+            await self.conn.commit()
+
     async def is_user_banned(self, user_id: int) -> bool:
         """Проверить, заблокирован ли пользователь"""
         async with self.conn.cursor() as cursor:
@@ -468,6 +479,17 @@ class Database:
             await cursor.execute("SELECT * FROM unified_leads ORDER BY created_at DESC")
             rows = await cursor.fetchall()
             return [dict(row) for row in rows]
+
+    async def is_quiz_completed(self, user_id: int) -> bool:
+        """Проверить, завершил ли пользователь квиз"""
+        async with self.conn.cursor() as cursor:
+            await cursor.execute(
+                """SELECT id FROM unified_leads
+                   WHERE user_id = ? AND lead_type IN ('quiz_completed', 'quiz_v2_completed')
+                   LIMIT 1""",
+                (user_id,)
+            )
+            return bool(await cursor.fetchone())
 
     async def get_all_users(self) -> List[Dict]:
         """Получить всех пользователей"""

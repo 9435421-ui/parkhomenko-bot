@@ -1,144 +1,98 @@
 """
-Сервис для работы с лидами (отправка в группу Telegram)
+Сервис для маршрутизации и отправки заявок (лидов)
 """
-import os
-from datetime import datetime
-from typing import Dict, Optional
 from aiogram import Bot
+from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
+from config import LEADS_GROUP_CHAT_ID, THREAD_ID_KVARTIRY, THREAD_ID_KOMMERCIA, THREAD_ID_DOMA, THREAD_ID_LOGS
 
-
-class LeadService:
-    """Сервис для отправки лидов в группу Telegram"""
+async def send_lead_to_admin_group(bot: Bot, lead_data: dict):
+    """
+    Отправка заявки в админ-группу с маршрутизацией по топикам
+    """
+    obj_type = lead_data.get('obj_type', '').lower()
     
-    def __init__(self):
-        self.leads_group_id = int(os.getenv("LEADS_GROUP_CHAT_ID", "0"))
-        self.thread_kvartiry = int(os.getenv("THREAD_ID_KVARTIRY", "0"))
-        self.thread_kommercia = int(os.getenv("THREAD_ID_KOMMERCIA", "0"))
-        self.thread_doma = int(os.getenv("THREAD_ID_DOMA", "0"))
+    # Маршрутизация по топикам
+    if 'квартира' in obj_type:
+        thread_id = THREAD_ID_KVARTIRY
+    elif 'коммерция' in obj_type:
+        thread_id = THREAD_ID_KOMMERCIA
+    elif 'дом' in obj_type:
+        thread_id = THREAD_ID_DOMA
+    else:
+        thread_id = THREAD_ID_LOGS
+
+    user_id = lead_data.get('user_id')
+    username = lead_data.get('username') or "Нет"
+    phone = lead_data.get('phone') or "Нет"
     
-    async def send_lead_to_group(
-        self,
-        bot: Bot,
-        lead_data: Dict,
-        user_id: int
-    ) -> bool:
-        """
-        Отправка лида в группу Telegram
-        
-        Args:
-            bot: Экземпляр бота
-            lead_data: Данные лида
-            user_id: ID пользователя
-        
-        Returns:
-            bool: Успешность отправки
-        """
-        # Определяем топик по типу объекта
-        object_type = lead_data.get('object_type', '')
-        
-        if object_type == "Квартира":
-            thread_id = self.thread_kvartiry
-        elif object_type == "Коммерция":
-            thread_id = self.thread_kommercia
-        elif object_type == "Дом":
-            thread_id = self.thread_doma
-        else:
-            thread_id = None
-        
-        # Формируем текст лида
-        lead_text = self._format_lead_text(lead_data, user_id)
-        
-        try:
-            if thread_id and thread_id > 0:
-                await bot.send_message(
-                    chat_id=self.leads_group_id,
-                    text=lead_text,
-                    message_thread_id=thread_id,
-                    parse_mode="HTML"
-                )
-            else:
-                await bot.send_message(
-                    chat_id=self.leads_group_id,
-                    text=lead_text,
-                    parse_mode="HTML"
-                )
-            
-            return True
-        except Exception as e:
-            print(f"❌ Ошибка отправки лида: {e}")
-            return False
-    
-    def _format_lead_text(self, lead_data: Dict, user_id: int) -> str:
-        """Форматирование текста лида"""
-        
-        floor_info = ""
-        if lead_data.get('floor'):
-            floor_info = f"🏢 Этаж: {lead_data['floor']}"
-            if lead_data.get('total_floors'):
-                floor_info += f"/{lead_data['total_floors']}"
-        
-        return f"""
-📋 <b>Новая заявка на перепланировку</b>
+    # Формируем текст CRM-карточки
+    text = (
+        f"🆕 <b>НОВАЯ ЗАЯВКА ТЕРИОН</b>\n\n"
+        f"👤 <b>Клиент:</b> {lead_data.get('name')}\n"
+        f"📱 <b>Телефон:</b> <code>{phone}</code>\n"
+        f"🆔 <b>TG ID:</b> <code>{user_id}</code>\n"
+        f"🔗 <b>Username:</b> @{username}\n\n"
+        f"🏙 <b>Город:</b> {lead_data.get('city')}\n"
+        f"🏢 <b>Тип:</b> {lead_data.get('obj_type')}\n"
+        f"🏠 <b>Этаж:</b> {lead_data.get('floor_info')}\n"
+        f"📐 <b>Площадь:</b> {lead_data.get('area')} кв.м\n"
+        f"🏗 <b>Статус:</b> {lead_data.get('status')}\n"
+        f"📝 <b>Описание:</b> {lead_data.get('changes_desc', 'Нет')}\n"
+        f"📂 <b>План:</b> {'Да' if lead_data.get('has_plan') else 'Нет'}\n"
+    )
 
-👤 <b>Имя:</b> {lead_data.get('name', 'не указано')}
-📞 <b>Телефон (TG):</b> {lead_data.get('phone', 'не указан')}
-📪 <b>Доп. контакт:</b> {lead_data.get('extra_contact') or 'не указан'}
+    # Кнопка связи
+    markup = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="📞 Связаться с клиентом", url=f"tg://user?id={user_id}")]
+    ])
 
-🏠 <b>Тип объекта:</b> {lead_data.get('object_type', 'не выбран')}
-🏙️ <b>Город:</b> {lead_data.get('city', 'не указан')}
-{floor_info}
-
-🔧 <b>Статус:</b> {lead_data.get('remodeling_status', 'не указан')}
-🛠️ <b>Что хочет изменить:</b>
-{lead_data.get('change_plan', 'не указано')}
-
-📄 <b>Статус БТИ:</b> {lead_data.get('bti_status', 'не указан')}
-
-🕐 <b>Время:</b> {datetime.now().strftime("%d.%m.%Y %H:%M")}
-👤 <b>User ID:</b> <code>{user_id}</code>
-        """.strip()
-    
-    async def send_minimal_lead(
-        self,
-        bot: Bot,
-        user_id: int,
-        name: str,
-        phone: str
-    ) -> bool:
-        """
-        Отправка минимального лида (только контакт получен)
-        
-        Args:
-            bot: Экземпляр бота
-            user_id: ID пользователя
-            name: Имя
-            phone: Телефон
-        
-        Returns:
-            bool: Успешность отправки
-        """
-        text = f"""
-🆕 <b>НОВЫЙ КОНТАКТ</b>
-
-👤 <b>Имя:</b> {name}
-📞 <b>Телефон:</b> {phone}
-👤 <b>User ID:</b> <code>{user_id}</code>
-
-🕐 <b>Время:</b> {datetime.now().strftime("%d.%m.%Y %H:%M")}
-ℹ️ <b>Статус:</b> контакт получен, тип объекта и заявка ещё не оформлены
-        """.strip()
-        
-        try:
-            await bot.send_message(
-                chat_id=self.leads_group_id,
-                text=text,
-                parse_mode="HTML"
+    try:
+        if lead_data.get('plan_file_id'):
+            await bot.send_document(
+                chat_id=LEADS_GROUP_CHAT_ID,
+                document=lead_data.get('plan_file_id'),
+                caption=text,
+                parse_mode="HTML",
+                message_thread_id=thread_id,
+                reply_markup=markup
             )
-            return True
-        except Exception as e:
-            print(f"❌ Ошибка отправки минимального лида: {e}")
-            return False
+        else:
+            await bot.send_message(
+                chat_id=LEADS_GROUP_CHAT_ID,
+                text=text,
+                parse_mode="HTML",
+                message_thread_id=thread_id,
+                reply_markup=markup
+            )
+    except Exception as e:
+        print(f"❌ Ошибка отправки заявки в группу: {e}")
 
+async def send_contact_to_logs(bot: Bot, user_data: dict):
+    """
+    Отправка первичного контакта в топик Логи (88)
+    """
+    user_id = user_data.get('user_id')
+    name = user_data.get('name')
+    phone = user_data.get('phone')
 
-# Singleton instance
-lead_service = LeadService()
+    text = (
+        f"📱 <b>ПОЛУЧЕН КОНТАКТ</b>\n\n"
+        f"👤 <b>Имя:</b> {name}\n"
+        f"📱 <b>Телефон:</b> <code>{phone}</code>\n"
+        f"🆔 <b>ID:</b> <code>{user_id}</code>"
+    )
+
+    markup = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="💬 Написать", url=f"tg://user?id={user_id}")]
+    ])
+
+    try:
+        await bot.send_message(
+            chat_id=LEADS_GROUP_CHAT_ID,
+            text=text,
+            parse_mode="HTML",
+            message_thread_id=THREAD_ID_LOGS,
+            reply_markup=markup
+        )
+    except Exception as e:
+        print(f"❌ Ошибка отправки контакта в логи: {e}")

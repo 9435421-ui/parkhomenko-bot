@@ -21,7 +21,32 @@ async def handle_start(message: Message, state: FSMContext):
     payload = parts[1] if len(parts) > 1 else ""
     await state.update_data(_payload=payload)
 
-    # Всегда показываем приветствие и кнопку согласия
+    user_id = message.from_user.id
+    user = await db.get_or_create_user(
+        user_id,
+        username=message.from_user.username,
+        first_name=message.from_user.first_name,
+        last_name=message.from_user.last_name
+    )
+
+    # Проверяем наличие контакта
+    if user.get('phone'):
+        # Если контакт есть, проверяем статус квиза
+        if await db.is_quiz_completed(user_id):
+            if payload == "quiz":
+                await message.answer("Вы уже заполнили заявку! Наш эксперт скоро свяжется с вами.")
+            await message.answer("Главное меню ТЕРИОН:", reply_markup=get_main_menu())
+        else:
+            # Начинаем или продолжаем квиз (Шаг 1: Город)
+            await state.set_state(QuizOrder.city)
+            await message.answer(
+                "📋 <b>Начинаем квалификацию</b>\n\n1. Укажите город / населенный пункт.",
+                parse_mode="HTML",
+                reply_markup=ReplyKeyboardRemove()
+            )
+        return
+
+    # Если контакта нет — ВСЕГДА приветствие и согласие
     await message.answer(
         "Вас приветствует компания ТЕРИОН! Я — Антон, ИИ-помощник.\n\n"
         "Нажимая кнопку ниже, вы даете согласие на обработку персональных данных, "

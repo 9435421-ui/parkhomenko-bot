@@ -6,6 +6,7 @@ from config import LEADS_GROUP_CHAT_ID as ADMIN_GROUP_ID, THREAD_ID_KVARTIRY, TH
 from database.db import db
 from utils.voice_handler import voice_handler
 from utils.notifications import notify_admin_new_lead
+from services.lead_service import send_lead_to_admin_group, send_contact_to_logs
 import json
 import re
 import os
@@ -75,21 +76,17 @@ async def handle_initial_contact(message: Message, state: FSMContext):
         details=json.dumps({"username": username}, ensure_ascii=False)
     )
 
-    # Уведомляем админа (в группу и в ЛС через утилиту)
-    summary = (
-        f"📱 <b>ПОЛУЧЕН КОНТАКТ</b>\n\n"
-        f"👤 <b>Имя:</b> {name}\n"
-        f"📱 <b>Телефон:</b> <code>{phone}</code>\n"
-        f"🆔 <b>ID:</b> <code>{user_id}</code>"
-    )
+    # Также обновляем телефон в таблице пользователей
+    await db.update_user(user_id, phone=phone)
 
+    # Уведомляем админа (в группу через сервис и в ЛС через утилиту)
     try:
-        await message.bot.send_message(
-            chat_id=ADMIN_GROUP_ID,
-            text=summary,
-            parse_mode="HTML",
-            message_thread_id=THREAD_ID_LOGS
-        )
+        await send_contact_to_logs(message.bot, {
+            'user_id': user_id,
+            'name': name,
+            'phone': phone
+        })
+
         # Дублируем "карточкой" в ЛС админу
         lead_data = {
             'user_id': user_id,
@@ -206,28 +203,11 @@ async def finalize_quiz(message: Message, state: FSMContext):
     data = await state.get_data()
     user_id = message.from_user.id
 
-    # Определяем тред
-    obj_type = data.get('obj_type', '').lower()
-    if 'квартира' in obj_type:
-        thread_id = THREAD_ID_KVARTIRY
-    elif 'коммерция' in obj_type:
-        thread_id = THREAD_ID_KOMMERCIA
-    else:
-        thread_id = THREAD_ID_DOMA
-
-    # Сводка для админа
-    summary = (
-        f"🚀 <b>ЗАВЕРШЕН КВИЗ (7 вопросов)</b>\n\n"
-        f"👤 <b>Клиент:</b> {message.from_user.full_name}\n"
-        f"📱 <b>Телефон:</b> {data.get('phone')}\n"
-        f"🏙 <b>Город:</b> {data.get('city')}\n"
-        f"🏢 <b>Тип:</b> {data.get('obj_type')}\n"
-        f"🏢 <b>Этаж:</b> {data.get('floor_info')}\n"
-        f"📐 <b>Площадь:</b> {data.get('area')}\n"
-        f"🏗 <b>Статус:</b> {data.get('status')}\n"
-        f"📝 <b>Изменения:</b> {data.get('changes_desc')}\n"
-        f"📂 <b>План:</b> {'Да' if data.get('has_plan') else 'Нет'} ({data.get('plan_file_type', 'N/A')})"
-    )
+    # Подготавливаем данные для сервиса
+    lead_data = data.copy()
+    lead_data['user_id'] = user_id
+    lead_data['name'] = message.from_user.full_name
+    lead_data['username'] = message.from_user.username
 
     # Сохранение в БД
     lead_id = await db.upsert_unified_lead(
@@ -240,24 +220,11 @@ async def finalize_quiz(message: Message, state: FSMContext):
     )
 
     try:
-        if data.get('plan_file_id'):
-            await message.bot.send_document(
-                chat_id=ADMIN_GROUP_ID,
-                document=data.get('plan_file_id'),
-                caption=summary,
-                parse_mode="HTML",
-                message_thread_id=thread_id
-            )
-        else:
-            await message.bot.send_message(
-                chat_id=ADMIN_GROUP_ID,
-                text=summary,
-                parse_mode="HTML",
-                message_thread_id=thread_id
-            )
+        # Уведомление в группу через сервис
+        await send_lead_to_admin_group(message.bot, lead_data)
 
         # Уведомление в ЛС админу карточкой
-        lead_data = {
+        lead_msg_data = {
             'user_id': user_id,
             'name': message.from_user.full_name,
             'phone': data.get('phone'),
@@ -265,7 +232,7 @@ async def finalize_quiz(message: Message, state: FSMContext):
             'lead_type': 'quiz_completed',
             'details': data
         }
-        await notify_admin_new_lead(message.bot, lead_id, lead_data)
+        await notify_admin_new_lead(message.bot, lead_id, lead_msg_data)
     except Exception as e:
         logger.error(f"Ошибка уведомления админа: {e}")
 
