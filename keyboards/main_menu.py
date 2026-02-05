@@ -2,14 +2,11 @@
 Клавиатуры для главного меню и навигации
 """
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton, ReplyKeyboardMarkup, KeyboardButton, WebAppInfo
-from os import getenv
+from config import MINI_APP_URL
 
 
 def get_main_menu() -> InlineKeyboardMarkup:
     """Главное меню бота"""
-    # URL Mini App (настроить в .env или использовать локальный)
-    mini_app_url = getenv("MINI_APP_URL", "https://your-domain.com/mini_app/")
-    
     return InlineKeyboardMarkup(
         inline_keyboard=[
             [InlineKeyboardButton(
@@ -25,19 +22,22 @@ def get_main_menu() -> InlineKeyboardMarkup:
                 callback_data="mode:invest"
             )],
             [InlineKeyboardButton(
-                text="🌐 Mini App: Инвест-калькулятор",
-                web_app=WebAppInfo(url=mini_app_url)
+                text="🌐 Mini App: Аналитика объекта",
+                web_app=WebAppInfo(url=MINI_APP_URL)
+            )],
+            [InlineKeyboardButton(
+                text="🎁 Подарок на День Рождения",
+                callback_data="set_birthday"
             )]
         ]
     )
 
 
 def get_consent_keyboard() -> ReplyKeyboardMarkup:
-    """Клавиатура согласия на обработку данных"""
+    """Клавиатура согласия на обработку данных с запросом контакта"""
     return ReplyKeyboardMarkup(
         keyboard=[
-            [KeyboardButton(text="✅ Я согласен и хочу продолжить")],
-            [KeyboardButton(text="❌ Отказаться")]
+            [KeyboardButton(text="✅ Согласен и хочу продолжить", request_contact=True)]
         ],
         resize_keyboard=True,
         one_time_keyboard=True

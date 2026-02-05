@@ -1,0 +1,26 @@
+#!/bin/bash
+# run_bot.sh - Запуск бота с авто-рестартом
+PID_FILE="content_bot_mvp/bot.pid"
+
+# Убиваем предыдущие процессы конкретно этого бота
+pgrep -f "python3.*content_bot_mvp/main.py" | xargs kill 2>/dev/null || true
+if [ -f "$PID_FILE" ]; then
+    kill $(cat "$PID_FILE") 2>/dev/null
+    rm "$PID_FILE"
+fi
+
+source venv/bin/activate
+
+# Записываем PID текущего шелл-скрипта
+echo $$ > "$PID_FILE"
+
+while true; do
+    echo "$(date): Запуск бота..." >> bot.log
+    # Переходим в директорию бота для корректной загрузки .env и файлов
+    cd content_bot_mvp
+    # stdout в bot.log, stderr в bot_error_log.txt
+    python3 -u main.py >> ../bot.log 2>> ../bot_error_log.txt
+    cd ..
+    echo "$(date): Бот упал (см. bot_error_log.txt), перезапуск через 5 секунд..." >> bot.log
+    sleep 5
+done

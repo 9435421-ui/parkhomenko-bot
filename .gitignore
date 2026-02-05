@@ -24,20 +24,21 @@ wheels/
 *.egg
 
 # Environment variables
-.env
 .env.local
 .env.*.local
 
 # Database
-*.db
 *.sqlite
 *.sqlite3
-database/*.db
 
 # Logs
 *.log
+bot_error_log.txt
+*.pid
+content_bot_mvp/bot_error_log.txt
+bot_full_report.txt
+content_bot_mvp/bot.pid
 logs/
-bot.log
 
 # IDE
 .vscode/
@@ -48,8 +49,6 @@ bot.log
 .DS_Store
 
 # Uploads
-uploads/
-uploads_plans/
 temp/
 tmp/
 
@@ -59,3 +58,8 @@ nohup.out
 # Backups
 *.bak
 *.backup
+handlers/quiz_backup*.py
+backups/
+**/backups/
+.env
+*.db

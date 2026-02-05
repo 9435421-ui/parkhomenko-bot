@@ -10,14 +10,19 @@ from datetime import datetime
 class Database:
     """Класс для работы с SQLite базой данных"""
     
-    def __init__(self, db_path: str = "database/bot.db"):
+    def __init__(self, db_path: str = None):
+        if db_path is None:
+            db_url = os.getenv("DATABASE_URL", "sqlite:///parkhomenko_bot.db")
+            db_path = db_url.replace("sqlite:///", "")
         self.db_path = db_path
         self.conn: Optional[aiosqlite.Connection] = None
     
     async def connect(self):
         """Подключение к базе данных"""
         # Создаём директорию если не существует
-        os.makedirs(os.path.dirname(self.db_path), exist_ok=True)
+        db_dir = os.path.dirname(self.db_path)
+        if db_dir:
+            os.makedirs(db_dir, exist_ok=True)
         
         self.conn = await aiosqlite.connect(self.db_path)
         self.conn.row_factory = aiosqlite.Row
@@ -40,6 +45,8 @@ class Database:
                     first_name TEXT,
                     last_name TEXT,
                     phone TEXT,
+                    birthday TEXT, -- Формат: DD.MM
+                    is_banned BOOLEAN DEFAULT 0,
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                     last_interaction TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                 )
@@ -63,6 +70,7 @@ class Database:
                     bti_status TEXT,
                     consent_given BOOLEAN DEFAULT 0,
                     contact_received BOOLEAN DEFAULT 0,
+                    dialog_count INTEGER DEFAULT 0,
                     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                     FOREIGN KEY (user_id) REFERENCES users(user_id)
                 )
@@ -97,6 +105,30 @@ class Database:
                     bti_status TEXT,
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                     sent_to_group BOOLEAN DEFAULT 0,
+                    source_bot TEXT DEFAULT 'qualification',
+                    lead_type TEXT DEFAULT 'quiz',
+                    FOREIGN KEY (user_id) REFERENCES users(user_id)
+                )
+            """)
+
+            # Единая таблица лидов для всех ботов (расширенная версия)
+            await cursor.execute("""
+                CREATE TABLE IF NOT EXISTS unified_leads (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    user_id INTEGER,
+                    source_bot TEXT NOT NULL, -- 'qualification' или 'content'
+                    lead_type TEXT, -- 'quiz', 'direct_request', 'report'
+                    name TEXT,
+                    username TEXT,
+                    phone TEXT,
+                    extra_contact TEXT,
+                    details TEXT, -- JSON или текстовое описание (результаты квиза и т.д.)
+                    status TEXT DEFAULT 'new',
+                    comment TEXT,
+                    consent BOOLEAN DEFAULT 0,
+                    consent_date TEXT,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    sent_at TIMESTAMP,
                     FOREIGN KEY (user_id) REFERENCES users(user_id)
                 )
             """)
@@ -143,6 +175,25 @@ class Database:
                 )
                 row = await cursor.fetchone()
                 return dict(row)
+
+    async def ban_user(self, user_id: int):
+        """Заблокировать пользователя"""
+        async with self.conn.cursor() as cursor:
+            await cursor.execute(
+                "UPDATE users SET is_banned = 1 WHERE user_id = ?",
+                (user_id,)
+            )
+            await self.conn.commit()
+
+    async def is_user_banned(self, user_id: int) -> bool:
+        """Проверить, заблокирован ли пользователь"""
+        async with self.conn.cursor() as cursor:
+            await cursor.execute(
+                "SELECT is_banned FROM users WHERE user_id = ?",
+                (user_id,)
+            )
+            row = await cursor.fetchone()
+            return bool(row[0]) if row else False
     
     # ============= СОСТОЯНИЯ =============
     
@@ -240,6 +291,20 @@ class Database:
                 "DELETE FROM dialog_history WHERE user_id = ?",
                 (user_id,)
             )
+            # Также сбрасываем счетчик диалогов
+            await cursor.execute(
+                "UPDATE user_states SET dialog_count = 0 WHERE user_id = ?",
+                (user_id,)
+            )
+            await self.conn.commit()
+
+    async def increment_dialog_count(self, user_id: int):
+        """Увеличить счетчик вопросов в диалоге"""
+        async with self.conn.cursor() as cursor:
+            await cursor.execute(
+                "UPDATE user_states SET dialog_count = dialog_count + 1 WHERE user_id = ?",
+                (user_id,)
+            )
             await self.conn.commit()
     
     # ============= ЛИДЫ =============
@@ -260,6 +325,66 @@ class Database:
             await cursor.execute(
                 f"""INSERT INTO leads ({', '.join(columns)})
                     VALUES ({placeholders})""",
+                values
+            )
+            await self.conn.commit()
+            return cursor.lastrowid
+
+    async def upsert_unified_lead(
+        self,
+        user_id: int,
+        source_bot: str,
+        **kwargs
+    ) -> int:
+        """Обновить или добавить лид в единую таблицу"""
+        async with self.conn.cursor() as cursor:
+            # Проверяем наличие активного лида за последние 24 часа
+            await cursor.execute(
+                """SELECT id FROM unified_leads
+                   WHERE user_id = ? AND source_bot = ?
+                   AND created_at > datetime('now', '-1 day')
+                   ORDER BY created_at DESC LIMIT 1""",
+                (user_id, source_bot)
+            )
+            row = await cursor.fetchone()
+
+            if row:
+                lead_id = row[0]
+                set_clause = ", ".join([f"{k} = ?" for k in kwargs.keys()])
+                values = list(kwargs.values()) + [lead_id]
+                await cursor.execute(
+                    f"UPDATE unified_leads SET {set_clause} WHERE id = ?",
+                    values
+                )
+                await self.conn.commit()
+                return lead_id
+            else:
+                return await self.add_unified_lead(user_id, source_bot, phone=kwargs.get('phone', ''), **kwargs)
+
+    async def add_unified_lead(
+        self,
+        user_id: int,
+        source_bot: str,
+        phone: str,
+        name: Optional[str] = None,
+        username: Optional[str] = None,
+        lead_type: str = 'direct',
+        details: Optional[str] = None,
+        **kwargs
+    ) -> int:
+        """Добавить лид в единую таблицу"""
+        async with self.conn.cursor() as cursor:
+            columns = ['user_id', 'source_bot', 'phone', 'name', 'username', 'lead_type', 'details']
+            values = [user_id, source_bot, phone, name, username, lead_type, details]
+
+            for k, v in kwargs.items():
+                if k not in columns:
+                    columns.append(k)
+                    values.append(v)
+
+            placeholders = ", ".join(["?" for _ in columns])
+            await cursor.execute(
+                f"INSERT INTO unified_leads ({', '.join(columns)}) VALUES ({placeholders})",
                 values
             )
             await self.conn.commit()
@@ -297,6 +422,73 @@ class Database:
             await cursor.execute(
                 "UPDATE leads SET sent_to_group = 1 WHERE id = ?",
                 (lead_id,)
+            )
+            await self.conn.commit()
+
+    # ============= АДМИН-ФУНКЦИИ =============
+
+    async def get_stats(self) -> Dict:
+        """Получить статистику по лидам"""
+        async with self.conn.cursor() as cursor:
+            # Всего пользователей
+            await cursor.execute("SELECT COUNT(*) FROM users")
+            total_users = (await cursor.fetchone())[0]
+
+            # Начали квиз (есть запись в user_states)
+            await cursor.execute("SELECT COUNT(*) FROM user_states")
+            quiz_started = (await cursor.fetchone())[0]
+
+            # Оставили контакт (есть запись в unified_leads)
+            await cursor.execute("SELECT COUNT(DISTINCT user_id) FROM unified_leads")
+            contacts_left = (await cursor.fetchone())[0]
+
+            # Завершили квиз (поддерживаем оба типа: старый и v2)
+            await cursor.execute("SELECT COUNT(*) FROM unified_leads WHERE lead_type IN ('quiz_completed', 'quiz_v2_completed')")
+            quiz_completed = (await cursor.fetchone())[0]
+
+            # По статусам
+            await cursor.execute("SELECT COUNT(*) FROM unified_leads WHERE status = 'new'")
+            status_new = (await cursor.fetchone())[0]
+
+            await cursor.execute("SELECT COUNT(*) FROM unified_leads WHERE status = 'in_progress'")
+            status_progress = (await cursor.fetchone())[0]
+
+            return {
+                "total_users": total_users,
+                "quiz_started": quiz_started,
+                "contacts_left": contacts_left,
+                "quiz_completed": quiz_completed,
+                "status_new": status_new,
+                "status_progress": status_progress
+            }
+
+    async def get_all_unified_leads(self) -> List[Dict]:
+        """Получить все лиды из единой таблицы для экспорта"""
+        async with self.conn.cursor() as cursor:
+            await cursor.execute("SELECT * FROM unified_leads ORDER BY created_at DESC")
+            rows = await cursor.fetchall()
+            return [dict(row) for row in rows]
+
+    async def get_all_users(self) -> List[Dict]:
+        """Получить всех пользователей"""
+        async with self.conn.cursor() as cursor:
+            await cursor.execute("SELECT user_id, first_name FROM users")
+            rows = await cursor.fetchall()
+            return [dict(row) for row in rows]
+
+    async def get_users_with_birthday(self, date_str: str) -> List[Dict]:
+        """Получить пользователей с днем рождения в указанную дату (DD.MM)"""
+        async with self.conn.cursor() as cursor:
+            await cursor.execute("SELECT user_id, first_name FROM users WHERE birthday = ?", (date_str,))
+            rows = await cursor.fetchall()
+            return [dict(row) for row in rows]
+
+    async def update_user_birthday(self, user_id: int, birthday: str):
+        """Обновить дату рождения пользователя"""
+        async with self.conn.cursor() as cursor:
+            await cursor.execute(
+                "UPDATE users SET birthday = ? WHERE user_id = ?",
+                (birthday, user_id)
             )
             await self.conn.commit()
 
