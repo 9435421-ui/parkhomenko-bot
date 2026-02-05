@@ -1,8 +1,9 @@
 from aiogram import Router, F
-from aiogram.types import Message
+from aiogram.types import Message, ContentType
 from aiogram.fsm.context import FSMContext
 from handlers.quiz import QuizOrder
 from keyboards.main_menu import get_consent_keyboard, get_main_menu
+from config import LEADS_GROUP_CHAT_ID
 
 router = Router()
 
@@ -25,11 +26,13 @@ async def handle_consent(message: Message, state: FSMContext):
     """Обработка согласия пользователя"""
     data = await state.get_data()
     payload = data.get('_payload', '')
-    
+
     if payload == 'quiz':
-        # Запуск квиза
-        await state.set_state(QuizOrder.city)
-        await message.answer("📋 Кто вы? (Собственник/Дизайнер/Застройщик/Инвестор/Другое)")
+        # Запрос контакта перед началом квиза
+        await message.answer(
+            "Для начала квиза мне нужен ваш контакт. Пожалуйста, поделитесь вашим номером телефона.",
+            reply_markup=message.bot.get_contact_request_button("Поделиться номером")
+        )
     elif payload == 'invest':
         # Запуск инвестиционного калькулятора
         await state.set_state(QuizOrder.city)
@@ -46,3 +49,18 @@ async def handle_consent(message: Message, state: FSMContext):
     else:
         # Стандартное главное меню
         await message.answer("Выберите действие:", reply_markup=get_main_menu())
+
+
+@router.message(F.contact)
+async def handle_contact(message: Message, state: FSMContext):
+    """Обработка полученного контакта"""
+    await state.update_data(phone=message.contact.phone_number)
+    await state.set_state(QuizOrder.city)
+    await message.answer("📋 Кто вы? (Собственник/Дизайнер/Застройщик/Инвестор/Другое)")
+
+
+@router.message(F.text == "📋 Кто вы? (Собственник/Дизайнер/Застройщик/Инвестор/Другое)")
+async def handle_quiz_start(message: Message, state: FSMContext):
+    """Обработка начала квиза после получения контакта"""
+    await state.set_state(QuizOrder.city)
+    await message.answer("📋 Кто вы? (Собственник/Дизайнер/Застройщик/Инвестор/Другое)")
