@@ -9,6 +9,3 @@ ADMIN_GROUP_ID = os.getenv("ADMIN_GROUP_ID", "твой_id")
 
 YANDEX_API_KEY = os.getenv("YANDEX_API_KEY")
 YANDEX_FOLDER_ID = os.getenv("YANDEX_FOLDER_ID", "")
-
-CHANNEL_NAME = "@kapremont_channel"
-CHANNEL_LINK = "https://t.me/kapremont_channel"
