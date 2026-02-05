@@ -1,5 +1,5 @@
 # Telegram Bot Framework
-aiogram==3.13.1
+aiogram==3.7.0
 
 # Environment variables
 python-dotenv==1.0.0
