@@ -76,8 +76,7 @@ def get_object_type_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         inline_keyboard=[
             [InlineKeyboardButton(text="🏠 Квартира", callback_data="obj:kvartira")],
-            [InlineKeyboardButton(text="🏢 Коммерция", callback_data="obj:kommercia")],
-            [InlineKeyboardButton(text="🏡 Дом", callback_data="obj:dom")]
+            [InlineKeyboardButton(text="🏢 Коммерция", callback_data="obj:kommercia")]
         ]
     )
 
