@@ -1,106 +1,44 @@
-"""
-Сервис для интеграции с ВКонтакте API (заглушка)
-"""
 import os
-from typing import Dict, Optional
 import aiohttp
+from typing import Optional, List
 
 
 class VKService:
-    """
-    Сервис для дублирования функций бота в ВКонтакте
-    
-    TODO: Реализовать после завершения основного функционала
-    """
+    """Сервис для интеграции с ВКонтакте API (Асинхронный)"""
     
     def __init__(self):
-        self.vk_token = os.getenv("VK_API_TOKEN", "")
-        self.vk_group_id = os.getenv("VK_GROUP_ID", "")
+        self.vk_token = os.getenv("VK_TOKEN")
+        self.vk_group_id = os.getenv("VK_GROUP_ID")
         self.api_version = "5.131"
         self.base_url = "https://api.vk.com/method/"
     
-    async def send_message(
-        self,
-        user_id: int,
-        message: str,
-        keyboard: Optional[Dict] = None
-    ) -> bool:
-        """
-        Отправка сообщения в ВК
-        
-        Args:
-            user_id: ID пользователя ВК
-            message: Текст сообщения
-            keyboard: Клавиатура (опционально)
-        
-        Returns:
-            bool: Успешность отправки
-        """
-        if not self.vk_token:
-            print("⚠️ VK_API_TOKEN не установлен")
-            return False
-        
-        # TODO: Реализовать отправку сообщений через VK API
-        print(f"📤 VK: Отправка сообщения пользователю {user_id}")
-        return True
-    
-    async def handle_callback(self, callback_data: str) -> Dict:
-        """
-        Обработка callback от ВК
-        
-        Args:
-            callback_data: Данные callback
-        
-        Returns:
-            Dict: Ответ для ВК API
-        """
-        # TODO: Реализовать обработку callback
-        return {"ok": True}
-    
-    async def duplicate_lead_to_vk(
-        self,
-        lead_data: Dict,
-        group_id: Optional[str] = None
-    ) -> bool:
-        """
-        Дублирование лида в группу ВК
-        
-        Args:
-            lead_data: Данные лида
-            group_id: ID группы ВК (опционально)
-        
-        Returns:
-            bool: Успешность отправки
-        """
-        if not self.vk_token:
-            return False
-        
-        # TODO: Реализовать отправку лида в сообщения  группы ВК
-        print(f"📤 VK: Дублирование лида в группу")
-        return True
-    
-    async def send_to_community(
-        self,
-        message: str,
-        attachments: Optional[list] = None
-    ) -> bool:
-        """
-        Отправка сообщения от имени сообщества
-        
-        Args:
-            message: Текст сообщения
-            attachments: Вложения (опционально)
-        
-        Returns:
-            bool: Успешность отправки
-        """
+    async def send_to_community(self, message: str, attachments: Optional[List[str]] = None) -> bool:
+        """Публикация поста на стене сообщества"""
         if not self.vk_token or not self.vk_group_id:
             return False
-        
-        # TODO: Реализовать wall.post для публикаций на стене
-        print(f"📤 VK: Публикация в сообществе")
-        return True
 
+        params = {
+            "owner_id": f"-{self.vk_group_id}",
+            "from_group": 1,
+            "message": message,
+            "access_token": self.vk_token,
+            "v": self.api_version
+        }
 
-# Singleton instance
+        if attachments:
+            params["attachments"] = ",".join(attachments)
+
+        async with aiohttp.ClientSession() as session:
+            try:
+                async with session.post(f"{self.base_url}wall.post", params=params, timeout=10) as response:
+                    result = await response.json()
+                    if "response" in result:
+                        return True
+                    else:
+                        print(f"❌ VK Error: {result.get('error')}")
+                        return False
+            except Exception as e:
+                print(f"❌ VK Exception: {e}")
+                return False
+
 vk_service = VKService()
