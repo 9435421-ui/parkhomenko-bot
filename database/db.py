@@ -1,28 +1,32 @@
 """
-База данных для хранения состояний пользователей и лидов
+База данных для хранения состояний пользователей, лидов и контент-плана
 """
 import aiosqlite
 import os
+import logging
 from typing import Optional, Dict, List
 from datetime import datetime
 
+logger = logging.getLogger(__name__)
 
 class Database:
     """Класс для работы с SQLite базой данных"""
     
-    def __init__(self, db_path: str = "database/bot.db"):
-        self.db_path = db_path
+    def __init__(self, db_url: Optional[str] = None):
+        self.db_url = db_url or os.getenv("DATABASE_URL", "sqlite:///parkhomenko_bot.db")
+        self.db_path = self.db_url.replace('sqlite:///', '')
         self.conn: Optional[aiosqlite.Connection] = None
     
     async def connect(self):
         """Подключение к базе данных"""
         # Создаём директорию если не существует
-        os.makedirs(os.path.dirname(self.db_path), exist_ok=True)
+        os.makedirs(os.path.dirname(self.db_path) if os.path.dirname(self.db_path) else ".", exist_ok=True)
         
         self.conn = await aiosqlite.connect(self.db_path)
         self.conn.row_factory = aiosqlite.Row
+        await self.conn.execute("PRAGMA foreign_keys = ON")
         await self._create_tables()
-        print(f"✅ База данных подключена: {self.db_path}")
+        logger.info(f"✅ База данных подключена: {self.db_path}")
     
     async def close(self):
         """Закрытие соединения с базой данных"""
@@ -101,8 +105,23 @@ class Database:
                 )
             """)
             
+            # Таблица контент-плана
+            await cursor.execute("""
+                CREATE TABLE IF NOT EXISTS content_plan (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    type TEXT NOT NULL,
+                    title TEXT,
+                    body TEXT NOT NULL,
+                    cta TEXT NOT NULL,
+                    publish_date TEXT NOT NULL,
+                    status TEXT DEFAULT 'draft',
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    published_at TIMESTAMP
+                )
+            """)
+
             await self.conn.commit()
-    
+
     # ============= ПОЛЬЗОВАТЕЛИ =============
     
     async def get_or_create_user(
@@ -188,15 +207,6 @@ class Database:
             
             await self.conn.commit()
     
-    async def reset_user_state(self, user_id: int):
-        """Сброс состояния пользователя"""
-        async with self.conn.cursor() as cursor:
-            await cursor.execute(
-                "DELETE FROM user_states WHERE user_id = ?",
-                (user_id,)
-            )
-            await self.conn.commit()
-    
     # ============= ИСТОРИЯ ДИАЛОГОВ =============
     
     async def add_dialog_message(
@@ -230,18 +240,8 @@ class Database:
                 (user_id, limit)
             )
             rows = await cursor.fetchall()
-            # Возвращаем в хронологическом порядке
             return [dict(row) for row in reversed(rows)]
-    
-    async def clear_dialog_history(self, user_id: int):
-        """Очистить историю диалога"""
-        async with self.conn.cursor() as cursor:
-            await cursor.execute(
-                "DELETE FROM dialog_history WHERE user_id = ?",
-                (user_id,)
-            )
-            await self.conn.commit()
-    
+
     # ============= ЛИДЫ =============
     
     async def save_lead(
@@ -264,42 +264,6 @@ class Database:
             )
             await self.conn.commit()
             return cursor.lastrowid
-    
-    async def get_leads(
-        self,
-        sent_to_group: Optional[bool] = None,
-        limit: int = 100
-    ) -> List[Dict]:
-        """Получить список лидов"""
-        async with self.conn.cursor() as cursor:
-            if sent_to_group is not None:
-                await cursor.execute(
-                    """SELECT * FROM leads
-                       WHERE sent_to_group = ?
-                       ORDER BY created_at DESC
-                       LIMIT ?""",
-                    (sent_to_group, limit)
-                )
-            else:
-                await cursor.execute(
-                    """SELECT * FROM leads
-                       ORDER BY created_at DESC
-                       LIMIT ?""",
-                    (limit,)
-                )
-            
-            rows = await cursor.fetchall()
-            return [dict(row) for row in rows]
-    
-    async def mark_lead_sent(self, lead_id: int):
-        """Отметить лид как отправленный"""
-        async with self.conn.cursor() as cursor:
-            await cursor.execute(
-                "UPDATE leads SET sent_to_group = 1 WHERE id = ?",
-                (lead_id,)
-            )
-            await self.conn.commit()
-
 
 # Singleton instance
 db = Database()
