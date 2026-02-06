@@ -156,12 +156,14 @@ async def generate_art_for_post(callback: CallbackQuery):
 
     if image_data:
         media_list = json.loads(media_json) if media_json else []
-        media_list.append({"type": "bytes", "data": image_data})
+        # Encode bytes to base64 string for JSON serialization
+        image_b64 = base64.b64encode(image_data).decode('utf-8')
+        media_list.append({"type": "bytes", "data": image_b64})
         await db.conn.execute("UPDATE content_plan SET media_data = ? WHERE id = ?", (json.dumps(media_list), post_id))
         await db.conn.commit()
 
         await callback.message.answer_photo(
-            BufferedInputFile(base64.b64decode(image_data), filename="art.jpg"),
+            BufferedInputFile(image_data, filename="art.jpg"),
             caption="✅ Обложка сгенерирована и добавлена к черновику!"
         )
     else:

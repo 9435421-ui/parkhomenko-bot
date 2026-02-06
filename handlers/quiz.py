@@ -41,13 +41,17 @@ async def process_city(message: Message, state: FSMContext):
 # STAGE_LOGIC: 2. Object Type
 @router.message(QuizOrder.object_type)
 async def process_object_type(message: Message, state: FSMContext):
-    if message.text not in ["Квартира", "Коммерция"]:
+    text = message.text
+    if message.voice:
+        text = await transcribe(message.voice.file_id)
+
+    if text not in ["Квартира", "Коммерция"]:
         await message.answer("Пожалуйста, выберите тип объекта из списка.", reply_markup=get_object_type_keyboard())
         return
 
-    await state.update_data(object_type=message.text)
+    await state.update_data(object_type=text)
     await state.set_state(QuizOrder.floor)
-    await message.answer("3. Укажите этаж:", reply_markup=ReplyKeyboardRemove())
+    await message.answer("3. Укажите этаж и этажность дома:", reply_markup=ReplyKeyboardRemove())
 
 # STAGE_LOGIC: 3. Floor
 @router.message(QuizOrder.floor)
@@ -79,11 +83,15 @@ async def process_area(message: Message, state: FSMContext):
 # STAGE_LOGIC: 5. Status
 @router.message(QuizOrder.status)
 async def process_status(message: Message, state: FSMContext):
-    if message.text not in ["Планируется", "Выполнена"]:
+    text = message.text
+    if message.voice:
+        text = await transcribe(message.voice.file_id)
+
+    if text not in ["Планируется", "Выполнена"]:
         await message.answer("Пожалуйста, выберите статус.", reply_markup=get_remodeling_status_keyboard())
         return
 
-    await state.update_data(status=message.text)
+    await state.update_data(status=text)
     await state.set_state(QuizOrder.description)
     await message.answer("6. Описание изменений (что планируете или уже сделали):", reply_markup=ReplyKeyboardRemove())
 
