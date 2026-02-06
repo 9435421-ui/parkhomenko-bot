@@ -117,5 +117,32 @@ class Database:
                 # Если лида нет, создаем новый
                 await self.save_lead(user_id, data)
 
+    async def get_user_state(self, user_id: int) -> Dict[str, Any]:
+        """Получить данные пользователя из таблицы users"""
+        async with self.conn.cursor() as cursor:
+            await cursor.execute("SELECT * FROM users WHERE user_id = ?", (user_id,))
+            row = await cursor.fetchone()
+            return dict(row) if row else {}
+
+    async def update_user_state(self, user_id: int, **kwargs):
+        """Обновить данные/состояние пользователя в таблице users"""
+        if not kwargs: return
+
+        # Сначала проверяем существование
+        state = await self.get_user_state(user_id)
+        if not state:
+            # Создаем
+            cols = ["user_id"] + list(kwargs.keys())
+            vals = [user_id] + list(kwargs.values())
+            placeholders = ", ".join(["?" for _ in cols])
+            await self.conn.execute(f"INSERT INTO users ({', '.join(cols)}) VALUES ({placeholders})", vals)
+        else:
+            # Обновляем
+            set_clause = ", ".join([f"{k} = ?" for k in kwargs.keys()])
+            vals = list(kwargs.values()) + [user_id]
+            await self.conn.execute(f"UPDATE users SET {set_clause}, last_interaction = CURRENT_TIMESTAMP WHERE user_id = ?", vals)
+
+        await self.conn.commit()
+
 # Singleton instance
 db = Database()

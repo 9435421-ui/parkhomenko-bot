@@ -32,6 +32,10 @@ FOLDER_ID = os.getenv("FOLDER_ID")
 OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY")
 ROUTER_AI_KEY = os.getenv("ROUTER_AI_KEY")
 
+# === TELEGRAM API (FOR SPY WORKER) ===
+TELEGRAM_API_ID = os.getenv("TELEGRAM_API_ID")
+TELEGRAM_API_HASH = os.getenv("TELEGRAM_API_HASH")
+
 # === БАЗА ДАННЫХ И ПУТИ ===
 DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///parkhomenko_bot.db")
 UPLOAD_PLANS_DIR = os.getenv("UPLOAD_PLANS_DIR", "uploads_plans")
