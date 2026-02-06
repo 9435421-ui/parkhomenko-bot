@@ -33,21 +33,23 @@ def get_contact_keyboard() -> ReplyKeyboardMarkup:
     )
 
 
-def get_object_type_keyboard() -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup(
-        inline_keyboard=[
-            [InlineKeyboardButton(text="🏠 Квартира", callback_data="obj:kvartira")],
-            [InlineKeyboardButton(text="🏢 Коммерция", callback_data="obj:kommercia")]
-        ]
+def get_object_type_keyboard() -> ReplyKeyboardMarkup:
+    return ReplyKeyboardMarkup(
+        keyboard=[
+            [KeyboardButton(text="Квартира")],
+            [KeyboardButton(text="Коммерция")]
+        ],
+        resize_keyboard=True, one_time_keyboard=True
     )
 
 
-def get_remodeling_status_keyboard() -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup(
-        inline_keyboard=[
-            [InlineKeyboardButton(text="✅ Выполнена", callback_data="remodel:done")],
-            [InlineKeyboardButton(text="📋 Планируется", callback_data="remodel:planned")]
-        ]
+def get_remodeling_status_keyboard() -> ReplyKeyboardMarkup:
+    return ReplyKeyboardMarkup(
+        keyboard=[
+            [KeyboardButton(text="Выполнена")],
+            [KeyboardButton(text="Планируется")]
+        ],
+        resize_keyboard=True, one_time_keyboard=True
     )
 
 def get_name_confirmation_keyboard(name: str) -> InlineKeyboardMarkup:

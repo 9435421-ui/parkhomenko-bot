@@ -5,6 +5,7 @@ from aiogram.enums import ChatType
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.types import Message, ReplyKeyboardRemove
+from config import MINI_APP_URL
 from database.db import db
 from keyboards.main_menu import get_object_type_keyboard, get_remodeling_status_keyboard
 from services.lead_service import send_lead_to_admin_group
@@ -124,11 +125,11 @@ async def process_bti_file(message: Message, state: FSMContext):
     await send_lead_to_admin_group(message.bot, user_id, data, file_id)
 
     # Final message logic
-    suffix = " Всю полученную от вас информацию, я передам эксперту..."
-    if data.get("status") == "Выполнена":
-        final_text = f"Спасибо! Ваша заявка принята. Так как перепланировка уже выполнена, наш специалист свяжется с вами, чтобы обсудить варианты её узаконивания.{suffix}"
-    else:
-        final_text = f"Спасибо! Ваша заявка принята. Мы изучим ваши пожелания и предложим оптимальный вариант проекта и согласования.{suffix}"
+    user_name = data.get("name") or message.from_user.first_name or "Клиент"
+    final_text = (
+        f"{user_name}, спасибо! Всю информацию уже передаю эксперту ТЕРИОН. "
+        f"Ознакомиться с нашими услугами и кейсами можно в Mini App: {MINI_APP_URL}"
+    )
 
     await message.answer(final_text, reply_markup=ReplyKeyboardRemove())
     await state.clear()

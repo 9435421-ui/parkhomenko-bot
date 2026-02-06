@@ -12,7 +12,7 @@ from aiogram.fsm.state import StatesGroup, State
 from aiogram.fsm.context import FSMContext
 from config import (
     THREAD_ID_DRAFTS, NOTIFICATIONS_CHANNEL_ID, OPENROUTER_API_KEY, CHANNEL_ID,
-    ADMIN_ID, BOT_TOKEN
+    ADMIN_ID, BOT_TOKEN, MINI_APP_URL
 )
 from services.vk_service import vk_service
 from services.yandex_art import yandex_art
@@ -70,14 +70,14 @@ async def handle_expert_input(message: Message, state: FSMContext):
 
     # Генерация текста через AI
     prompt = f"""
-    Ты — эксперт по перепланировкам в компании 'Право и Решение'.
+    Ты — эксперт по перепланировкам в компании ТЕРИОН.
     Напиши пост для соцсетей на основе следующих фактов: {caption}
 
     Требования:
     1. Стиль: профессиональный, экспертный, но понятный.
-    2. Добавь тематические хэштеги: #перепланировка #правоирешение #москва.
-    3. В конце обязательно добавь призыв пройти квиз для оценки проекта.
-    4. Упомяни бота @{(await message.bot.get_me()).username}.
+    2. Добавь тематические хэштеги: #терион #перепланировка #москва.
+    3. В конце обязательно добавь ссылку на Mini App для ознакомления с услугами: {MINI_APP_URL}
+    4. Упомяни бота @{(await message.bot.get_me()).username} для прохождения квиза.
     5. ЗАПРЕЩЕНО использовать лишний текст на картинках.
     """
 
