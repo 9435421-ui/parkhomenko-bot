@@ -7,10 +7,10 @@ class RouterAIClient:
         self.api_key = ROUTER_AI_KEY
         self.base_url = "https://routerai.ru/api/v1"
         self.client = AsyncOpenAI(api_key=self.api_key, base_url=self.base_url)
-        self.text_model = "deepseek-v3"
+        self.text_model = "qwen-2.5-max"
 
     async def improve_text(self, text: str) -> str:
-        """Улучшение текста для постов компании ТЕРИОН (deepseek-v3)"""
+        """Улучшение текста для постов компании ТЕРИОН (qwen-2.5-max)"""
         prompt = (
             "Ты — эксперт по перепланировкам компании ТЕРИОН. "
             "Преврати краткий комментарий или факты в продающий, профессиональный и структурированный пост для соцсетей. "
