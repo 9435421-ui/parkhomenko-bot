@@ -1,10 +1,13 @@
 import os
 import hashlib
 import base64
+import io
+import subprocess
+from PIL import Image
 from aiogram import Router, F
 from aiogram.types import (
     Message, CallbackQuery, InlineKeyboardMarkup,
-    InlineKeyboardButton, BufferedInputFile, InputMediaPhoto
+    InlineKeyboardButton, BufferedInputFile, InputMediaPhoto, FSInputFile
 )
 from aiogram.fsm.context import FSMContext
 from config import (
@@ -31,12 +34,12 @@ def get_post_markup(post_id: int):
 
 def get_expert_tools_markup():
     return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="🪄 Оформить пост", callback_data="expert:improve")],
-        [InlineKeyboardButton(text="🖼 Создать визуал", callback_data="expert:image")],
-        [InlineKeyboardButton(text="📝 В черновики", callback_data="expert:to_draft")]
+        [InlineKeyboardButton(text="🪄 Текст (AI)", callback_data="expert:improve"),
+         InlineKeyboardButton(text="🖼 Обложка (AI)", callback_data="expert:image")],
+        [InlineKeyboardButton(text="📅 Запланировать", callback_data="expert:to_draft")]
     ])
 
-@media_router.message(F.chat.type == "private", F.photo | F.document | F.text)
+@media_router.message(F.chat.type == "private", F.photo | F.document | F.text | F.video)
 async def private_gateway(message: Message, state: FSMContext):
     """Шлюз «Приемка — Рабочая группа»: ЛС -> Топик 85"""
     if message.text and message.text.startswith("/"):
@@ -47,12 +50,79 @@ async def private_gateway(message: Message, state: FSMContext):
     if current_state is not None:
         return
 
-    await message.copy_to(
-        chat_id=NOTIFICATIONS_CHANNEL_ID,
-        message_thread_id=THREAD_ID_DRAFTS,
-        reply_markup=get_expert_tools_markup()
-    )
+    if message.photo:
+        # Сжатие фото через Pillow
+        photo_buffer = io.BytesIO()
+        file_info = await message.bot.get_file(message.photo[-1].file_id)
+        downloaded_file = await message.bot.download_file(file_info.file_path)
+
+        img = Image.open(downloaded_file)
+        img.save(photo_buffer, format='WEBP', quality=80)
+        photo_buffer.seek(0)
+
+        await message.bot.send_photo(
+            chat_id=NOTIFICATIONS_CHANNEL_ID,
+            photo=BufferedInputFile(photo_buffer.read(), filename="compressed.webp"),
+            message_thread_id=THREAD_ID_DRAFTS,
+            caption=message.caption or "Фото от клиента",
+            reply_markup=get_expert_tools_markup()
+        )
+    elif message.video:
+        # Видео будет обработано в следующем шаге
+        await forward_video_optimized(message)
+    else:
+        await message.copy_to(
+            chat_id=NOTIFICATIONS_CHANNEL_ID,
+            message_thread_id=THREAD_ID_DRAFTS,
+            reply_markup=get_expert_tools_markup()
+        )
+
     await message.answer("✅ Материал передан в рабочую группу (Топик 85).")
+
+async def forward_video_optimized(message: Message):
+    """Сжатие видео через FFmpeg (720p, libx264) и пересылка"""
+    file_id = message.video.file_id
+    file_info = await message.bot.get_file(file_id)
+    input_path = f"temp_input_{file_id}.mp4"
+    output_path = f"temp_output_{file_id}.mp4"
+
+    try:
+        # Скачиваем оригинал
+        await message.bot.download_file(file_info.file_path, input_path)
+
+        # Проверка наличия ffmpeg
+        ffmpeg_check = subprocess.run(["ffmpeg", "-version"], capture_output=True)
+        if ffmpeg_check.returncode != 0:
+            raise FileNotFoundError("FFmpeg not found")
+
+        # Сжатие
+        cmd = [
+            "ffmpeg", "-i", input_path,
+            "-vcodec", "libx264", "-crf", "28",
+            "-vf", "scale=-2:720",
+            "-acodec", "aac", "-strict", "experimental",
+            "-y", output_path
+        ]
+        subprocess.run(cmd, check=True)
+
+        await message.bot.send_video(
+            chat_id=NOTIFICATIONS_CHANNEL_ID,
+            video=FSInputFile(output_path),
+            message_thread_id=THREAD_ID_DRAFTS,
+            caption=message.caption or "Видео от клиента",
+            reply_markup=get_expert_tools_markup()
+        )
+    except Exception as e:
+        print(f"❌ Video compression error: {e}. Forwarding original.")
+        await message.copy_to(
+            chat_id=NOTIFICATIONS_CHANNEL_ID,
+            message_thread_id=THREAD_ID_DRAFTS,
+            reply_markup=get_expert_tools_markup()
+        )
+    finally:
+        # Чистим временные файлы
+        if os.path.exists(input_path): os.remove(input_path)
+        if os.path.exists(output_path): os.remove(output_path)
 
 @media_router.message(F.chat.id == NOTIFICATIONS_CHANNEL_ID, F.message_thread_id == THREAD_ID_DRAFTS, F.photo | F.document | F.text)
 async def handle_expert_input(message: Message, state: FSMContext):
