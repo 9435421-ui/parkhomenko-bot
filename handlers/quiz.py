@@ -105,7 +105,7 @@ async def finish_quiz(message: Message, state: FSMContext):
     )
 
     await message.answer(checklist, parse_mode="HTML")
-    await message.answer("Спасибо! Юлия Пархоменко свяжется с вами для анализа.")
+    await message.answer("Спасибо! Эксперт команды Терион свяжется с вами для дальнейшего анализа.")
     await state.clear()
 
 
