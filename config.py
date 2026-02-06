@@ -30,6 +30,7 @@ THREAD_ID_LOGS = int(os.getenv("THREAD_ID_LOGS", "88"))
 YANDEX_API_KEY = os.getenv("YANDEX_API_KEY")
 FOLDER_ID = os.getenv("FOLDER_ID")
 OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY")
+ROUTER_AI_KEY = os.getenv("ROUTER_AI_KEY")
 
 # === БАЗА ДАННЫХ И ПУТИ ===
 DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///parkhomenko_bot.db")

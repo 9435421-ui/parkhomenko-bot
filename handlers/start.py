@@ -1,5 +1,5 @@
 from aiogram import Router, F
-from aiogram.types import Message, ContentType, CallbackQuery
+from aiogram.types import Message, CallbackQuery
 from aiogram.enums import ChatType
 from aiogram.fsm.context import FSMContext
 from handlers.quiz import QuizOrder
