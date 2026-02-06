@@ -11,8 +11,8 @@ from aiogram.types import (
 from aiogram.fsm.state import StatesGroup, State
 from aiogram.fsm.context import FSMContext
 from config import (
-    THREAD_ID_DRAFTS, OPENROUTER_API_KEY, CHANNEL_ID,
-    ADMIN_ID, LEADS_GROUP_CHAT_ID, BOT_TOKEN
+    THREAD_ID_DRAFTS, NOTIFICATIONS_CHANNEL_ID, OPENROUTER_API_KEY, CHANNEL_ID,
+    ADMIN_ID, BOT_TOKEN
 )
 from services.vk_service import vk_service
 from services.yandex_art import yandex_art
@@ -20,7 +20,9 @@ from database.db import db
 import aiohttp
 import json
 
-router = Router()
+media_router = Router()
+# Применяем фильтры ко всем сообщениям в роутере
+media_router.message.filter(F.chat.id == NOTIFICATIONS_CHANNEL_ID, F.message_thread_id == THREAD_ID_DRAFTS)
 
 class ContentCreation(StatesGroup):
     waiting_for_media = State()
@@ -34,7 +36,7 @@ def get_post_markup(post_id: int):
         [InlineKeyboardButton(text="❌ Удалить", callback_data=f"delete_draft:{post_id}")]
     ])
 
-@router.message(F.message_thread_id == THREAD_ID_DRAFTS, F.photo | F.document | F.text)
+@media_router.message(F.photo | F.document | F.text)
 async def handle_expert_input(message: Message, state: FSMContext):
     """Прием вводных от эксперта: файлы + текст"""
     if message.text and message.text.startswith("/"):
@@ -120,24 +122,24 @@ async def handle_expert_input(message: Message, state: FSMContext):
     if raw_images:
         preview = raw_images[0]
         if isinstance(preview, str):
-            await message.bot.send_photo(chat_id=LEADS_GROUP_CHAT_ID, photo=preview, message_thread_id=THREAD_ID_DRAFTS)
+            await message.bot.send_photo(chat_id=NOTIFICATIONS_CHANNEL_ID, photo=preview, message_thread_id=THREAD_ID_DRAFTS)
         else:
             await message.bot.send_photo(
-                chat_id=LEADS_GROUP_CHAT_ID,
+                chat_id=NOTIFICATIONS_CHANNEL_ID,
                 photo=BufferedInputFile(preview, filename="preview.jpg"),
                 message_thread_id=THREAD_ID_DRAFTS
             )
 
     # Отправляем в группу на модерацию
     await message.bot.send_message(
-        chat_id=LEADS_GROUP_CHAT_ID,
+        chat_id=NOTIFICATIONS_CHANNEL_ID,
         text=f"📝 <b>ПРЕДПРОСМОТР ПОСТА (ID: {post_id}):</b>\n\n{ai_text}",
         message_thread_id=THREAD_ID_DRAFTS,
         parse_mode="HTML",
         reply_markup=get_post_markup(post_id)
     )
 
-@router.callback_query(F.data.startswith("gen_art:"))
+@media_router.callback_query(F.data.startswith("gen_art:"))
 async def generate_art_for_post(callback: CallbackQuery):
     post_id = int(callback.data.split(":")[1])
     async with db.conn.execute("SELECT body, media_data FROM content_plan WHERE id = ?", (post_id,)) as cursor:
@@ -166,7 +168,7 @@ async def generate_art_for_post(callback: CallbackQuery):
         await callback.message.answer("❌ Ошибка генерации.")
     await callback.answer()
 
-@router.callback_query(F.data.startswith(("publish_", "delete_draft:")))
+@media_router.callback_query(F.data.startswith(("publish_", "delete_draft:")))
 async def handle_moderation(callback: CallbackQuery):
     data_parts = callback.data.split(":")
     action = data_parts[0]

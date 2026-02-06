@@ -1,15 +1,17 @@
 import logging
 import os
 from aiogram import Router, F, types
+from aiogram.enums import ChatType
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
-from aiogram.types import Message, ReplyKeyboardRemove, FSInputFile
+from aiogram.types import Message, ReplyKeyboardRemove
 from database.db import db
 from keyboards.main_menu import get_object_type_keyboard, get_remodeling_status_keyboard
 from services.lead_service import send_lead_to_admin_group
 from utils.voice_handler import transcribe
 
 router = Router()
+router.message.filter(F.chat.type == ChatType.PRIVATE)
 
 class QuizOrder(StatesGroup):
     city = State()
@@ -108,12 +110,12 @@ async def process_bti_file(message: Message, state: FSMContext):
     user_id = message.from_user.id
 
     # Update lead in DB
-    db.update_lead(user_id, {
+    await db.update_lead(user_id, {
         "city": data.get("city"),
         "object_type": data.get("object_type"),
         "floor": data.get("floor"),
-        "area": data.get("area"),
-        "status": data.get("status"),
+        "area": str(data.get("area")),
+        "remodeling_status": data.get("status"),
         "description": data.get("description"),
         "bti_file": file_id
     })
@@ -122,10 +124,11 @@ async def process_bti_file(message: Message, state: FSMContext):
     await send_lead_to_admin_group(message.bot, user_id, data, file_id)
 
     # Final message logic
+    suffix = " Всю полученную от вас информацию, я передам эксперту..."
     if data.get("status") == "Выполнена":
-        final_text = "Спасибо! Ваша заявка принята. Так как перепланировка уже выполнена, наш специалист свяжется с вами, чтобы обсудить варианты её узаконивания."
+        final_text = f"Спасибо! Ваша заявка принята. Так как перепланировка уже выполнена, наш специалист свяжется с вами, чтобы обсудить варианты её узаконивания.{suffix}"
     else:
-        final_text = "Спасибо! Ваша заявка принята. Мы изучим ваши пожелания и предложим оптимальный вариант проекта и согласования."
+        final_text = f"Спасибо! Ваша заявка принята. Мы изучим ваши пожелания и предложим оптимальный вариант проекта и согласования.{suffix}"
 
     await message.answer(final_text, reply_markup=ReplyKeyboardRemove())
     await state.clear()
