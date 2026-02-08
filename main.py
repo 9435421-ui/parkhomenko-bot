@@ -5,8 +5,24 @@ from aiogram.fsm.storage.memory import MemoryStorage
 from aiogram.client.default import DefaultBotProperties
 from config import BOT_TOKEN
 from handlers import start as common, quiz, dialog, invest
+from database import db
+from utils import kb, router_ai
 
 logging.basicConfig(level=logging.INFO)
+
+
+async def on_startup():
+    """Инициализация при запуске"""
+    # Подключаем БД
+    await db.connect()
+    
+    # Индексируем базу знаний
+    await kb.index_documents()
+    
+    print("✅ Бот готов к работе")
+    print(f"📚 База знаний: {len(kb.documents)} документов")
+    print(f"🧠 Router AI: {'подключен' if router_ai.api_key else 'не настроен'}")
+
 
 async def main():
     bot = Bot(token=BOT_TOKEN, default=DefaultBotProperties(parse_mode="HTML"))
@@ -17,7 +33,9 @@ async def main():
     dp.include_router(invest.router)
     dp.include_router(dialog.router)
 
+    await on_startup()
     await dp.start_polling(bot)
+
 
 if __name__ == "__main__":
     asyncio.run(main())
