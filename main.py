@@ -7,8 +7,10 @@ from config import BOT_TOKEN
 from handlers import start as common, quiz, dialog, invest
 from database import db
 from utils import kb, router_ai
+from auto_poster import run_auto_poster
 
 logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 
 async def on_startup():
@@ -34,6 +36,10 @@ async def main():
     dp.include_router(dialog.router)
 
     await on_startup()
+    
+    # Запускаем автопостинг в фоновом режиме
+    asyncio.create_task(run_auto_poster(bot))
+    
     await dp.start_polling(bot)
 
 
