@@ -3,7 +3,7 @@ import logging
 from aiogram import Bot, Dispatcher
 from aiogram.fsm.storage.memory import MemoryStorage
 from config import BOT_TOKEN
-from handlers import start as common, quiz, dialog, invest, expert, price
+from handlers import start as common, quiz, dialog, invest
 
 logging.basicConfig(level=logging.INFO)
 
@@ -13,13 +13,8 @@ async def main():
 
     dp.include_router(common.router)
     dp.include_router(quiz.router)
-    dp.include_router(expert.router)
-    dp.include_router(price.router)
     dp.include_router(invest.router)
     dp.include_router(dialog.router)
-    dp.include_router(quiz.router)
-    dp.include_router(dialog.router)
-    dp.include_router(invest.router)
 
     await dp.start_polling(bot)
 
