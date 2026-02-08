@@ -36,7 +36,7 @@ def get_consent_keyboard() -> ReplyKeyboardMarkup:
     """Клавиатура согласия на обработку данных"""
     return ReplyKeyboardMarkup(
         keyboard=[
-            [KeyboardButton(text="✅ Я согласен и хочу продолжить")],
+            [KeyboardButton(text="✅ Согласен и хочу продолжить")],
             [KeyboardButton(text="❌ Отказаться")]
         ],
         resize_keyboard=True,
@@ -45,10 +45,10 @@ def get_consent_keyboard() -> ReplyKeyboardMarkup:
 
 
 def get_contact_keyboard() -> ReplyKeyboardMarkup:
-    """Клавиатура запроса контакта"""
+    """Клавиатура запроса контакта с request_contact=True"""
     return ReplyKeyboardMarkup(
         keyboard=[
-            [KeyboardButton(text="📱 Поделиться контактом", request_contact=True)]
+            [KeyboardButton(text="📱 Отправить контакт и согласиться", request_contact=True)]
         ],
         resize_keyboard=True,
         one_time_keyboard=True
@@ -87,7 +87,8 @@ def get_remodeling_status_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         inline_keyboard=[
             [InlineKeyboardButton(text="✅ Выполнена", callback_data="remodel:done")],
-            [InlineKeyboardButton(text="📋 Планируется", callback_data="remodel:planned")]
+            [InlineKeyboardButton(text="📋 Планируется", callback_data="remodel:planned")],
+            [InlineKeyboardButton(text="🔄 В процессе", callback_data="remodel:in_progress")]
         ]
     )
 
