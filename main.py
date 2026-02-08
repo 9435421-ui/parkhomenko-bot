@@ -4,7 +4,7 @@ from aiogram import Bot, Dispatcher
 from aiogram.fsm.storage.memory import MemoryStorage
 from aiogram.client.default import DefaultBotProperties
 from config import BOT_TOKEN
-from handlers import start as common, quiz, dialog, invest
+from handlers import start as common, quiz, dialog, invest, admin
 from database import db
 from utils import kb, router_ai
 from auto_poster import run_auto_poster
@@ -34,6 +34,7 @@ async def main():
     dp.include_router(quiz.router)
     dp.include_router(invest.router)
     dp.include_router(dialog.router)
+    dp.include_router(admin.router)
 
     await on_startup()
     

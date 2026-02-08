@@ -106,9 +106,22 @@ class Database:
                     publish_date TIMESTAMP,
                     status TEXT DEFAULT 'draft',
                     image_url TEXT,
+                    admin_id INTEGER DEFAULT NULL,
+                    published_at TIMESTAMP DEFAULT NULL,
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                 )
             """)
+            
+            # Миграция: добавляем колонки если их нет
+            try:
+                await cursor.execute("ALTER TABLE content_plan ADD COLUMN admin_id INTEGER DEFAULT NULL")
+            except:
+                pass
+            
+            try:
+                await cursor.execute("ALTER TABLE content_plan ADD COLUMN published_at TIMESTAMP DEFAULT NULL")
+            except:
+                pass
             
             await self.conn.commit()
     
@@ -199,12 +212,15 @@ class Database:
             await self.conn.commit()
 
     async def save_post(self, post_type: str, title: str, body: str, cta: str, publish_date: datetime,
-                       channel: str = 'terion', theme: Optional[str] = None, image_url: Optional[str] = None) -> int:
+                       channel: str = 'terion', theme: Optional[str] = None, 
+                       image_url: Optional[str] = None, admin_id: Optional[int] = None,
+                       status: str = 'draft') -> int:
+        """Сохранить пост в контент-план"""
         async with self.conn.cursor() as cursor:
             await cursor.execute(
-                """INSERT INTO content_plan (type, channel, title, body, cta, theme, publish_date, image_url)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
-                (post_type, channel, title, body, cta, theme, publish_date, image_url)
+                """INSERT INTO content_plan (type, channel, title, body, cta, theme, publish_date, image_url, admin_id, status)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                (post_type, channel, title, body, cta, theme, publish_date, image_url, admin_id, status)
             )
             await self.conn.commit()
             return cursor.lastrowid
