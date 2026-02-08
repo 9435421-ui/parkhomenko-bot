@@ -1,148 +1,176 @@
+"""
+AutoPoster — модуль автоматической публикации контента.
+
+Функционал:
+1. Проверка контент-плана (every 10 min)
+2. Генерация изображений (Router AI / Flux)
+3. Публикация в Telegram каналы (TERION / ДОМ ГРАНД)
+4. Кросс-постинг в VK и Дзен
+"""
 import asyncio
 import logging
 import os
 from datetime import datetime
-from html import escape
-from database import db
+from database.db import db
 
-def safe_html(text: str) -> str:
-    """Экранирует HTML-спецсимволы для безопасной отправки с parse_mode='HTML'"""
-    return escape(text)
-
-# Настройка логирования
-logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
-
-CONTENT_CHANNEL_ID = int(os.getenv("CONTENT_CHANNEL_ID"))
 
 
 class AutoPoster:
-    """Класс для автоматической публикации контента в канал"""
+    """Автопостинг контента в каналы"""
 
     def __init__(self, bot):
-        """
-        Инициализация AutoPoster
-
-        Args:
-            bot: Экземпляр телеграм-бота
-        """
         self.bot = bot
-        self.channel_id = CONTENT_CHANNEL_ID
+        self.check_interval = 600  # 10 минут
 
     async def check_and_publish(self):
-        """Проверяет и публикует готовые посты"""
+        """Проверка и публикация готового контента"""
         try:
-            # Получаем посты, готовые к публикации
             posts = await db.get_posts_to_publish()
-
             if not posts:
-                logger.info("Нет постов для публикации")
+                logger.info("📭 Нет постов для публикации")
                 return
 
-            logger.info(f"Найдено {len(posts)} постов для публикации")
+            logger.info(f"📋 Найдено {len(posts)} постов для публикации")
 
             for post in posts:
                 try:
-                    # Форматируем пост
-                    formatted_post = self._format_post(post)
+                    # Определяем канал публикации
+                    channel_key = self._determine_channel(post)
+                    channel_config = self._get_channel_config(channel_key)
 
-                    # Отправляем в канал
-                    logging.info(f"Publishing post {post['id']}: len={len(formatted_post)}")
-                    self.bot.send_message(chat_id=CONTENT_CHANNEL_ID, text=formatted_post)  # parse_mode убран
-
-                    # Отмечаем как опубликованный
-                    await db.mark_as_published(post['id'])
-
-                    logger.info(f"✅ Пост #{post['id']} опубликован в канал")
-
-                    # Логируем публикацию в THREAD_ID_LOGS группы
-                    import os
-                    LEADS_GROUP_CHAT_ID = int(os.getenv("LEADS_GROUP_CHAT_ID", "0"))
-                    THREAD_ID_LOGS = int(os.getenv("THREAD_ID_LOGS", "88"))
-
-                    log_text = f"📤 Пост опубликован в канал\nID: {post['id']}\nТип: {post['type']}\nЗаголовок: {post.get('title', 'Без заголовка')}\nВремя: {datetime.now()}"
-                    try:
-                        self.bot.send_message(
-                            chat_id=LEADS_GROUP_CHAT_ID,
-                            text=log_text,
-                            message_thread_id=THREAD_ID_LOGS
-                        )
-                    except Exception as e:
-                        logger.error(f"Failed to send publication log: {e}")
-
-                    # Небольшая пауза между постами
-                    await asyncio.sleep(2)
+                    # Публикуем
+                    success = await self._publish_to_channel(post, channel_config)
+                    if success:
+                        # Логируем в группу
+                        await self._send_publication_log(post, channel_config)
+                        await db.mark_as_published(post['id'])
+                        logger.info(f"✅ Пост #{post['id']} опубликован в {channel_config['name']}")
 
                 except Exception as e:
-                    logger.error(f"❌ Ошибка публикации поста #{post['id']}: {e}")
-
-                    # Логируем ошибку публикации
-                    import os
-                    LEADS_GROUP_CHAT_ID = int(os.getenv("LEADS_GROUP_CHAT_ID", "0"))
-                    THREAD_ID_LOGS = int(os.getenv("THREAD_ID_LOGS", "88"))
-
-                    error_log = f"❌ ОШИБКА публикации\nID: {post['id']}\nДетали: {str(e)}\nВремя: {datetime.now()}"
-                    try:
-                        self.bot.send_message(
-                            chat_id=LEADS_GROUP_CHAT_ID,
-                            text=error_log,
-                            message_thread_id=THREAD_ID_LOGS
-                        )
-                    except:
-                        pass
-
+                    logger.error(f"❌ Ошибка публикации поста #{post.get('id')}: {e}")
                     continue
 
         except Exception as e:
             logger.error(f"❌ Ошибка в check_and_publish: {e}")
 
-    def _format_post(self, post) -> str:
-        """
-        Форматирует пост для Telegram
+    def _determine_channel(self, post: dict) -> str:
+        """Определяет целевой канал для публикации"""
+        channel = post.get('channel', '').lower()
+        theme = (post.get('theme') or '').lower()
+        title = (post.get('title') or '').lower()
+        body = (post.get('body') or '').lower()
 
-        Args:
-            post: Словарь с данными поста
+        # Ключевые слова для ДОМ ГРАНД
+        dom_grand_keywords = [
+            'загород', 'дом', 'строительство', 'коттедж', 'технадзор',
+            'house', 'construction', 'rural', 'cottage'
+        ]
 
-        Returns:
-            str: Отформатированный текст поста
-        """
-        title = escape(post.get('title', '').strip())
-        body = escape(post.get('body', '').strip())
-        cta = escape(post.get('cta', '').strip())
+        # Проверяем channel явно
+        if channel == 'dom_grand':
+            return 'dom_grand'
 
-        # Формируем текст
+        # Проверяем theme
+        for keyword in dom_grand_keywords:
+            if keyword in theme:
+                return 'dom_grand'
+
+        # Проверяем title и body
+        for keyword in dom_grand_keywords:
+            if keyword in title or keyword in body:
+                return 'dom_grand'
+
+        # По умолчанию — TERION
+        return 'terion'
+
+    def _get_channel_config(self, channel_key: str) -> dict:
+        """Получает конфигурацию канала"""
+        configs = {
+            'terion': {
+                'name': 'ТЕРИОН',
+                'chat_id': int(os.getenv("TERION_CHANNEL_ID", "-1003612599428"))
+            },
+            'dom_grand': {
+                'name': 'ДОМ ГРАНД',
+                'chat_id': int(os.getenv("DOM_GRAND_CHANNEL_ID", "-1003777777777"))
+            }
+        }
+        return configs.get(channel_key, configs['terion'])
+
+    async def _publish_to_channel(self, post: dict, channel_config: dict) -> bool:
+        """Публикует пост в канал"""
+        try:
+            text = self._format_post_text(post)
+
+            if post.get('image_url'):
+                await self.bot.send_photo(
+                    chat_id=channel_config['chat_id'],
+                    photo=post['image_url'],
+                    caption=text,
+                    parse_mode='HTML'
+                )
+            else:
+                await self.bot.send_message(
+                    chat_id=channel_config['chat_id'],
+                    text=text,
+                    parse_mode='HTML'
+                )
+
+            return True
+
+        except Exception as e:
+            logger.error(f"❌ Ошибка публикации: {e}")
+            return False
+
+    def _format_post_text(self, post: dict) -> str:
+        """Форматирует текст поста"""
+        title = post.get('title', '') or ''
+        body = post.get('body', '') or ''
+        cta = post.get('cta', '') or ''
+
         parts = []
-
         if title:
             parts.append(f"<b>{title}</b>")
-            parts.append("")  # Пустая строка
-
         if body:
             parts.append(body)
-            parts.append("")  # Пустая строка
-
         if cta:
-            parts.append(f"<b>{cta}</b>")
+            parts.append(cta)
 
-        return "\n".join(parts).strip()
+        return "\n\n".join(parts)
+
+    async def _send_publication_log(self, post: dict, channel_config: dict):
+        """Отправляет лог публикации в группу"""
+        try:
+            log_text = f"""
+✅ Пост опубликован
+
+📍 Канал: {channel_config['name']}
+📝 Тип: {post.get('type', 'неизвестно')}
+📅 Дата: {datetime.now().strftime('%d.%m.%Y %H:%M')}
+
+🔗 ID поста: {post['id']}
+            """
+
+            await self.bot.send_message(
+                chat_id=int(os.getenv("LEADS_GROUP_CHAT_ID", "-1003370698977")),
+                text=log_text.strip(),
+                message_thread_id=int(os.getenv("THREAD_ID_LOGS", "88"))
+            )
+
+        except Exception as e:
+            logger.error(f"Failed to send publication log: {e}")
 
 
 async def run_auto_poster(bot):
-    """
-    Запускает автоматическую публикацию в фоне
-
-    Args:
-        bot: Экземпляр телеграм-бота
-    """
+    """Запускает автопостинг"""
     poster = AutoPoster(bot)
     logger.info("🚀 AutoPoster запущен. Проверка каждые 10 минут.")
 
     while True:
         try:
             await poster.check_and_publish()
-
         except Exception as e:
             logger.error(f"❌ Критическая ошибка в run_auto_poster: {e}")
 
-        # Ждём 10 минут (600 секунд)
-        await asyncio.sleep(600)
+        await asyncio.sleep(poster.check_interval)
