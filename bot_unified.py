@@ -1465,7 +1465,9 @@ def generate_content_cmd(message):
                     post.get('title', ''),
                     post['body'],
                     post['cta'],
-                    post['publish_date']
+                    post['publish_date'],
+                    image_prompt=post.get('image_prompt'),
+                    image_url=post.get('image_url')
                 )
 
         asyncio.run(save_posts())

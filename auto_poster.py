@@ -48,7 +48,21 @@ class AutoPoster:
 
                     # Отправляем в канал
                     logging.info(f"Publishing post {post['id']}: len={len(formatted_post)}")
-                    self.bot.send_message(chat_id=CONTENT_CHANNEL_ID, text=formatted_post)  # parse_mode убран
+
+                    image_url = post.get('image_url')
+                    if image_url:
+                        try:
+                            self.bot.send_photo(
+                                chat_id=CONTENT_CHANNEL_ID,
+                                photo=image_url,
+                                caption=formatted_post[:1024] # Telegram caption limit
+                            )
+                        except Exception as img_e:
+                            logger.error(f"Failed to send photo for post {post['id']}: {img_e}")
+                            # Fallback to text only if photo fails
+                            self.bot.send_message(chat_id=CONTENT_CHANNEL_ID, text=formatted_post)
+                    else:
+                        self.bot.send_message(chat_id=CONTENT_CHANNEL_ID, text=formatted_post)
 
                     # Отмечаем как опубликованный
                     await db.mark_as_published(post['id'])

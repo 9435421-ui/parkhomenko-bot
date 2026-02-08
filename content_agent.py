@@ -2,6 +2,7 @@ import requests
 import os
 from datetime import datetime, timedelta
 import json
+from utils.image_gen import generate_image
 
 class ContentAgent:
     def __init__(self):
@@ -67,13 +68,17 @@ class ContentAgent:
                 # Парсим ответ: заголовок (опционально), текст, CTA
                 title, body, cta = self._parse_response(text)
 
+                image_prompt = self.build_image_prompt({'type': post_type})
+                image_url = generate_image(image_prompt) if image_prompt else None
+
                 post = {
                     'type': post_type,
                     'title': title,
                     'body': body,
                     'cta': cta,
                     'publish_date': start_date + timedelta(days=len(posts)),
-                    'image_prompt': self.build_image_prompt({'type': post_type})  # ← добавить
+                    'image_prompt': image_prompt,
+                    'image_url': image_url
                 }
                 posts.append(post)
 
