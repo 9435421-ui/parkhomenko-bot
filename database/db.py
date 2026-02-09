@@ -112,17 +112,6 @@ class Database:
                 )
             """)
             
-            # Миграция: добавляем колонки если их нет
-            try:
-                await cursor.execute("ALTER TABLE content_plan ADD COLUMN admin_id INTEGER DEFAULT NULL")
-            except:
-                pass
-            
-            try:
-                await cursor.execute("ALTER TABLE content_plan ADD COLUMN published_at TIMESTAMP DEFAULT NULL")
-            except:
-                pass
-            
             await self.conn.commit()
     
     async def get_or_create_user(self, user_id: int, username: Optional[str] = None,
@@ -189,13 +178,37 @@ class Database:
             rows = await cursor.fetchall()
             return [dict(row) for row in reversed(rows)]
     
-    async def save_lead(self, user_id: int, name: str, phone: str, **kwargs) -> int:
+    async def add_lead(self, user_id: int, name: str, phone: str, **kwargs) -> int:
+        """Добавить лида в БД"""
         async with self.conn.cursor() as cursor:
             columns = ['user_id', 'name', 'phone'] + list(kwargs.keys())
             values = [user_id, name, phone] + list(kwargs.values())
-            await cursor.execute(f"INSERT INTO leads ({', '.join(columns)}) VALUES ({', '.join(['?' for _ in columns])})", values)
+            await cursor.execute(
+                f"INSERT INTO leads ({', '.join(columns)}) VALUES ({', '.join(['?' for _ in columns])})",
+                values
+            )
             await self.conn.commit()
             return cursor.lastrowid
+    
+    async def update_lead_status(self, user_id: int, status: str, data: Dict = None):
+        """Обновить статус лида"""
+        async with self.conn.cursor() as cursor:
+            # Находим последнего лида пользователя
+            await cursor.execute(
+                "SELECT id FROM leads WHERE user_id = ? ORDER BY created_at DESC LIMIT 1",
+                (user_id,)
+            )
+            row = await cursor.fetchone()
+            
+            if row:
+                lead_id = row['id']
+                if data:
+                    set_clause = ", ".join([f"{k} = ?" for k in data.keys()])
+                    values = list(data.values()) + [lead_id]
+                    await cursor.execute(f"UPDATE leads SET {set_clause} WHERE id = ?", values)
+                
+                await cursor.execute("UPDATE leads SET sent_to_group = 1 WHERE id = ?", (lead_id,))
+                await self.conn.commit()
     
     async def get_leads(self, sent_to_group: Optional[bool] = None, limit: int = 100) -> List[Dict]:
         async with self.conn.cursor() as cursor:
