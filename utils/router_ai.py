@@ -136,10 +136,15 @@ class RouterAIClient:
                 history_parts.append(f"{name}: {h['text']}")
             history_text = "\n".join(history_parts)
         
+        # Формируем историю для промпта
+        history_block = ""
+        if history_text:
+            history_block = f"ИСТОРИЯ ДИАЛОГА:\n{history_text}\n"
+        
         user_prompt = f"""
 {rag_context}
 
-{f"ИСТОРИЯ ДИАЛОГА:\n{history_text}\n" if history_text else ""}
+{history_block}
 ---
 НОВЫЙ ВОПРОС КЛИЕНТА: {user_query}
 
