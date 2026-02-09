@@ -1,5 +1,6 @@
 """
 Основной бот ТЕРИОН - aiogram 3.x + Content Factory.
+Запуск ДВУХ ботов: main_bot + content_bot
 """
 import asyncio
 import logging
@@ -9,25 +10,29 @@ from aiogram.client.default import DefaultBotProperties
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from datetime import datetime
 
-from config import BOT_TOKEN, GROUP_ID, THREAD_ID_LEADS, CHANNEL_ID
+from config import BOT_TOKEN, CONTENT_BOT_TOKEN, GROUP_ID, THREAD_ID_LEADS, CHANNEL_ID
 from handlers import start_router, quiz_router, content_router, dialog_router, admin_router
 from database import db
 from utils import kb, router_ai
 from agents.viral_hooks_agent import viral_hooks_agent
 from agents.scout_agent import scout_agent
 
-logging.basicConfig(level=logging.INFO)
+# Настройка логов — видим ВСЕ события!
+logging.basicConfig(
+    level=logging.DEBUG,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
 logger = logging.getLogger(__name__)
 
-# Глобальный экземпляр бота
-bot: Bot = None
+# Глобальные экземпляры
+main_bot: Bot = None
+content_bot: Bot = None
 dp: Dispatcher = None
-scheduler: AsyncIOScheduler = None
 
 
 async def on_startup():
     """Инициализация при запуске"""
-    global bot, dp, scheduler
+    global main_bot, content_bot, dp
     
     # Подключаем БД
     await db.connect()
@@ -35,23 +40,25 @@ async def on_startup():
     # Индексируем базу знаний
     await kb.index_documents()
     
-    # Тесты агентов — НЕблокирующие (запускаем в фоне)
+    # Тесты агентов — НЕблокирующие
     asyncio.create_task(test_agents_background())
     
     # Запускаем планировщик
     scheduler = AsyncIOScheduler()
-    scheduler.add_job(check_birthdays_and_holidays, 'cron', hour=9, minute=0, timezone='Europe/Moscow')  # Дни рождения
-    scheduler.add_job(check_scheduled_posts, 'cron', hour=12, minute=0, timezone='Europe/Moscow')  # Автопостинг
+    scheduler.add_job(check_birthdays_and_holidays, 'cron', hour=9, minute=0, timezone='Europe/Moscow')
+    scheduler.add_job(check_scheduled_posts, 'cron', hour=12, minute=0, timezone='Europe/Moscow')
     scheduler.start()
     
-    print("✅ Бот ТЕРИОН готов!")
-    print(f"📚 База знаний: {len(kb.documents)} документов")
-    print(f"🧠 Router AI: {'подключен' if router_ai.api_key else 'не настроен'}")
-    print(f"📤 Группа: {GROUP_ID} (thread: {THREAD_ID_LEADS})")
+    logger.info("=" * 50)
+    logger.info("✅ Бот ТЕРИОН готов!")
+    logger.info(f"📚 База знаний: {len(kb.documents)} документов")
+    logger.info(f"🧠 Router AI: {'подключен' if router_ai.api_key else 'не настроен'}")
+    logger.info(f"📤 Группа: {GROUP_ID}")
+    logger.info("=" * 50)
 
 
 async def test_agents_background():
-    """Тесты агентов в фоне — не блокируют запуск"""
+    """Тесты агентов в фоне"""
     logger.info("🧪 Тесты агентов (фоновый режим)...")
     
     try:
@@ -68,76 +75,65 @@ async def test_agents_background():
 
 
 async def check_scheduled_posts():
-    """Проверка и публикация запланированных постов (12:00 МСК)"""
+    """Проверка и публикация постов (12:00 МСК)"""
     logger.info("⏰ Проверка запланированных постов...")
-    # TODO: реализовать логику публикации
 
 
 async def check_birthdays_and_holidays():
-    """Проверка дней рождений и праздников (09:00 МСК)"""
+    """Проверка дней рождения (09:00 МСК)"""
     logger.info("🎂 Проверка дней рождения...")
     
-    from database import db
-    
     try:
-        # Получаем клиентов с ДР сегодня
         birthdays = await db.get_today_birthdays()
-        
-        for client in birthdays:
-            name = client.get('name', 'Клиент')
-            user_id = client.get('user_id')
-            
-            # Поздравление
-            greeting = (
-                f"🎂 С Днём Рождения, {name}! 🎂\n\n"
-                f"От всей души поздравляем вас!\n"
-                f"Желаем успехов, здоровья и благополучия!\n\n"
-                f"С уважением,\n"
-                f"Компания «Терион»"
-            )
-            
-            try:
-                # Отправляем поздравление (нужен bot)
-                if bot:
-                    await bot.send_message(user_id, greeting)
-                    await db.mark_birthday_greeting_sent(client['id'])
-                    logger.info(f"✅ Поздравление отправлено: {name}")
-            except Exception as e:
-                logger.error(f"❌ Ошибка отправки поздравления {name}: {e}")
-        
-        if not birthdays:
+        if birthdays:
+            for client in birthdays:
+                logger.info(f"🎂 ДР сегодня: {client.get('name')}")
+        else:
             logger.info("📭 Дней рождения сегодня нет")
-            
     except Exception as e:
-        logger.error(f"❌ Ошибка проверки ДР: {e}")
+        logger.error(f"❌ Ошибка ДР: {e}")
 
 
 async def main():
-    """Запуск бота"""
-    global bot, dp
+    """Запуск ДВУХ ботов через asyncio.gather"""
+    global main_bot, content_bot, dp
     
-    bot = Bot(
+    # === BOT 1: Основной бот (консультант) ===
+    main_bot = Bot(
         token=BOT_TOKEN,
         default=DefaultBotProperties(parse_mode="HTML")
     )
+    
+    # === BOT 2: Content бот (посты) ===
+    content_bot = Bot(
+        token=CONTENT_BOT_TOKEN,
+        default=DefaultBotProperties(parse_mode="HTML")
+    )
+    
+    # === ОДИН Dispatcher для обоих ботов ===
     dp = Dispatcher(storage=MemoryStorage())
-
-    # ⚠️ ВАЖНО: Порядок роутеров!
-    # 1. start - /start и приветствие
-    # 2. quiz - квиз (FSM, должен обрабатывать до dialog)
-    # 3. content - создание постов
-    # 4. dialog - YandexGPT (только когда не в квизе!)
-    # 5. admin - админка
+    
+    # Регистрируем роутеры
     dp.include_router(start_router)
     dp.include_router(quiz_router)
     dp.include_router(content_router)
     dp.include_router(dialog_router)
     dp.include_router(admin_router)
-
+    
     await on_startup()
     
-    print("🚀 Запуск поллинга...")
-    await dp.start_polling(bot)
+    logger.info("🚀 Запуск двух ботов...")
+    logger.info(f"📱 main_bot: {BOT_TOKEN[:10]}...")
+    logger.info(f"📱 content_bot: {CONTENT_BOT_TOKEN[:10]}...")
+    
+    # === ЗАПУСК ОБОИХ БОТОВ ===
+    try:
+        await asyncio.gather(
+            dp.start_polling(main_bot),
+            dp.start_polling(content_bot)
+        )
+    except Exception as e:
+        logger.error(f"❌ Ошибка поллинга: {e}")
 
 
 if __name__ == "__main__":
