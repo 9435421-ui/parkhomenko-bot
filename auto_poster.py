@@ -5,13 +5,14 @@ AutoPoster — модуль автоматической публикации к
 1. Проверка контент-плана (every 10 min)
 2. Генерация изображений (Router AI / Flux)
 3. Публикация в Telegram каналы (TERION / ДОМ ГРАНД)
-4. Кросс-постинг в VK и Дзен
+4. Кросс-постинг в VK
 """
 import asyncio
 import logging
 import os
 from datetime import datetime
 from database.db import db
+from services.vk_service import vk_service
 
 logger = logging.getLogger(__name__)
 
@@ -117,10 +118,49 @@ class AutoPoster:
                     parse_mode='HTML'
                 )
 
+            # Если канал "both" - публикуем в VK
+            channel = post.get('channel', '').lower()
+            if channel == 'both':
+                await self._publish_to_vk(post)
+
             return True
 
         except Exception as e:
             logger.error(f"❌ Ошибка публикации: {e}")
+            return False
+
+    async def _publish_to_vk(self, post: dict) -> bool:
+        """Публикует пост в VK"""
+        try:
+            if not vk_service.vk_token:
+                logger.warning("VK не настроен, пропуск")
+                return False
+
+            # Форматируем текст для VK (без HTML)
+            title = post.get('title', '') or ''
+            body = post.get('body', '') or ''
+            cta = post.get('cta', '') or ''
+
+            vk_text = f"{title}\n\n{body}\n\n{cta}" if title else f"{body}\n\n{cta}"
+
+            # Публикуем
+            if post.get('image_url'):
+                # Если image_url это локальный путь - скачиваем и публикуем
+                image_path = post['image_url']
+                if image_path.startswith('http'):
+                    # Это URL - просто публикуем ссылку
+                    await vk_service.post(vk_text)
+                else:
+                    # Локальный файл
+                    await vk_service.post_with_photos(vk_text, [image_path])
+            else:
+                await vk_service.post(vk_text)
+
+            logger.info("✅ Пост опубликован в VK")
+            return True
+
+        except Exception as e:
+            logger.error(f"❌ Ошибка публикации в VK: {e}")
             return False
 
     def _format_post_text(self, post: dict) -> str:
