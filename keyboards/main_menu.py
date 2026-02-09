@@ -33,8 +33,8 @@ def get_admin_menu() -> ReplyKeyboardMarkup:
     markup = ReplyKeyboardMarkup(
         keyboard=[
             [KeyboardButton(text="🛠 Создать пост")],
-            [KeyboardButton(text="📅 Контент-план")],
-            [KeyboardButton(text="👤 Мой профиль")],
+            [KeyboardButton(text="🕵️‍♂️ Темы от Шпиона")],
+            [KeyboardButton(text="📅 Очередь постов")],
         ],
         resize_keyboard=True
     )
@@ -69,6 +69,16 @@ def get_approve_post_btn(post_id: int) -> InlineKeyboardMarkup:
     return markup
 
 
+def get_urgent_btn() -> InlineKeyboardMarkup:
+    """Кнопки срочной публикации"""
+    markup = InlineKeyboardMarkup()
+    markup.add(
+        InlineKeyboardButton("🚀 Опубликовать сейчас", callback_data="urgent_publish"),
+        InlineKeyboardButton("📝 Доработать", callback_data="urgent_edit")
+    )
+    return markup
+
+
 async def send_main_menu(bot: Bot, chat_id: int, user_id: int = None):
     """Отправка главного меню"""
     text = (
@@ -83,9 +93,9 @@ async def send_main_menu(bot: Bot, chat_id: int, user_id: int = None):
         markup = get_admin_menu()
         text = (
             "🎯 <b>Главное меню</b>\n\n"
-            "🛠 <b>Создать пост</b> — генерация контента\n"
-            "📅 <b>Контент-план</b> — идеи от Скаута\n"
-            "👤 <b>Мой профиль</b> — настройки и статистика\n\n"
+            "🛠 <b>Создать пост</b> — Текст → Фото → Публикация\n"
+            "🕵️‍♂️ <b>Темы от Шпиона</b> — ScoutAgent ищет идеи\n"
+            "📅 <b>Очередь постов</b> — что запланировано на 12:00\n\n"
             "Выберите:"
         )
     else:
