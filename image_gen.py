@@ -36,8 +36,8 @@ def generate(prompt: str) -> Optional[str]:
         logger.error("ROUTER_AI_IMAGE_KEY не настроен в переменных окружения")
         return None
 
-    # API Router AI для генерации изображений
-    url = "https://api.router.ai/v1/image_generation"
+    # API Router AI для генерации изображений (пробуем альтернативный endpoint)
+    url = os.getenv("ROUTER_IMAGE_URL", "https://router.huge.ai/api/image_generation")
 
     headers = {
         "Authorization": f"Bearer {ROUTER_AI_IMAGE_KEY}",
