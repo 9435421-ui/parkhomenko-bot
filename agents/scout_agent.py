@@ -85,22 +85,30 @@ class ScoutAgent:
 
 Предложи 1 конкретную тему для поста."""
 
-            if self.use_router:
-                response = await router_ai.generate_response(
+            # СНАЧАЛА YandexGPT (в РФ, работает!)
+            try:
+                response = await yandex_gpt.generate_response(
                     user_prompt=user_prompt,
                     system_prompt=system_prompt.format(date=datetime.now().strftime("%B %Y")),
                     max_tokens=500
                 )
                 if response:
                     return self._parse_response(response, query)
+            except Exception as e:
+                logger.warning(f"YandexGPT error: {e}")
             
-            response = await yandex_gpt.generate_response(
-                user_prompt=user_prompt,
-                system_prompt=system_prompt.format(date=datetime.now().strftime("%B %Y")),
-                max_tokens=500
-            )
-            if response:
-                return self._parse_response(response, query)
+            # Fallback на Router AI
+            if self.use_router:
+                try:
+                    response = await router_ai.generate_response(
+                        user_prompt=user_prompt,
+                        system_prompt=system_prompt.format(date=datetime.now().strftime("%B %Y")),
+                        max_tokens=500
+                    )
+                    if response:
+                        return self._parse_response(response, query)
+                except Exception as e:
+                    logger.warning(f"Router AI error: {e}")
                 
         except Exception as e:
             logger.error(f"Scout AI error: {e}")

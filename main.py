@@ -35,39 +35,36 @@ async def on_startup():
     # Индексируем базу знаний
     await kb.index_documents()
     
-    # Тест ViralHooksAgent
-    logger.info("🧪 Тест ViralHooksAgent...")
-    try:
-        hooks = await viral_hooks_agent.generate_hooks("Ипотека 2026", count=5)
-        logger.info(f"📝 ViralHooksAgent result: {len(hooks)} hooks generated")
-        for i, hook in enumerate(hooks, 1):
-            logger.info(f"  {i}. {hook['text']}")
-    except Exception as e:
-        logger.error(f"❌ ViralHooksAgent error: {e}")
-    
-    # Тест Scout Agent
-    logger.info("\n🔍 Тест Scout Agent...")
-    try:
-        topics = await scout_agent.scout_topics(count=3)
-        logger.info(f"📌 Scout Agent result: {len(topics)} topics found")
-        for i, topic in enumerate(topics, 1):
-            logger.info(f"  {i}. {topic['title']}")
-            logger.info(f"     Почему: {topic['why']}")
-            logger.info(f"     Инсайт: {topic['insight']}")
-    except Exception as e:
-        logger.error(f"❌ Scout Agent error: {e}")
+    # Тесты агентов — НЕблокирующие (запускаем в фоне)
+    asyncio.create_task(test_agents_background())
     
     # Запускаем планировщик
     scheduler = AsyncIOScheduler()
     scheduler.add_job(check_birthdays_and_holidays, 'cron', hour=9, minute=0, timezone='Europe/Moscow')  # Дни рождения
     scheduler.add_job(check_scheduled_posts, 'cron', hour=12, minute=0, timezone='Europe/Moscow')  # Автопостинг
     scheduler.start()
-    logger.info("⏰ APScheduler запущен (09:00 и 12:00 МСК)")
     
     print("✅ Бот ТЕРИОН готов!")
     print(f"📚 База знаний: {len(kb.documents)} документов")
     print(f"🧠 Router AI: {'подключен' if router_ai.api_key else 'не настроен'}")
     print(f"📤 Группа: {GROUP_ID} (thread: {THREAD_ID_LEADS})")
+
+
+async def test_agents_background():
+    """Тесты агентов в фоне — не блокируют запуск"""
+    logger.info("🧪 Тесты агентов (фоновый режим)...")
+    
+    try:
+        hooks = await viral_hooks_agent.generate_hooks("перепланировка", count=3)
+        logger.info(f"📝 ViralHooksAgent: {len(hooks)} hooks OK")
+    except Exception as e:
+        logger.warning(f"⚠️ ViralHooksAgent: {e}")
+    
+    try:
+        topics = await scout_agent.scout_topics(count=1)
+        logger.info(f"📌 ScoutAgent: {len(topics)} topics OK")
+    except Exception as e:
+        logger.warning(f"⚠️ ScoutAgent: {e}")
 
 
 async def check_scheduled_posts():
