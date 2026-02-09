@@ -189,3 +189,10 @@ class KnowledgeBase:
 
 # Singleton instance
 kb = KnowledgeBase()
+
+
+# Alias для совместимости
+async def search(query: str, limit: int = 3) -> List[Dict[str, str]]:
+    """Удобная функция-алиас для get_context"""
+    context = await kb.get_context(query, max_chunks=limit)
+    return [{'text': context, 'source': 'knowledge_base'}]
