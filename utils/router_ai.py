@@ -79,7 +79,7 @@ class RouterAIClient:
                     self.endpoint,
                     headers=headers,
                     json=payload,
-                    timeout=aiohttp.ClientTimeout(total=90)
+                    timeout=aiohttp.ClientTimeout(total=30)
                 ) as response:
                     if response.status == 200:
                         result = await response.json()
