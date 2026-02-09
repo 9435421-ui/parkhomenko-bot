@@ -112,6 +112,21 @@ class Database:
                 )
             """)
             
+            # Таблица для дней рождения клиентов
+            await cursor.execute("""
+                CREATE TABLE IF NOT EXISTS clients_birthdays (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    user_id INTEGER NOT NULL,
+                    name TEXT,
+                    birth_date DATE NOT NULL,
+                    channel TEXT DEFAULT 'telegram',
+                    greeting_sent BOOLEAN DEFAULT 0,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY (user_id) REFERENCES users(user_id)
+                )
+            """)
+            
             await self.conn.commit()
     
     async def get_or_create_user(self, user_id: int, username: Optional[str] = None,
@@ -275,6 +290,36 @@ class Database:
             if row and row[0]:
                 return datetime.fromisoformat(row[0])
             return None
+    
+    # === ДНИ РОЖДЕНИЯ ===
+    async def add_client_birthday(self, user_id: int, name: str, birth_date: str, channel: str = 'telegram'):
+        """Добавить дату рождения клиента"""
+        async with self.conn.cursor() as cursor:
+            await cursor.execute(
+                "INSERT INTO clients_birthdays (user_id, name, birth_date, channel) VALUES (?, ?, ?, ?)",
+                (user_id, name, birth_date, channel)
+            )
+            await self.conn.commit()
+            return cursor.lastrowid
+    
+    async def get_today_birthdays(self) -> List[Dict]:
+        """Получить клиентов с ДР сегодня"""
+        today = datetime.now().strftime("%m-%d")
+        async with self.conn.cursor() as cursor:
+            await cursor.execute(
+                "SELECT * FROM clients_birthdays WHERE strftime('%m-%d', birth_date) = ? AND greeting_sent = 0",
+                (today,)
+            )
+            return [dict(row) for row in await cursor.fetchall()]
+    
+    async def mark_birthday_greeting_sent(self, birthday_id: int):
+        """Отметить что поздравление отправлено"""
+        async with self.conn.cursor() as cursor:
+            await cursor.execute(
+                "UPDATE clients_birthdays SET greeting_sent = 1, updated_at = ? WHERE id = ?",
+                (datetime.now(), birthday_id)
+            )
+            await self.conn.commit()
 
 
 db = Database()
