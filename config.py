@@ -29,3 +29,7 @@ THREAD_ID_LOGS = int(os.getenv("THREAD_ID_LOGS", "88"))
 
 # === AIOGRAM ===
 GROUP_ID = LEADS_GROUP_CHAT_ID
+
+# === КАНАЛЫ КОНТЕНТА ===
+TERION_CHANNEL_ID = int(os.getenv("TERION_CHANNEL_ID", "-1003612599428"))
+DOM_GRAND_CHANNEL_ID = int(os.getenv("DOM_GRAND_CHANNEL_ID", "-1003777777777"))
