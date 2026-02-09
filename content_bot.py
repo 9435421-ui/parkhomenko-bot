@@ -1,33 +1,29 @@
-# bot.py
+"""
+Content Bot — бот для генерации контента.
+Использует Router AI (Kimi/Qwen) и YandexGPT.
+"""
 import telebot
 from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
 import json
 import os
+import asyncio
 from dotenv import load_dotenv
-from openai import OpenAI
-import schedule
-import time
-import threading
 
 load_dotenv()
 
-BOT_TOKEN = os.getenv("BOT_TOKEN")
-CHANNEL_ID = int(os.getenv("CHANNEL_ID"))
-OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
+BOT_TOKEN = os.getenv("CONTENT_BOT_TOKEN")
+CHANNEL_ID = int(os.getenv("CHANNEL_ID", "-1003612599428"))
 LEADS_GROUP_CHAT_ID = int(os.getenv("LEADS_GROUP_CHAT_ID", "-1003370698977"))
 THREAD_ID_KVARTIRY = int(os.getenv("THREAD_ID_KVARTIRY", "2"))
 THREAD_ID_KOMMERCIA = int(os.getenv("THREAD_ID_KOMMERCIA", "5"))
 THREAD_ID_DOMA = int(os.getenv("THREAD_ID_DOMA", "8"))
 ADMIN_ID = int(os.getenv("ADMIN_ID", "0"))
 
-if not BOT_TOKEN or not OPENAI_API_KEY:
-    raise RuntimeError("BOT_TOKEN and OPENAI_API_KEY must be set in .env")
+if not BOT_TOKEN:
+    raise RuntimeError("CONTENT_BOT_TOKEN must be set in .env")
 
-client = OpenAI(api_key=OPENAI_API_KEY)
-
-# ==========================
-# Настройки бота и OpenAI
-# ==========================
+# Инициализируем ИИ
+from utils import router_ai, yandex_gpt
 
 # ==========================
 # Инициализация бота
@@ -44,7 +40,7 @@ def load_posts():
     try:
         with open(POSTS_FILE, "r", encoding="utf-8") as f:
             return json.load(f)
-    except BaseException:
+    except:
         return []
 
 
@@ -53,35 +49,59 @@ def save_posts(posts):
         json.dump(posts, f, ensure_ascii=False, indent=2)
 
 # ==========================
-# Функции генерации контента
+# Генерация контента через Router AI / YandexGPT
 # ==========================
 
 
-def generate_text(prompt: str) -> str:
+async def generate_text_async(prompt: str) -> str:
+    """Генерация текста через Router AI"""
     try:
-        resp = client.chat.completions.create(
-            model="gpt-4o-mini",
-            messages=[{"role": "user", "content": prompt}]
+        result = await router_ai.generate(
+            system_prompt="Ты - эксперт по контенту для канала о перепланировках.",
+            user_message=prompt
         )
-        return resp.choices[0].message.content
+        if result:
+            return result
     except Exception as e:
-        return f"Ошибка генерации текста: {e}"
+        print(f"Router AI error: {e}")
+    
+    # Fallback на YandexGPT
+    try:
+        result = await yandex_gpt.generate(
+            system_prompt="Ты - эксперт по контенту.",
+            user_message=prompt
+        )
+        return result or "Ошибка генерации"
+    except Exception as e:
+        return f"Ошибка: {e}"
+
+
+def generate_text(prompt: str) -> str:
+    """Синхронная обёртка"""
+    try:
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        result = loop.run_until_complete(generate_text_async(prompt))
+        loop.close()
+        return result
+    except:
+        return "Ошибка генерации текста"
+
+
+# ==========================
+# Генерация изображений через Flux (Router AI)
+# ==========================
 
 
 def generate_image(prompt: str) -> str:
+    """Генерация изображения"""
     try:
-        resp = client.images.generate(
-            model="gpt-image-1",
-            prompt=prompt,
-            size="1024x1024"
-        )
-        return resp.data[0].url
+        from image_gen import generate
+        result = generate(prompt)
+        return result or "Ошибка генерации изображения"
     except Exception as e:
-        return f"Ошибка генерации изображения: {e}"
+        return f"Ошибка: {e}"
 
-
-def generate_video(prompt: str) -> str:
-    return "Генерация видео временно недоступна."
 
 # ==========================
 # Отправка лидов в группу
@@ -106,40 +126,6 @@ def send_lead_to_group(summary_text: str, object_type: str, is_new: bool = True)
         message_thread_id=thread_id
     )
 
-# ==========================
-# Автопостинг по расписанию
-# ==========================
-
-
-def post_scheduler():
-    posts = load_posts()
-    if posts:
-        post = posts.pop(0)
-        save_posts(posts)
-        text = generate_text(post["text"])
-        img_url = generate_image(post["image"]) if "image" in post else None
-        video_url = generate_video(post["video"]) if "video" in post else None
-
-        msg = text
-        if img_url:
-            msg += f"\n\nИзображение: {img_url}"
-        if video_url:
-            msg += f"\n\nВидео: {video_url}"
-
-        bot.send_message(CHANNEL_ID, msg)
-
-
-# Запускаем автопостинг в 12:00 каждый день
-schedule.every().day.at("12:00").do(post_scheduler)
-
-
-def run_schedule():
-    while True:
-        schedule.run_pending()
-        time.sleep(10)
-
-
-threading.Thread(target=run_schedule, daemon=True).start()
 
 # ==========================
 # Меню бота
@@ -149,141 +135,93 @@ threading.Thread(target=run_schedule, daemon=True).start()
 @bot.message_handler(commands=["start"])
 def start(message):
     markup = InlineKeyboardMarkup()
-    markup.add(InlineKeyboardButton("Создать пост", callback_data="create_post"))
-    markup.add(InlineKeyboardButton("Просмотреть контент-план", callback_data="view_plan"))
-    markup.add(InlineKeyboardButton("Генерация изображения", callback_data="gen_image"))
-    markup.add(InlineKeyboardButton("Генерация видео", callback_data="gen_video"))
-    markup.add(InlineKeyboardButton("Собрать лид", callback_data="collect_lead"))
-    bot.send_message(message.chat.id, "Привет! Выберите действие:", reply_markup=markup)
+    markup.add(InlineKeyboardButton("📝 Создать пост", callback_data="create_post"))
+    markup.add(InlineKeyboardButton("📋 Контент-план", callback_data="view_plan"))
+    markup.add(InlineKeyboardButton("🎨 Сгенерировать картинку", callback_data="gen_image"))
+    markup.add(InlineKeyboardButton("💬 Задать вопрос ИИ", callback_data="ask_ai"))
+    bot.send_message(
+        message.chat.id,
+        "🎯 Контент-бот ТЕРИОН\n\n"
+        "Выберите действие:",
+        reply_markup=markup
+    )
+
 
 # ==========================
 # Обработка кнопок
 # ==========================
 
 
+user_leads = {}
+
+
 @bot.callback_query_handler(func=lambda call: True)
 def callback_handler(call):
     if call.data == "create_post":
-        bot.send_message(call.message.chat.id, "Отправьте текст поста:")
-        bot.register_next_step_handler(call.message, add_post)
+        msg = bot.send_message(call.message.chat.id, "📝 Отправьте тему поста или идею:")
+        bot.register_next_step_handler(msg, add_post)
     elif call.data == "view_plan":
         posts = load_posts()
         if posts:
-            msg = "\n\n".join([p["text"] for p in posts])
-            bot.send_message(call.message.chat.id, msg)
+            response = "📋 <b>Контент-план:</b>\n\n"
+            for i, post in enumerate(posts[:10], 1):
+                response += f"{i}. {post.get('title', 'Без темы')}\n"
+            bot.send_message(call.message.chat.id, response, parse_mode="HTML")
         else:
-            bot.send_message(call.message.chat.id, "Контент-план пуст.")
+            bot.send_message(call.message.chat.id, "📭 Контент-план пуст.")
     elif call.data == "gen_image":
-        bot.send_message(call.message.chat.id, "Введите описание изображения:")
-        bot.register_next_step_handler(call.message, generate_image_handler)
-    elif call.data == "gen_video":
-        bot.send_message(call.message.chat.id, "Введите описание видео:")
-        bot.register_next_step_handler(call.message, generate_video_handler)
-    elif call.data == "collect_lead":
-        bot.send_message(call.message.chat.id, "Соглашаетесь ли вы на обработку персональных данных? (да/нет)")
-        bot.register_next_step_handler(call.message, ask_name)
-    elif call.data.startswith("obj_"):
-        object_type = call.data.replace("obj_", "")
-        if object_type == "kvartira":
-            obj = "квартира"
-        elif object_type == "kommertsia":
-            obj = "коммерция"
-        elif object_type == "dom":
-            obj = "дом"
-        user_leads[call.message.chat.id]["object_type"] = obj
-        bot.send_message(call.message.chat.id, "Введите город:")
-        bot.register_next_step_handler(call.message, ask_address)
+        msg = bot.send_message(call.message.chat.id, "🎨 Опишите изображение:")
+        bot.register_next_step_handler(msg, generate_image_handler)
+    elif call.data == "ask_ai":
+        msg = bot.send_message(call.message.chat.id, "💬 Задайте вопрос:")
+        bot.register_next_step_handler(msg, ask_ai_handler)
 
 
 def add_post(message):
     posts = load_posts()
-    posts.append({"text": message.text})
+    posts.append({
+        "text": message.text,
+        "title": message.text[:50],
+        "status": "pending"
+    })
     save_posts(posts)
-    bot.send_message(message.chat.id, "Пост добавлен в контент-план!")
+    bot.send_message(message.chat.id, "✅ Пост добавлен в контент-план!")
 
 
 def generate_image_handler(message):
     url = generate_image(message.text)
-    bot.send_message(message.chat.id, f"Ссылка на изображение: {url}")
+    bot.send_message(
+        message.chat.id,
+        f"🎨 Результат:\n{url}"
+    )
 
 
-def generate_video_handler(message):
-    url = generate_video(message.text)
-    bot.send_message(message.chat.id, f"Ссылка на видео: {url}")
+def ask_ai_handler(message):
+    response = generate_text(message.text)
+    bot.send_message(
+        message.chat.id,
+        f"💬 <b>Ответ ИИ:</b>\n\n{response}",
+        parse_mode="HTML"
+    )
+
 
 # ==========================
-# Сбор лидов
+# Сбор лидов (заглушка - используй основной бот)
 # ==========================
 
 
-def ask_name(message):
-    if message.text.lower() not in ["да", "yes"]:
-        bot.send_message(message.chat.id, "Без согласия не можем продолжить.")
-        return
-    user_leads[message.chat.id] = {"pd_agreed": True}
-    bot.send_message(message.chat.id, "Введите ваше имя:")
-    bot.register_next_step_handler(message, ask_phone)
-
-
-def ask_phone(message):
-    user_leads[message.chat.id]["name"] = message.text
-    bot.send_message(message.chat.id, "Введите ваш телефон:")
-    bot.register_next_step_handler(message, ask_object_type_inline)
-
-
-def ask_object_type_inline(message):
-    user_leads[message.chat.id]["phone"] = message.text
-    markup = InlineKeyboardMarkup()
-    markup.add(InlineKeyboardButton("Квартира", callback_data="obj_kvartira"))
-    markup.add(InlineKeyboardButton("Коммерция", callback_data="obj_kommertsia"))
-    markup.add(InlineKeyboardButton("Дом", callback_data="obj_dom"))
-    bot.send_message(message.chat.id, "Выберите тип объекта:", reply_markup=markup)
-
-
-def ask_address(message):
-    user_leads[message.chat.id]["city"] = message.text
-    bot.send_message(
-        message.chat.id,
-        "Кратко опишите, что хотите изменить в перепланировке "
-        "(объединить комнаты, перенести санузел, расширить кухню и т.п.)."
-    )
-    bot.register_next_step_handler(message, ask_params)
-
-
-def ask_params(message):
-    user_leads[message.chat.id]["change_plan"] = message.text
-    bot.send_message(
-        message.chat.id,
-        "Есть ли сейчас у вас на руках документы БТИ по этому объекту "
-        "(поэтажный план, экспликация, техпаспорт)? "
-        "Кратко опишите: есть/нет, в каком виде."
-    )
-    bot.register_next_step_handler(message, finalize_lead)
-
-
-def finalize_lead(message):
-    user_leads[message.chat.id]["bti_status"] = message.text
-    lead = user_leads[message.chat.id]
-    summary = (
-        f"Имя: {lead.get('name')}\n"
-        f"Телефон: {lead.get('phone')}\n"
-        f"Тип объекта: {lead.get('object_type')}\n"
-        f"Город/регион: {lead.get('city')}\n"
-        f"Что хочет изменить: {lead.get('change_plan')}\n"
-        f"Статус документов БТИ: {lead.get('bti_status')}"
-    )
-    send_lead_to_group(summary, lead["object_type"])
-    bot.send_message(
-        message.chat.id,
-        "Спасибо, информация получена. Лид отправлен специалисту. "
-        "Адрес и детали по документам уточним уже на следующем шаге общения."
-    )
-    del user_leads[message.chat.id]
+@bot.message_handler(func=lambda message: True)
+def echo(message):
+    """Эхо для неизвестных сообщений"""
+    if message.chat.type == "private":
+        bot.send_message(
+            message.chat.id,
+            "Используйте меню /start"
+        )
 
 
 # ==========================
 # Запуск бота
 # ==========================
-print("Бот запущен...")
+print("🎯 Content Bot запущен...")
 bot.polling(non_stop=True)
-
