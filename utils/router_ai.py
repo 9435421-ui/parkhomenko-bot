@@ -184,10 +184,10 @@ class RouterAIClient:
 router_ai = RouterAIClient()
 
 # Alias для совместимости
-async def generate(system_prompt: str, user_message: str, max_tokens: int = 500) -> Optional[str]:
+async def generate(system_prompt: str = "", user_message: str = "", max_tokens: int = 500) -> Optional[str]:
     """Удобная функция-алиас для generate_response"""
     return await router_ai.generate_response(
-        user_prompt=user_message,
-        system_prompt=system_prompt,
+        user_prompt=user_message or system_prompt,
+        system_prompt=system_prompt if system_prompt else None,
         max_tokens=max_tokens
     )
