@@ -136,20 +136,10 @@ class RouterAIClient:
                 history_parts.append(f"{name}: {h['text']}")
             history_text = "\n".join(history_parts)
         
-        # Формируем историю для промпта
-        history_block = ""
-        if history_text:
-            history_block = f"ИСТОРИЯ ДИАЛОГА:\n{history_text}\n"
+        # Формируем историю для промпта (совместимость с Python 3.11)
+        history_prefix = "ИСТОРИЯ ДИАЛОГА:\n" + history_text + "\n" if history_text else ""
         
-        user_prompt = f"""
-{rag_context}
-
-{history_block}
----
-НОВЫЙ ВОПРОС КЛИЕНТА: {user_query}
-
-Отвечай кратко (2-3 предложения), по делу, со ссылками на законы из контекста.
-"""
+        user_prompt = rag_context + "\n\n" + history_prefix + "---\n" + "НОВЫЙ ВОПРОС КЛИЕНТА: " + user_query + "\n\nОтвечай кратко (2-3 предложения), по делу, со ссылками на законы из контекста."
         
         return await self.generate_response(
             user_prompt=user_prompt,
