@@ -130,10 +130,11 @@ class RouterAIClient:
         history_text = ""
         if dialog_history and len(dialog_history) > 1:
             recent = dialog_history[-6:-1]
-            history_text = "\n".join([
-                f"{'Клиент' if h['role'] == 'user' else 'Антон'}: {h['text']}"
-                for h in recent
-            ])
+            history_parts = []
+            for h in recent:
+                name = "Клиент" if h['role'] == 'user' else "Антон"
+                history_parts.append(f"{name}: {h['text']}")
+            history_text = "\n".join(history_parts)
         
         user_prompt = f"""
 {rag_context}
