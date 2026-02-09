@@ -6,7 +6,6 @@ from aiogram import Router, F
 from aiogram.types import Message, CallbackQuery
 from database import db
 from utils import router_ai, yandex_gpt, kb
-from keyboards import get_continue_or_menu_keyboard
 
 router = Router()
 
@@ -74,23 +73,7 @@ async def dialog_message_handler(message: Message):
         
         await message.answer(
             f"{name}, отлично! Давайте оформим заявку для связи со специалистом.\n\n"
-            f"Я задам несколько вопросов, чтобы наш эксперт смог подготовить "
-            f"предварительную консультацию.",
-            parse_mode="HTML"
-        )
-        
-        # Переходим к квизу
-        from handlers.quiz import QuizOrder
-        from aiogram.fsm.context import FSMContext
-        from aiogram import Router
-        from keyboards.main_menu import get_object_type_keyboard
-        
-        # Импортируем роутер quiz
-        from handlers.quiz import router as quiz_router
-        
-        await message.answer(
-            "📝 <b>Заявка на консультацию</b>\n\n"
-            "<b>Вопрос 1 из 7:</b> В каком городе находится объект?",
+            f"🏙️ <b>1. В каком городе находится объект?</b>",
             parse_mode="HTML"
         )
         return
@@ -110,16 +93,6 @@ async def dialog_message_handler(message: Message):
         
         # Отправляем ответ пользователю
         await message.answer(response, parse_mode="HTML")
-        
-        # После 2-го ответа предлагаем продолжить или оставить заявку
-        assistant_count = len([h for h in history_for_prompt if h['role'] == 'assistant'])
-        
-        if assistant_count >= 2:
-            await message.answer(
-                f"{name}, хотите продолжить задавать вопросы или оставить заявку "
-                f"для детальной консультации со специалистом ТЕРИОН?",
-                reply_markup=get_continue_or_menu_keyboard()
-            )
     
     except Exception as e:
         print(f"❌ Ошибка Router AI: {e}")
@@ -140,6 +113,5 @@ async def dialog_message_handler(message: Message):
             print(f"❌ Ошибка YandexGPT fallback: {yandex_error}")
             await message.answer(
                 "Извините, произошла техническая ошибка. "
-                "Попробуйте переформулировать вопрос или свяжитесь со специалистом.",
-                reply_markup=get_continue_or_menu_keyboard()
+                "Попробуйте переформулировать вопрос."
             )

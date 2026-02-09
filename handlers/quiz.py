@@ -1,34 +1,32 @@
 """
 Квиз для сбора заявок на перепланировку (FSM).
-7 этапов: Город → Тип объекта → Этажность → Площадь → Статус → Описание → План
+7 этапов: Контакт → Город → Тип объекта → Этажность → Площадь → Статус → Описание → План
 """
-import asyncio
 from aiogram import Router, F
-from aiogram.types import Message, ReplyKeyboardMarkup, KeyboardButton, ContentType
+from aiogram.types import Message, ReplyKeyboardMarkup, KeyboardButton
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.fsm.context import FSMContext
 
 from database import db
-from utils.router_ai import router_ai
 from config import GROUP_ID, THREAD_ID_LEADS
 
 router = Router()
 
 # === FSM STATES ===
 class QuizStates(StatesGroup):
-    greeting = State()           # Приветствие
+    greeting = State()           # Приветствие + согласие
+    contact = State()            # Запрос контакта
     city = State()              # Город
     object_type = State()        # Тип объекта
     floors = State()             # Этажность
     area = State()               # Площадь
     status = State()            # Статус перепланировки
-    description = State()       # Описание
+    description = State()        # Описание
     plan = State()              # План помещения
-    finish = State()            # Завершение
 
 # === KEYBOARDS ===
 def get_contact_keyboard():
-    """Кнопка отправки контакта"""
+    """Кнопка отправки контакта (request_contact=True)"""
     return ReplyKeyboardMarkup(
         keyboard=[[KeyboardButton(text="📱 Отправить контакт и согласиться", request_contact=True)]],
         resize_keyboard=True
@@ -59,21 +57,7 @@ def get_status_keyboard():
 # === START QUIZ ===
 @router.message(F.text.startswith("/start"))
 async def start_quiz(message: Message, state: FSMContext):
-    """Начало квиза - обработка /start и deep link"""
-    user_name = message.from_user.full_name or message.from_user.first_name
-    text = message.text
-    
-    # Deep link из поста (/start?mode=quiz)
-    if "?mode=quiz" in text or "quiz" in text.lower():
-        await message.answer(
-            "📝 <b>Запись на консультацию</b>\n\n"
-            "🏙️ <b>1. В каком городе находится объект?</b>",
-            parse_mode="HTML"
-        )
-        await state.set_state(QuizStates.city)
-        return
-    
-    # Стандартное приветствие
+    """Начало квиза - приветствие + согласие"""
     await message.answer(
         "🏢 <b>Вас приветствует компания ТЕРИОН!</b>\n\n"
         "Я — Антон, ваш ИИ-помощник по перепланировкам.\n\n"
@@ -86,17 +70,10 @@ async def start_quiz(message: Message, state: FSMContext):
     )
     await state.set_state(QuizStates.greeting)
 
-@router.message(F.text == "📱 Отправить контакт и согласиться")
-@router.message(F.text == "📝 Записаться на консультацию")
-@router.message(F.text == "📋 Записаться")
-async def start_quiz_button(message: Message, state: FSMContext):
-    """Кнопка записи на консультацию из постов"""
-    await start_quiz(message, state)
-
-# === GREETING (Contact received) ===
+# === GREETING -> CONTACT ===
 @router.message(QuizStates.greeting, F.contact)
 async def process_contact(message: Message, state: FSMContext):
-    """Обработка контакта"""
+    """Обработка контакта - сразу переходим к вопросам"""
     user_name = message.from_user.full_name or message.from_user.first_name
     phone = message.contact.phone_number
     
@@ -109,7 +86,6 @@ async def process_contact(message: Message, state: FSMContext):
     
     await message.answer(
         f"✅ <b>{user_name}</b>, спасибо!\n\n"
-        "Теперь ответьте на несколько вопросов для расчёта:\n\n"
         "🏙️ <b>1. В каком городе находится объект?</b>",
         parse_mode="HTML"
     )
@@ -141,7 +117,6 @@ async def process_object_type(message: Message, state: FSMContext):
         f"🏢 <b>Тип объекта: {object_type}</b>\n\n"
         "🔢 <b>3. Какая этажность дома?</b>\n\n"
         "(Напишите цифру, например: 9 или 5)",
-        reply_markup=ReplyKeyboardMarkup(keyboard=[[KeyboardButton(text="⏮️ Назад")]], resize_keyboard=True),
         parse_mode="HTML"
     )
     await state.set_state(QuizStates.floors)
@@ -150,11 +125,6 @@ async def process_object_type(message: Message, state: FSMContext):
 @router.message(QuizStates.floors)
 async def process_floors(message: Message, state: FSMContext):
     """Этажность"""
-    if message.text == "⏮️ Назад":
-        await message.answer("🏠 Какой тип объекта?", reply_markup=get_object_type_keyboard())
-        await state.set_state(QuizStates.object_type)
-        return
-    
     floors = message.text.strip()
     await state.update_data(floors=floors)
     
@@ -162,7 +132,6 @@ async def process_floors(message: Message, state: FSMContext):
         f"🏢 <b>Этажность: {floors} этажей</b>\n\n"
         "📐 <b>4. Какая площадь объекта?</b>\n\n"
         "(Напишите число в кв.м., например: 45 или 120)",
-        reply_markup=ReplyKeyboardMarkup(keyboard=[[KeyboardButton(text="⏮️ Назад")]], resize_keyboard=True),
         parse_mode="HTML"
     )
     await state.set_state(QuizStates.area)
@@ -171,11 +140,6 @@ async def process_floors(message: Message, state: FSMContext):
 @router.message(QuizStates.area)
 async def process_area(message: Message, state: FSMContext):
     """Площадь"""
-    if message.text == "⏮️ Назад":
-        await message.answer("🔢 Этажность дома?", reply_markup=ReplyKeyboardMarkup(keyboard=[[KeyboardButton(text="⏮️ Назад")]], resize_keyboard=True))
-        await state.set_state(QuizStates.floors)
-        return
-    
     area = message.text.strip().replace(",", ".").split()[0]
     await state.update_data(area=area)
     
@@ -198,7 +162,6 @@ async def process_status(message: Message, state: FSMContext):
         f"📋 <b>Статус: {status}</b>\n\n"
         "📝 <b>6. Опишите планируемые/выполненные изменения:</b>\n\n"
         "(Например: объединение кухни и гостиной, снос перегородки)",
-        reply_markup=ReplyKeyboardMarkup(keyboard=[[KeyboardButton(text="⏮️ Назад")]], resize_keyboard=True),
         parse_mode="HTML"
     )
     await state.set_state(QuizStates.description)
@@ -207,11 +170,6 @@ async def process_status(message: Message, state: FSMContext):
 @router.message(QuizStates.description)
 async def process_description(message: Message, state: FSMContext):
     """Описание изменений"""
-    if message.text == "⏮️ Назад":
-        await message.answer("📋 Статус перепланировки?", reply_markup=get_status_keyboard())
-        await state.set_state(QuizStates.status)
-        return
-    
     description = message.text.strip()
     await state.update_data(description=description)
     
@@ -220,7 +178,6 @@ async def process_description(message: Message, state: FSMContext):
         "🏗️ <b>7. План помещения:</b>\n\n"
         "📸 <b>Загрузите фото плана</b> (схема/чертеж) "
         "или напишите «Нет плана»",
-        reply_markup=ReplyKeyboardMarkup(keyboard=[[KeyboardButton(text="❌ Нет плана")]], resize_keyboard=True),
         parse_mode="HTML"
     )
     await state.set_state(QuizStates.plan)
@@ -229,14 +186,14 @@ async def process_description(message: Message, state: FSMContext):
 @router.message(QuizStates.plan)
 async def process_plan(message: Message, state: FSMContext):
     """План помещения"""
-    if message.text == "❌ Нет плана":
+    if message.text and message.text.lower() in ["нет плана", "❌ нет плана"]:
         plan = "Нет плана"
         has_plan_photo = False
     elif message.photo:
         plan = message.photo[-1].file_id
         has_plan_photo = True
     else:
-        plan = message.text.strip()
+        plan = message.text.strip() if message.text else "Нет плана"
         has_plan_photo = False
     
     await state.update_data(plan=plan, has_plan_photo=has_plan_photo)
@@ -299,25 +256,3 @@ async def finish_quiz(message: Message, state: FSMContext):
     )
     
     await state.clear()
-
-# === BACK HANDLER ===
-@router.message(F.text == "⏮️ Назад")
-async def go_back(message: Message, state: FSMContext):
-    """Назад в меню"""
-    current_state = await state.get_state()
-    
-    back_map = {
-        QuizStates.city: None,
-        QuizStates.object_type: QuizStates.city,
-        QuizStates.floors: QuizStates.object_type,
-        QuizStates.area: QuizStates.floors,
-        QuizStates.status: QuizStates.area,
-        QuizStates.description: QuizStates.status,
-        QuizStates.plan: QuizStates.description,
-    }
-    
-    prev_state = back_map.get(current_state)
-    if prev_state:
-        await state.set_state(prev_state)
-    else:
-        await start_quiz(message, state)
