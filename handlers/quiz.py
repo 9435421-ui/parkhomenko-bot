@@ -1,205 +1,309 @@
+"""
+Квиз для сбора заявок на перепланировку (FSM).
+7 этапов: Город → Тип объекта → Этажность → Площадь → Статус → Описание → План
+"""
+import asyncio
 from aiogram import Router, F
-from aiogram.types import Message, ContentType, ReplyKeyboardMarkup, KeyboardButton
-from aiogram.fsm.state import StatesGroup, State
+from aiogram.types import Message, ReplyKeyboardMarkup, KeyboardButton, ContentType
+from aiogram.fsm.state import State, StatesGroup
 from aiogram.fsm.context import FSMContext
-from config import LEADS_GROUP_CHAT_ID, QUIZ_THREAD_ID
-from keyboards.main_menu import get_remodeling_status_keyboard
+
+from database import db
+from utils.router_ai import router_ai
+from config import GROUP_ID, THREAD_ID_LEADS
 
 router = Router()
 
+# === FSM STATES ===
+class QuizStates(StatesGroup):
+    greeting = State()           # Приветствие
+    city = State()              # Город
+    object_type = State()        # Тип объекта
+    floors = State()            # Этажность
+    area = State()              # Площадь
+    status = State()            # Статус перепланировки
+    description = State()       # Описание
+    plan = State()             # План помещения
+    finish = State()           # Завершение
 
-class QuizOrder(StatesGroup):
-    """7-этапный квиз для сбора заявок"""
-    city = State()        # 1. Город (текст)
-    obj_type = State()    # 2. Тип объекта (кнопки)
-    floor = State()       # 3. Этажность (текст - цифра)
-    area = State()        # 4. Площадь (текст)
-    status = State()      # 5. Статус перепланировки (кнопки)
-    description = State() # 6. Описание изменений (текст)
-    plan = State()        # 7. План помещения (фото/PDF или "Нет плана")
+# === KEYBOARDS ===
+def get_contact_keyboard():
+    """Кнопка отправки контакта"""
+    return ReplyKeyboardMarkup(
+        keyboard=[[KeyboardButton(text="📱 Отправить контакт и согласиться", request_contact=True)]],
+        resize_keyboard=True
+    )
 
-
-def get_object_type_keyboard() -> ReplyKeyboardMarkup:
-    """Клавиатура выбора типа объекта"""
+def get_object_type_keyboard():
+    """Тип объекта"""
     return ReplyKeyboardMarkup(
         keyboard=[
             [KeyboardButton(text="🏠 Квартира")],
             [KeyboardButton(text="🏢 Коммерция")],
-            [KeyboardButton(text="🏡 Дом")]
+            [KeyboardButton(text="🏡 Дом")],
         ],
         resize_keyboard=True
     )
 
-
-@router.message(QuizOrder.city)
-async def ask_city(message: Message, state: FSMContext):
-    """1. Сохраняем город и переходим к типу объекта"""
-    await state.update_data(city=message.text)
-    await state.set_state(QuizOrder.obj_type)
-    await message.answer(
-        "Какой тип объекта?",
-        reply_markup=get_object_type_keyboard()
+def get_status_keyboard():
+    """Статус перепланировки"""
+    return ReplyKeyboardMarkup(
+        keyboard=[
+            [KeyboardButton(text="📋 Планируется")],
+            [KeyboardButton(text="✅ Выполнена")],
+            [KeyboardButton(text="🔄 В процессе")],
+        ],
+        resize_keyboard=True
     )
 
-
-@router.message(QuizOrder.obj_type)
-async def ask_obj_type(message: Message, state: FSMContext):
-    """2. Сохраняем тип объекта и переходим к этажности"""
-    obj_type = message.text
-    # Нормализуем тип объекта
-    if "квартира" in obj_type.lower():
-        obj_type = "Квартира"
-    elif "коммерц" in obj_type.lower():
-        obj_type = "Коммерция"
-    elif "дом" in obj_type.lower():
-        obj_type = "Дом"
+# === START QUIZ ===
+@router.message(F.text == "/start")
+@router.message(F.text == "📱 Отправить контакт и согласиться")
+async def start_quiz(message: Message, state: FSMContext):
+    """Начало квиза"""
+    user_name = message.from_user.full_name or message.from_user.first_name
     
-    await state.update_data(obj_type=obj_type)
-    await state.set_state(QuizOrder.floor)
     await message.answer(
-        "Какая этажность дома? (просто напишите цифру, например: 9, 16, 25)",
-        reply_markup=ReplyKeyboardMarkup(keyboard=[[KeyboardButton(text="⬅️ Назад")]], resize_keyboard=True)
+        "🏢 <b>Вас приветствует компания ТЕРИОН!</b>\n\n"
+        "Я — Антон, ваш ИИ-помощник по перепланировкам.\n\n"
+        "Нажимая кнопку ниже, вы даете согласие на обработку "
+        "персональных данных, получение уведомлений и информационную переписку.\n\n"
+        "📞 Все консультации носят информационный характер, "
+        "финальное решение подтверждает эксперт ТЕРИОН.",
+        reply_markup=get_contact_keyboard(),
+        parse_mode="HTML"
     )
+    await state.set_state(QuizStates.greeting)
 
+# === GREETING (Contact received) ===
+@router.message(QuizStates.greeting, F.contact)
+async def process_contact(message: Message, state: FSMContext):
+    """Обработка контакта"""
+    user_name = message.from_user.full_name or message.from_user.first_name
+    phone = message.contact.phone_number
+    
+    # Сохраняем контакт
+    await db.add_lead(
+        user_id=message.from_user.id,
+        name=user_name,
+        phone=phone
+    )
+    
+    await message.answer(
+        f"✅ <b>{user_name}</b>, спасибо!\n\n"
+        "Теперь ответьте на несколько вопросов для расчёта:\n\n"
+        "🏙️ <b>1. В каком городе находится объект?</b>",
+        reply_markup=get_contact_keyboard(),  # Убираем кнопку контакта
+        parse_mode="HTML"
+    )
+    await state.set_state(QuizStates.city)
 
-@router.message(QuizOrder.floor)
-async def ask_floor(message: Message, state: FSMContext):
-    """3. Сохраняем этажность и переходим к площади"""
-    if message.text == "⬅️ Назад":
-        await state.set_state(QuizOrder.obj_type)
-        await message.answer(
-            "Какой тип объекта?",
-            reply_markup=get_object_type_keyboard()
-        )
+# === CITY ===
+@router.message(QuizStates.city)
+async def process_city(message: Message, state: FSMContext):
+    """Город"""
+    city = message.text.strip()
+    await state.update_data(city=city)
+    
+    await message.answer(
+        f"📍 <b>Город: {city}</b>\n\n"
+        "🏠 <b>2. Какой тип объекта?</b>",
+        reply_markup=get_object_type_keyboard(),
+        parse_mode="HTML"
+    )
+    await state.set_state(QuizStates.object_type)
+
+# === OBJECT TYPE ===
+@router.message(QuizStates.object_type, F.text.in_(["🏠 Квартира", "🏢 Коммерция", "🏡 Дом"]))
+async def process_object_type(message: Message, state: FSMContext):
+    """Тип объекта"""
+    object_type = message.text.split()[1]  # Квартира/Коммерция/Дом
+    await state.update_data(object_type=object_type)
+    
+    await message.answer(
+        f"🏢 <b>Тип объекта: {object_type}</b>\n\n"
+        "🔢 <b>3. Какая этажность дома?</b>\n\n"
+        "(Напишите цифру, например: 9 или 5)",
+        reply_markup=ReplyKeyboardMarkup(keyboard=[[KeyboardButton(text="⏮️ Назад")]], resize_keyboard=True),
+        parse_mode="HTML"
+    )
+    await state.set_state(QuizStates.floors)
+
+# === FLOORS ===
+@router.message(QuizStates.floors)
+async def process_floors(message: Message, state: FSMContext):
+    """Этажность"""
+    if message.text == "⏮️ Назад":
+        await message.answer("🏠 Какой тип объекта?", reply_markup=get_object_type_keyboard())
+        await state.set_state(QuizStates.object_type)
         return
     
-    await state.update_data(floor=message.text)
-    await state.set_state(QuizOrder.area)
+    floors = message.text.strip()
+    await state.update_data(floors=floors)
+    
     await message.answer(
-        "Какая площадь объекта в кв.м.? (просто напишите число)",
-        reply_markup=ReplyKeyboardMarkup(keyboard=[[KeyboardButton(text="⬅️ Назад")]], resize_keyboard=True)
+        f"🏢 <b>Этажность: {floors} этажей</b>\n\n"
+        "📐 <b>4. Какая площадь объекта?</b>\n\n"
+        "(Напишите число в кв.м., например: 45 или 120)",
+        reply_markup=ReplyKeyboardMarkup(keyboard=[[KeyboardButton(text="⏮️ Назад")]], resize_keyboard=True),
+        parse_mode="HTML"
     )
+    await state.set_state(QuizStates.area)
 
-
-@router.message(QuizOrder.area)
-async def ask_area(message: Message, state: FSMContext):
-    """4. Сохраняем площадь и переходим к статусу перепланировки"""
-    if message.text == "⬅️ Назад":
-        await state.set_state(QuizOrder.floor)
-        await message.answer(
-            "Какая этажность дома? (просто напишите цифру)",
-            reply_markup=ReplyKeyboardMarkup(keyboard=[[KeyboardButton(text="⬅️ Назад")]], resize_keyboard=True)
-        )
+# === AREA ===
+@router.message(QuizStates.area)
+async def process_area(message: Message, state: FSMContext):
+    """Площадь"""
+    if message.text == "⏮️ Назад":
+        await message.answer("🔢 Этажность дома?", reply_markup=ReplyKeyboardMarkup(keyboard=[[KeyboardButton(text="⏮️ Назад")]], resize_keyboard=True))
+        await state.set_state(QuizStates.floors)
         return
     
-    await state.update_data(area=message.text)
-    await state.set_state(QuizOrder.status)
-    await message.answer(
-        "Какой статус перепланировки?",
-        reply_markup=get_remodeling_status_keyboard()
-    )
-
-
-@router.message(QuizOrder.status)
-async def ask_status(message: Message, state: FSMContext):
-    """5. Сохраняем статус и переходим к описанию"""
-    status = message.text
-    # Нормализуем статус
-    if "выполнена" in status.lower():
-        status = "Выполнена"
-    elif "планируется" in status.lower():
-        status = "Планируется"
-    elif "процесс" in status.lower():
-        status = "В процессе"
+    area = message.text.strip().replace(",", ".").split()[0]
+    await state.update_data(area=area)
     
+    await message.answer(
+        f"📐 <b>Площадь: {area} кв.м.</b>\n\n"
+        "📋 <b>5. Какой статус перепланировки?</b>",
+        reply_markup=get_status_keyboard(),
+        parse_mode="HTML"
+    )
+    await state.set_state(QuizStates.status)
+
+# === STATUS ===
+@router.message(QuizStates.status, F.text.in_(["📋 Планируется", "✅ Выполнена", "🔄 В процессе"]))
+async def process_status(message: Message, state: FSMContext):
+    """Статус перепланировки"""
+    status = message.text.split()[1]  # Планируется/Выполнена/В процессе
     await state.update_data(status=status)
-    await state.set_state(QuizOrder.description)
+    
     await message.answer(
-        "Опишите, какие изменения вы хотите внести или уже внесли в планировку?",
-        reply_markup=ReplyKeyboardMarkup(keyboard=[[KeyboardButton(text="⬅️ Назад")]], resize_keyboard=True)
+        f"📋 <b>Статус: {status}</b>\n\n"
+        "📝 <b>6. Опишите планируемые/выполненные изменения:</b>\n\n"
+        "(Например: объединение кухни и гостиной, снос перегородки)",
+        reply_markup=ReplyKeyboardMarkup(keyboard=[[KeyboardButton(text="⏮️ Назад")]], resize_keyboard=True),
+        parse_mode="HTML"
     )
+    await state.set_state(QuizStates.description)
 
-
-@router.message(QuizOrder.description)
-async def ask_description(message: Message, state: FSMContext):
-    """6. Сохраняем описание и переходим к плану помещения"""
-    if message.text == "⬅️ Назад":
-        await state.set_state(QuizOrder.status)
-        await message.answer(
-            "Какой статус перепланировки?",
-            reply_markup=get_remodeling_status_keyboard()
-        )
+# === DESCRIPTION ===
+@router.message(QuizStates.description)
+async def process_description(message: Message, state: FSMContext):
+    """Описание изменений"""
+    if message.text == "⏮️ Назад":
+        await message.answer("📋 Статус перепланировки?", reply_markup=get_status_keyboard())
+        await state.set_state(QuizStates.status)
         return
     
-    await state.update_data(description=message.text)
-    await state.set_state(QuizOrder.plan)
+    description = message.text.strip()
+    await state.update_data(description=description)
+    
     await message.answer(
-        "Прикрепите план помещения (фото или PDF) или напишите «Нет плана», если его нет."
+        f"📝 <b>Описание изменений сохранено</b>\n\n"
+        "🏗️ <b>7. План помещения:</b>\n\n"
+        "📸 <b>Загрузите фото плана</b> (схема/чертеж) "
+        "или напишите «Нет плана»",
+        reply_markup=ReplyKeyboardMarkup(keyboard=[[KeyboardButton(text="❌ Нет плана")]], resize_keyboard=True),
+        parse_mode="HTML"
     )
+    await state.set_state(QuizStates.plan)
 
-
-@router.message(QuizOrder.plan)
-async def ask_plan(message: Message, state: FSMContext):
-    """7. Финальный этап - обрабатываем план и завершаем квиз"""
-    data = await state.get_data()
-    user_name = data.get('user_name', 'Клиент')
-    phone = data.get('phone', 'Не указан')
-    
-    # Сохраняем информацию о плане
-    plan_info = "План загружен"
-    if message.text and message.text.lower() == "нет плана":
-        plan_info = "Нет плана"
-    elif message.document:
-        plan_info = f"Документ: {message.document.file_name}"
+# === PLAN ===
+@router.message(QuizStates.plan)
+async def process_plan(message: Message, state: FSMContext):
+    """План помещения"""
+    if message.text == "❌ Нет плана":
+        plan = "Нет плана"
+        has_plan_photo = False
     elif message.photo:
-        plan_info = "Фото загружено"
-    elif message.text:
-        plan_info = message.text
+        plan = message.photo[-1].file_id
+        has_plan_photo = True
+    else:
+        plan = message.text.strip()
+        has_plan_photo = False
     
-    await state.update_data(plan=plan_info)
+    await state.update_data(plan=plan, has_plan_photo=has_plan_photo)
     
-    # Формируем сводку для рабочей группы
-    summary = (
-        f"🔥 Новая заявка от {user_name} ({phone})!\n\n"
-        f"📍 Город: {data.get('city')}\n"
-        f"🏠 Тип объекта: {data.get('obj_type')}\n"
-        f"📏 Площадь: {data.get('area')} кв.м.\n"
-        f"🪜 Этажность: {data.get('floor')}\n"
-        f"📅 Статус: {data.get('status')}\n"
-        f"📝 Описание: {data.get('description')}\n"
-        f"📄 План: {plan_info}"
+    # Завершение - отправляем в группу
+    await finish_quiz(message, state)
+
+async def finish_quiz(message: Message, state: FSMContext):
+    """Завершение квиза"""
+    data = await state.get_data()
+    user_name = message.from_user.full_name or message.from_user.first_name
+    
+    # Формируем сообщение в группу
+    lead_text = (
+        f"🔥 <b>Новая заявка!</b>\n\n"
+        f"👤 <b>Клиент:</b> {user_name}\n"
+        f"📍 <b>Город:</b> {data.get('city', 'Не указан')}\n"
+        f"🏠 <b>Тип объекта:</b> {data.get('object_type', 'Не указан')}\n"
+        f"🔢 <b>Этажность:</b> {data.get('floors', 'Не указана')}\n"
+        f"📐 <b>Площадь:</b> {data.get('area', 'Не указана')} кв.м.\n"
+        f"📋 <b>Статус:</b> {data.get('status', 'Не указан')}\n\n"
+        f"📝 <b>Описание:</b>\n{data.get('description', 'Нет описания')}\n\n"
+        f"🏗️ <b>План:</b> {'Есть фото' if data.get('has_plan_photo') else data.get('plan', 'Нет')}"
     )
     
-    # Отправляем в рабочую группу с thread_id
+    # Отправляем в группу
     try:
-        await message.bot.send_message(
-            chat_id=LEADS_GROUP_CHAT_ID,
-            message_thread_id=int(QUIZ_THREAD_ID),
-            text=summary
-        )
+        # Импорт здесь чтобы избежать цикличности
+        from main import bot
+        if data.get('has_plan_photo') and data.get('plan'):
+            await bot.send_photo(
+                chat_id=GROUP_ID,
+                message_thread_id=THREAD_ID_LEADS,
+                photo=data['plan'],
+                caption=lead_text,
+                parse_mode="HTML"
+            )
+        else:
+            await bot.send_message(
+                chat_id=GROUP_ID,
+                message_thread_id=THREAD_ID_LEADS,
+                text=lead_text,
+                parse_mode="HTML"
+            )
     except Exception as e:
-        # Если thread_id не работает, отправляем без него
-        await message.bot.send_message(
-            chat_id=LEADS_GROUP_CHAT_ID,
-            text=summary
-        )
+        print(f"Ошибка отправки в группу: {e}")
     
-    # Финальный текст пользователю
-    FINAL_TEXT = (
-        f"{user_name}, спасибо! Я отправил эксперту компании ТЕРИОН полученную от вас информацию.\n"
-        "Мы свяжемся с вами в рабочее время с 9:00 до 20:00 по МСК.\n\n"
-        "Если у вас остались вопросы или вы хотите отправить дополнительные документы, "
-        "вы можете оставить информацию в чате — я всё передам специалисту."
+    # Ответ пользователю
+    await message.answer(
+        f"✅ <b>{user_name}</b>, спасибо!\n\n"
+        f"📤 Я отправил эксперту компании ТЕРИОН полученную от вас информацию.\n\n"
+        f"⏰ Мы свяжемся с вами в рабочее время с 9:00 до 20:00 по МСК.\n\n"
+        f"❓ Если у вас остались вопросы или вы хотите отправить дополнительные документы, "
+        f"вы можете оставить информацию в чате — я всё передам специалисту.",
+        parse_mode="HTML"
     )
     
-    await message.answer(FINAL_TEXT)
+    # Сохраняем в БД
+    await db.update_lead_status(
+        user_id=message.from_user.id,
+        status="quiz_completed",
+        data=data
+    )
+    
     await state.clear()
 
-
-@router.message(F.photo | F.document)
-async def handle_media(message: Message, state: FSMContext):
-    """Обработка фото/файлов в последнем вопросе"""
-    if await state.get_state() == QuizOrder.plan:
-        await ask_plan(message, state)
+# === BACK HANDLER ===
+@router.message(F.text == "⏮️ Назад")
+async def go_back(message: Message, state: FSMContext):
+    """Назад в меню"""
+    current_state = await state.get_state()
+    
+    back_map = {
+        QuizStates.city: None,
+        QuizStates.object_type: QuizStates.city,
+        QuizStates.floors: QuizStates.object_type,
+        QuizStates.area: QuizStates.floors,
+        QuizStates.status: QuizStates.area,
+        QuizStates.description: QuizStates.status,
+        QuizStates.plan: QuizStates.description,
+    }
+    
+    prev_state = back_map.get(current_state)
+    if prev_state:
+        await state.set_state(prev_state)
     else:
-        await message.answer("Пожалуйста, ответьте на текущий вопрос.")
+        await start_quiz(message, state)
