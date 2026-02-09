@@ -8,7 +8,7 @@ from aiogram.fsm.state import State, StatesGroup
 from aiogram.fsm.context import FSMContext
 
 from database import db
-from config import GROUP_ID, THREAD_ID_LEADS
+from config import GROUP_ID, THREAD_ID_LEADS, THREAD_ID_KVARTIRY, THREAD_ID_KOMMERCIA, THREAD_ID_DOMA
 
 router = Router()
 
@@ -65,6 +65,19 @@ def get_status_keyboard():
     )
 
 
+# === THREAD ID ПО ТИПУ ОБЪЕКТА ===
+def get_thread_id(object_type: str) -> int:
+    """Возвращает thread_id в зависимости от типа объекта"""
+    if "квартира" in object_type.lower():
+        return THREAD_ID_KVARTIRY
+    elif "коммерц" in object_type.lower():
+        return THREAD_ID_KOMMERCIA
+    elif "дом" in object_type.lower():
+        return THREAD_ID_DOMA
+    else:
+        return THREAD_ID_LEADS
+
+
 # === START QUIZ ===
 @router.message(F.text.startswith("/start"))
 async def start_quiz(message: Message, state: FSMContext):
@@ -93,6 +106,18 @@ async def process_consent(message: Message, state: FSMContext):
         parse_mode="HTML"
     )
     await state.set_state(QuizStates.contact)
+
+
+# === CONSENT - FALLBACK (фото, текст) ===
+@router.message(QuizStates.consent)
+async def process_consent_fallback(message: Message, state: FSMContext):
+    """Fallback - если отправили не кнопку согласия"""
+    await message.answer(
+        "📱 <b>Пожалуйста, нажмите кнопку ниже</b>\n\n"
+        "«✅ Согласен и хочу продолжить»",
+        reply_markup=get_consent_keyboard(),
+        parse_mode="HTML"
+    )
 
 
 # === CONTACT ===
@@ -124,6 +149,18 @@ async def process_contact(message: Message, state: FSMContext, bot: Bot):
     await state.set_state(QuizStates.city)
 
 
+# === CONTACT - FALLBACK ===
+@router.message(QuizStates.contact)
+async def process_contact_fallback(message: Message, state: FSMContext):
+    """Fallback - если отправили не контакт"""
+    await message.answer(
+        "📱 <b>Пожалуйста, нажмите кнопку</b>\n\n"
+        "«📱 Отправить контакт и согласиться»",
+        reply_markup=get_contact_keyboard(),
+        parse_mode="HTML"
+    )
+
+
 # === CITY ===
 @router.message(QuizStates.city)
 async def process_city(message: Message, state: FSMContext):
@@ -144,7 +181,7 @@ async def process_city(message: Message, state: FSMContext):
 @router.message(QuizStates.object_type, F.text.in_(["🏠 Квартира", "🏢 Коммерция", "🏡 Дом"]))
 async def process_object_type(message: Message, state: FSMContext):
     """Тип объекта"""
-    object_type = message.text.split()[1]
+    object_type = message.text  # Полное название: "🏠 Квартира"
     await state.update_data(object_type=object_type)
     
     await message.answer(
@@ -226,23 +263,33 @@ async def process_description(message: Message, state: FSMContext):
 async def process_plan(message: Message, state: FSMContext, bot: Bot):
     """План помещения"""
     user_name = message.from_user.full_name or message.from_user.first_name or "Клиент"
-    data = await state.get_data()
     
     # Определяем что прислал пользователь
-    if message.text and message.text.lower() in ["нет плана", "❌ нет плана", "нет"]:
-        plan_text = "Нет плана"
-        photo_id = None
-    elif message.photo:
+    if message.photo:
+        # Фото плана
         photo_id = message.photo[-1].file_id
-        plan_text = "Есть фото"
-    else:
-        plan_text = message.text.strip() if message.text else "Нет плана"
+        plan_text = "План загружен"
+        has_photo = True
+    elif message.text and message.text.lower() in ["нет плана", "❌ нет плана", "нет"]:
         photo_id = None
-    
-    await state.update_data(plan=plan_text, photo_id=photo_id)
+        plan_text = "Нет плана"
+        has_photo = False
+    elif message.text:
+        # Текстовое описание плана
+        photo_id = None
+        plan_text = message.text.strip()
+        has_photo = False
+    else:
+        photo_id = None
+        plan_text = "Нет плана"
+        has_photo = False
     
     # Получаем все данные
     data = await state.get_data()
+    
+    # Определяем thread_id по типу объекта
+    object_type = data.get('object_type', '')
+    thread_id = get_thread_id(object_type)
     
     # Формируем сообщение в группу
     lead_text = (
@@ -259,10 +306,10 @@ async def process_plan(message: Message, state: FSMContext, bot: Bot):
     
     # Отправляем в группу
     try:
-        if photo_id:
+        if has_photo and photo_id:
             await bot.send_photo(
                 chat_id=GROUP_ID,
-                message_thread_id=THREAD_ID_LEADS,
+                message_thread_id=thread_id,
                 photo=photo_id,
                 caption=lead_text,
                 parse_mode="HTML"
@@ -270,13 +317,22 @@ async def process_plan(message: Message, state: FSMContext, bot: Bot):
         else:
             await bot.send_message(
                 chat_id=GROUP_ID,
-                message_thread_id=THREAD_ID_LEADS,
+                message_thread_id=thread_id,
                 text=lead_text,
                 parse_mode="HTML"
             )
-        print(f"✅ Заявка от {user_name} отправлена в группу")
+        print(f"✅ Заявка от {user_name} отправлена в thread {thread_id}")
     except Exception as e:
         print(f"❌ Ошибка отправки в группу: {e}")
+        # Пробуем без thread
+        try:
+            await bot.send_message(
+                chat_id=GROUP_ID,
+                text=lead_text,
+                parse_mode="HTML"
+            )
+        except:
+            pass
     
     # Ответ пользователю
     await message.answer(
