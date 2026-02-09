@@ -151,7 +151,19 @@ class ViralHooksAgent:
 
 Твой ответ — только хуки, по одному на строке, с эмодзи."""
 
-            # Пробуем Router AI
+            # СНАЧАЛА YandexGPT (в РФ, работает!)
+            try:
+                response = await yandex_gpt.generate_response(
+                    user_prompt=user_prompt,
+                    system_prompt=system_prompt,
+                    max_tokens=1000
+                )
+                if response:
+                    return self._parse_ai_response(response, topic)
+            except Exception as e:
+                logger.warning(f"YandexGPT error: {e}")
+            
+            # Fallback на Router AI
             if self.use_router:
                 try:
                     response = await router_ai.generate_response(
@@ -162,19 +174,7 @@ class ViralHooksAgent:
                     if response:
                         return self._parse_ai_response(response, topic)
                 except Exception as e:
-                    logger.error(f"Router AI error: {e}")
-            
-            # Fallback на YandexGPT
-            try:
-                response = await yandex_gpt.generate_response(
-                    user_prompt=user_prompt,
-                    system_prompt=system_prompt,
-                    max_tokens=1000
-                )
-                if response:
-                    return self._parse_ai_response(response, topic)
-            except Exception as e:
-                logger.error(f"YandexGPT error: {e}")
+                    logger.warning(f"Router AI error: {e}")
                 
         except Exception as e:
             logger.error(f"AI generation error: {e}")
