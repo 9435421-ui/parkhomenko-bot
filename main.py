@@ -15,9 +15,15 @@ from utils import kb, router_ai
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
+# Глобальный экземпляр бота
+bot: Bot = None
+dp: Dispatcher = None
+
 
 async def on_startup():
     """Инициализация при запуске"""
+    global bot, dp
+    
     # Подключаем БД
     await db.connect()
     
@@ -32,6 +38,8 @@ async def on_startup():
 
 async def main():
     """Запуск бота"""
+    global bot, dp
+    
     bot = Bot(
         token=BOT_TOKEN,
         default=DefaultBotProperties(parse_mode="HTML")

@@ -2,7 +2,7 @@
 Квиз для сбора заявок на перепланировку (FSM).
 7 этапов: Контакт → Город → Тип объекта → Этажность → Площадь → Статус → Описание → План
 """
-from aiogram import Router, F
+from aiogram import Router, F, Bot
 from aiogram.types import Message, ReplyKeyboardMarkup, KeyboardButton
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.fsm.context import FSMContext
@@ -14,17 +14,25 @@ router = Router()
 
 # === FSM STATES ===
 class QuizStates(StatesGroup):
-    greeting = State()           # Приветствие + согласие
-    contact = State()            # Запрос контакта
-    city = State()              # Город
-    object_type = State()        # Тип объекта
-    floors = State()             # Этажность
-    area = State()               # Площадь
-    status = State()            # Статус перепланировки
-    description = State()        # Описание
-    plan = State()              # План помещения
+    consent = State()          # Согласие на ПД
+    contact = State()          # Запрос контакта (request_contact=True)
+    city = State()             # Город
+    object_type = State()      # Тип объекта
+    floors = State()           # Этажность
+    area = State()             # Площадь
+    status = State()           # Статус перепланировки
+    description = State()       # Описание
+    plan = State()             # План помещения
 
 # === KEYBOARDS ===
+def get_consent_keyboard():
+    """Согласие на ПД"""
+    return ReplyKeyboardMarkup(
+        keyboard=[[KeyboardButton(text="✅ Согласен и хочу продолжить")]],
+        resize_keyboard=True
+    )
+
+
 def get_contact_keyboard():
     """Кнопка отправки контакта (request_contact=True)"""
     return ReplyKeyboardMarkup(
@@ -68,24 +76,44 @@ async def start_quiz(message: Message, state: FSMContext):
         "персональных данных, получение уведомлений и информационную переписку.\n\n"
         "📞 Все консультации носят информационный характер, "
         "финальное решение подтверждает эксперт ТЕРИОН.",
+        reply_markup=get_consent_keyboard(),
+        parse_mode="HTML"
+    )
+    await state.set_state(QuizStates.consent)
+
+
+# === CONSENT -> CONTACT ===
+@router.message(QuizStates.consent, F.text == "✅ Согласен и хочу продолжить")
+async def process_consent(message: Message, state: FSMContext):
+    """После согласия - запрашиваем контакт"""
+    await message.answer(
+        "📱 <b>Пожалуйста, поделитесь номером телефона</b>\n\n"
+        "Нажмите кнопку ниже для отправки контакта.",
         reply_markup=get_contact_keyboard(),
         parse_mode="HTML"
     )
-    await state.set_state(QuizStates.greeting)
+    await state.set_state(QuizStates.contact)
 
 
-# === GREETING -> CONTACT ===
-@router.message(QuizStates.greeting, F.contact)
-async def process_contact(message: Message, state: FSMContext):
-    """Обработка контакта - сразу переходим к вопросам"""
-    user_name = message.from_user.full_name or message.from_user.first_name
+# === CONTACT ===
+@router.message(QuizStates.contact, F.contact)
+async def process_contact(message: Message, state: FSMContext, bot: Bot):
+    """Обработка контакта - сохраняем и переходим к вопросам"""
+    user_name = message.from_user.full_name or message.from_user.first_name or "Клиент"
     phone = message.contact.phone_number
     
-    # Сохраняем контакт
+    # Сохраняем контакт в БД
     await db.add_lead(
         user_id=message.from_user.id,
         name=user_name,
         phone=phone
+    )
+    
+    await bot.send_message(
+        chat_id=GROUP_ID,
+        message_thread_id=THREAD_ID_LEADS,
+        text=f"📱 <b>Новый контакт!</b>\n👤 {user_name}\n📞 {phone}",
+        parse_mode="HTML"
     )
     
     await message.answer(
@@ -195,28 +223,26 @@ async def process_description(message: Message, state: FSMContext):
 
 # === PLAN ===
 @router.message(QuizStates.plan)
-async def process_plan(message: Message, state: FSMContext):
+async def process_plan(message: Message, state: FSMContext, bot: Bot):
     """План помещения"""
-    if message.text and message.text.lower() in ["нет плана", "❌ нет плана"]:
-        plan = "Нет плана"
-        has_plan_photo = False
-    elif message.photo:
-        plan = message.photo[-1].file_id
-        has_plan_photo = True
-    else:
-        plan = message.text.strip() if message.text else "Нет плана"
-        has_plan_photo = False
-    
-    await state.update_data(plan=plan, has_plan_photo=has_plan_photo)
-    await finish_quiz(message, state)
-
-
-async def finish_quiz(message: Message, state: FSMContext):
-    """Завершение квиза"""
-    from main import bot  # Импорт внутри функции для избежания цикла
-    
+    user_name = message.from_user.full_name or message.from_user.first_name or "Клиент"
     data = await state.get_data()
-    user_name = message.from_user.full_name or message.from_user.first_name
+    
+    # Определяем что прислал пользователь
+    if message.text and message.text.lower() in ["нет плана", "❌ нет плана", "нет"]:
+        plan_text = "Нет плана"
+        photo_id = None
+    elif message.photo:
+        photo_id = message.photo[-1].file_id
+        plan_text = "Есть фото"
+    else:
+        plan_text = message.text.strip() if message.text else "Нет плана"
+        photo_id = None
+    
+    await state.update_data(plan=plan_text, photo_id=photo_id)
+    
+    # Получаем все данные
+    data = await state.get_data()
     
     # Формируем сообщение в группу
     lead_text = (
@@ -228,16 +254,16 @@ async def finish_quiz(message: Message, state: FSMContext):
         f"📐 <b>Площадь:</b> {data.get('area', 'Не указана')} кв.м.\n"
         f"📋 <b>Статус:</b> {data.get('status', 'Не указан')}\n\n"
         f"📝 <b>Описание:</b>\n{data.get('description', 'Нет описания')}\n\n"
-        f"🏗️ <b>План:</b> {'Есть фото' if data.get('has_plan_photo') else data.get('plan', 'Нет')}"
+        f"🏗️ <b>План:</b> {plan_text}"
     )
     
     # Отправляем в группу
     try:
-        if data.get('has_plan_photo') and data.get('plan'):
+        if photo_id:
             await bot.send_photo(
                 chat_id=GROUP_ID,
                 message_thread_id=THREAD_ID_LEADS,
-                photo=data['plan'],
+                photo=photo_id,
                 caption=lead_text,
                 parse_mode="HTML"
             )
@@ -248,8 +274,9 @@ async def finish_quiz(message: Message, state: FSMContext):
                 text=lead_text,
                 parse_mode="HTML"
             )
+        print(f"✅ Заявка от {user_name} отправлена в группу")
     except Exception as e:
-        print(f"Ошибка отправки в группу: {e}")
+        print(f"❌ Ошибка отправки в группу: {e}")
     
     # Ответ пользователю
     await message.answer(
