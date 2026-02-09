@@ -19,12 +19,12 @@ class QuizStates(StatesGroup):
     greeting = State()           # Приветствие
     city = State()              # Город
     object_type = State()        # Тип объекта
-    floors = State()            # Этажность
-    area = State()              # Площадь
+    floors = State()             # Этажность
+    area = State()               # Площадь
     status = State()            # Статус перепланировки
     description = State()       # Описание
-    plan = State()             # План помещения
-    finish = State()           # Завершение
+    plan = State()              # План помещения
+    finish = State()            # Завершение
 
 # === KEYBOARDS ===
 def get_contact_keyboard():
@@ -57,12 +57,23 @@ def get_status_keyboard():
     )
 
 # === START QUIZ ===
-@router.message(F.text == "/start")
-@router.message(F.text == "📱 Отправить контакт и согласиться")
+@router.message(F.text.startswith("/start"))
 async def start_quiz(message: Message, state: FSMContext):
-    """Начало квиза"""
+    """Начало квиза - обработка /start и deep link"""
     user_name = message.from_user.full_name or message.from_user.first_name
+    text = message.text
     
+    # Deep link из поста (/start?mode=quiz)
+    if "?mode=quiz" in text or "quiz" in text.lower():
+        await message.answer(
+            "📝 <b>Запись на консультацию</b>\n\n"
+            "🏙️ <b>1. В каком городе находится объект?</b>",
+            parse_mode="HTML"
+        )
+        await state.set_state(QuizStates.city)
+        return
+    
+    # Стандартное приветствие
     await message.answer(
         "🏢 <b>Вас приветствует компания ТЕРИОН!</b>\n\n"
         "Я — Антон, ваш ИИ-помощник по перепланировкам.\n\n"
@@ -74,6 +85,13 @@ async def start_quiz(message: Message, state: FSMContext):
         parse_mode="HTML"
     )
     await state.set_state(QuizStates.greeting)
+
+@router.message(F.text == "📱 Отправить контакт и согласиться")
+@router.message(F.text == "📝 Записаться на консультацию")
+@router.message(F.text == "📋 Записаться")
+async def start_quiz_button(message: Message, state: FSMContext):
+    """Кнопка записи на консультацию из постов"""
+    await start_quiz(message, state)
 
 # === GREETING (Contact received) ===
 @router.message(QuizStates.greeting, F.contact)
@@ -93,7 +111,6 @@ async def process_contact(message: Message, state: FSMContext):
         f"✅ <b>{user_name}</b>, спасибо!\n\n"
         "Теперь ответьте на несколько вопросов для расчёта:\n\n"
         "🏙️ <b>1. В каком городе находится объект?</b>",
-        reply_markup=get_contact_keyboard(),  # Убираем кнопку контакта
         parse_mode="HTML"
     )
     await state.set_state(QuizStates.city)
@@ -117,7 +134,7 @@ async def process_city(message: Message, state: FSMContext):
 @router.message(QuizStates.object_type, F.text.in_(["🏠 Квартира", "🏢 Коммерция", "🏡 Дом"]))
 async def process_object_type(message: Message, state: FSMContext):
     """Тип объекта"""
-    object_type = message.text.split()[1]  # Квартира/Коммерция/Дом
+    object_type = message.text.split()[1]
     await state.update_data(object_type=object_type)
     
     await message.answer(
@@ -174,7 +191,7 @@ async def process_area(message: Message, state: FSMContext):
 @router.message(QuizStates.status, F.text.in_(["📋 Планируется", "✅ Выполнена", "🔄 В процессе"]))
 async def process_status(message: Message, state: FSMContext):
     """Статус перепланировки"""
-    status = message.text.split()[1]  # Планируется/Выполнена/В процессе
+    status = message.text.split()[1]
     await state.update_data(status=status)
     
     await message.answer(
@@ -223,8 +240,6 @@ async def process_plan(message: Message, state: FSMContext):
         has_plan_photo = False
     
     await state.update_data(plan=plan, has_plan_photo=has_plan_photo)
-    
-    # Завершение - отправляем в группу
     await finish_quiz(message, state)
 
 async def finish_quiz(message: Message, state: FSMContext):
@@ -247,7 +262,6 @@ async def finish_quiz(message: Message, state: FSMContext):
     
     # Отправляем в группу
     try:
-        # Импорт здесь чтобы избежать цикличности
         from main import bot
         if data.get('has_plan_photo') and data.get('plan'):
             await bot.send_photo(
