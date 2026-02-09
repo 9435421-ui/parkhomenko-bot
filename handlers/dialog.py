@@ -4,6 +4,7 @@ Router AI (Kimi/Qwen) для ответов, YandexGPT как fallback
 """
 from aiogram import Router, F
 from aiogram.types import Message, CallbackQuery
+from aiogram.fsm.context import FSMContext
 from database import db
 from utils import router_ai, yandex_gpt, kb
 
@@ -33,17 +34,28 @@ async def start_dialog(callback: CallbackQuery):
 
 
 @router.message(F.text)
-async def dialog_message_handler(message: Message):
+async def dialog_message_handler(message: Message, state: FSMContext):
     """Обработка сообщений в диалоговом режиме"""
     user_id = message.from_user.id
-    state = await db.get_user_state(user_id)
+    
+    # DEBUG: проверяем текущее состояние FSM
+    current_state = await state.get_state()
+    print(f"DEBUG: User {user_id}, current state: {current_state}")
+    
+    # Если пользователь в квизе — НЕ отвечаем!
+    if current_state is not None:
+        print(f"DEBUG: User {user_id} in quiz state, ignoring dialog")
+        return
+    
+    user_state = await db.get_user_state(user_id)
     
     # Проверяем, что пользователь в режиме диалога
-    if not state or state.get('mode') != 'dialog':
+    if not user_state or user_state.get('mode') != 'dialog':
+        print(f"DEBUG: User {user_id} not in dialog mode, ignoring")
         return
     
     user_query = message.text.strip()
-    name = state.get('name', '')
+    name = user_state.get('name', '')
     
     # Сохраняем сообщение пользователя в историю
     await db.add_dialog_message(user_id, role="user", message=user_query)
