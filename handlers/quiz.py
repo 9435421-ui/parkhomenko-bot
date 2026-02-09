@@ -32,6 +32,7 @@ def get_contact_keyboard():
         resize_keyboard=True
     )
 
+
 def get_object_type_keyboard():
     """Тип объекта"""
     return ReplyKeyboardMarkup(
@@ -43,6 +44,7 @@ def get_object_type_keyboard():
         resize_keyboard=True
     )
 
+
 def get_status_keyboard():
     """Статус перепланировки"""
     return ReplyKeyboardMarkup(
@@ -53,6 +55,7 @@ def get_status_keyboard():
         ],
         resize_keyboard=True
     )
+
 
 # === START QUIZ ===
 @router.message(F.text.startswith("/start"))
@@ -69,6 +72,7 @@ async def start_quiz(message: Message, state: FSMContext):
         parse_mode="HTML"
     )
     await state.set_state(QuizStates.greeting)
+
 
 # === GREETING -> CONTACT ===
 @router.message(QuizStates.greeting, F.contact)
@@ -91,6 +95,7 @@ async def process_contact(message: Message, state: FSMContext):
     )
     await state.set_state(QuizStates.city)
 
+
 # === CITY ===
 @router.message(QuizStates.city)
 async def process_city(message: Message, state: FSMContext):
@@ -105,6 +110,7 @@ async def process_city(message: Message, state: FSMContext):
         parse_mode="HTML"
     )
     await state.set_state(QuizStates.object_type)
+
 
 # === OBJECT TYPE ===
 @router.message(QuizStates.object_type, F.text.in_(["🏠 Квартира", "🏢 Коммерция", "🏡 Дом"]))
@@ -121,6 +127,7 @@ async def process_object_type(message: Message, state: FSMContext):
     )
     await state.set_state(QuizStates.floors)
 
+
 # === FLOORS ===
 @router.message(QuizStates.floors)
 async def process_floors(message: Message, state: FSMContext):
@@ -135,6 +142,7 @@ async def process_floors(message: Message, state: FSMContext):
         parse_mode="HTML"
     )
     await state.set_state(QuizStates.area)
+
 
 # === AREA ===
 @router.message(QuizStates.area)
@@ -151,6 +159,7 @@ async def process_area(message: Message, state: FSMContext):
     )
     await state.set_state(QuizStates.status)
 
+
 # === STATUS ===
 @router.message(QuizStates.status, F.text.in_(["📋 Планируется", "✅ Выполнена", "🔄 В процессе"]))
 async def process_status(message: Message, state: FSMContext):
@@ -165,6 +174,7 @@ async def process_status(message: Message, state: FSMContext):
         parse_mode="HTML"
     )
     await state.set_state(QuizStates.description)
+
 
 # === DESCRIPTION ===
 @router.message(QuizStates.description)
@@ -181,6 +191,7 @@ async def process_description(message: Message, state: FSMContext):
         parse_mode="HTML"
     )
     await state.set_state(QuizStates.plan)
+
 
 # === PLAN ===
 @router.message(QuizStates.plan)
@@ -199,8 +210,11 @@ async def process_plan(message: Message, state: FSMContext):
     await state.update_data(plan=plan, has_plan_photo=has_plan_photo)
     await finish_quiz(message, state)
 
+
 async def finish_quiz(message: Message, state: FSMContext):
     """Завершение квиза"""
+    from main import bot  # Импорт внутри функции для избежания цикла
+    
     data = await state.get_data()
     user_name = message.from_user.full_name or message.from_user.first_name
     
@@ -219,7 +233,6 @@ async def finish_quiz(message: Message, state: FSMContext):
     
     # Отправляем в группу
     try:
-        from main import bot
         if data.get('has_plan_photo') and data.get('plan'):
             await bot.send_photo(
                 chat_id=GROUP_ID,
@@ -248,7 +261,7 @@ async def finish_quiz(message: Message, state: FSMContext):
         parse_mode="HTML"
     )
     
-    # Сохраняем в БД
+    # Обновляем лида
     await db.update_lead_status(
         user_id=message.from_user.id,
         status="quiz_completed",
