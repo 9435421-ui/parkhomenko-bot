@@ -108,16 +108,28 @@ async def process_consent(message: Message, state: FSMContext):
     await state.set_state(QuizStates.contact)
 
 
-# === CONSENT - ЛЮБОЙ ДРУГОЙ ВВОД ===
+# === CONSENT - ЛЮБОЙ ВВОД (включая username, текст) ===
 @router.message(QuizStates.consent)
 async def process_consent_fallback(message: Message, state: FSMContext):
-    """Fallback - если отправили не кнопку согласия (фото, текст, и т.д.)"""
-    await message.answer(
-        "📱 <b>Пожалуйста, нажмите кнопку</b>\n\n"
-        "«✅ Согласен и хочу продолжить»",
-        reply_markup=get_consent_keyboard(),
-        parse_mode="HTML"
-    )
+    """Fallback - если отправили username, текст или любой другой ввод"""
+    # Проверяем, содержит ли текст "согласен"
+    if message.text and "согласен" in message.text.lower():
+        # Переходим к контакту
+        await message.answer(
+            "📱 <b>Пожалуйста, поделитесь номером телефона</b>\n\n"
+            "Нажмите кнопку ниже для отправки контакта.",
+            reply_markup=get_contact_keyboard(),
+            parse_mode="HTML"
+        )
+        await state.set_state(QuizStates.contact)
+    else:
+        # Напоминаем про кнопку
+        await message.answer(
+            "📱 <b>Пожалуйста, нажмите кнопку</b>\n\n"
+            "«✅ Согласен и хочу продолжить»",
+            reply_markup=get_consent_keyboard(),
+            parse_mode="HTML"
+        )
 
 
 # === CONTACT ===
