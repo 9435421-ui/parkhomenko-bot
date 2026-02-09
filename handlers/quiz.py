@@ -108,12 +108,12 @@ async def process_consent(message: Message, state: FSMContext):
     await state.set_state(QuizStates.contact)
 
 
-# === CONSENT - FALLBACK (фото, текст) ===
+# === CONSENT - ЛЮБОЙ ДРУГОЙ ВВОД ===
 @router.message(QuizStates.consent)
 async def process_consent_fallback(message: Message, state: FSMContext):
-    """Fallback - если отправили не кнопку согласия"""
+    """Fallback - если отправили не кнопку согласия (фото, текст, и т.д.)"""
     await message.answer(
-        "📱 <b>Пожалуйста, нажмите кнопку ниже</b>\n\n"
+        "📱 <b>Пожалуйста, нажмите кнопку</b>\n\n"
         "«✅ Согласен и хочу продолжить»",
         reply_markup=get_consent_keyboard(),
         parse_mode="HTML"
@@ -149,10 +149,10 @@ async def process_contact(message: Message, state: FSMContext, bot: Bot):
     await state.set_state(QuizStates.city)
 
 
-# === CONTACT - FALLBACK ===
+# === CONTACT - ЛЮБОЙ ДРУГОЙ ВВОД ===
 @router.message(QuizStates.contact)
 async def process_contact_fallback(message: Message, state: FSMContext):
-    """Fallback - если отправили не контакт"""
+    """Fallback - если отправили не контакт (фото, текст)"""
     await message.answer(
         "📱 <b>Пожалуйста, нажмите кнопку</b>\n\n"
         "«📱 Отправить контакт и согласиться»",
