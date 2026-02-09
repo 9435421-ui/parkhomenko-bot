@@ -59,9 +59,10 @@ async def on_startup():
     
     # Запускаем планировщик
     scheduler = AsyncIOScheduler()
-    scheduler.add_job(check_scheduled_posts, 'cron', hour=12, minute=0, timezone='Europe/Moscow')
+    scheduler.add_job(check_birthdays_and_holidays, 'cron', hour=9, minute=0, timezone='Europe/Moscow')  # Дни рождения
+    scheduler.add_job(check_scheduled_posts, 'cron', hour=12, minute=0, timezone='Europe/Moscow')  # Автопостинг
     scheduler.start()
-    logger.info("⏰ APScheduler запущен (12:00 МСК)")
+    logger.info("⏰ APScheduler запущен (09:00 и 12:00 МСК)")
     
     print("✅ Бот ТЕРИОН готов!")
     print(f"📚 База знаний: {len(kb.documents)} документов")
@@ -73,6 +74,45 @@ async def check_scheduled_posts():
     """Проверка и публикация запланированных постов (12:00 МСК)"""
     logger.info("⏰ Проверка запланированных постов...")
     # TODO: реализовать логику публикации
+
+
+async def check_birthdays_and_holidays():
+    """Проверка дней рождений и праздников (09:00 МСК)"""
+    logger.info("🎂 Проверка дней рождения...")
+    
+    from database import db
+    
+    try:
+        # Получаем клиентов с ДР сегодня
+        birthdays = await db.get_today_birthdays()
+        
+        for client in birthdays:
+            name = client.get('name', 'Клиент')
+            user_id = client.get('user_id')
+            
+            # Поздравление
+            greeting = (
+                f"🎂 С Днём Рождения, {name}! 🎂\n\n"
+                f"От всей души поздравляем вас!\n"
+                f"Желаем успехов, здоровья и благополучия!\n\n"
+                f"С уважением,\n"
+                f"Компания «Терион»"
+            )
+            
+            try:
+                # Отправляем поздравление (нужен bot)
+                if bot:
+                    await bot.send_message(user_id, greeting)
+                    await db.mark_birthday_greeting_sent(client['id'])
+                    logger.info(f"✅ Поздравление отправлено: {name}")
+            except Exception as e:
+                logger.error(f"❌ Ошибка отправки поздравления {name}: {e}")
+        
+        if not birthdays:
+            logger.info("📭 Дней рождения сегодня нет")
+            
+    except Exception as e:
+        logger.error(f"❌ Ошибка проверки ДР: {e}")
 
 
 async def main():
