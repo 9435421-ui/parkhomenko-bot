@@ -11,7 +11,7 @@ from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import StatesGroup, State
 from config import ADMIN_ID
 from database import db
-from utils import router_ai, image_compressor
+from utils import router_ai, image_compressor, yandex_vision
 
 router = Router()
 
@@ -200,10 +200,25 @@ async def process_description(message: Message, state: FSMContext):
 
 
 async def analyze_photos_with_ai(photo_paths: list) -> str:
-    """Анализирует фото через ИИ (упрощенная версия)"""
-    # В реальной версии здесь был бы анализ изображений
-    # Пока возвращаем заглушку
-    return "📸 Фото объекта готовы к публикации"
+    """Анализирует фото через Яндекс Vision API"""
+    if not photo_paths:
+        return "📸 Фото объекта"
+    
+    try:
+        # Анализируем первое фото
+        first_photo = photo_paths[0]
+        
+        # Используем Яндекс Vision для анализа
+        description = await yandex_vision.analyze_image(first_photo)
+        
+        if description and description != "📸 Фото объекта":
+            return description
+        
+        return "📸 Фото объекта недвижимости"
+        
+    except Exception as e:
+        logging.error(f"Ошибка анализа фото: {e}")
+        return "📸 Фото объекта"
 
 
 @router.callback_query(PhotoStates.waiting_for_channel)
