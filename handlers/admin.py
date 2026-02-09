@@ -12,6 +12,7 @@ from aiogram.fsm.state import StatesGroup, State
 from config import ADMIN_ID
 from database import db
 from utils import router_ai, image_compressor, yandex_vision
+from services.vk_service import vk_service
 
 router = Router()
 
@@ -384,6 +385,94 @@ async def delete_post(callback: CallbackQuery):
     await callback.message.edit_text(
         f"❌ Пост #{post_id} удалён"
     )
+    await callback.answer()
+
+
+@router.callback_query(F.data.startswith("publish_post:"))
+async def publish_post(callback: CallbackQuery, bot):
+    """Публикация поста в ТГ и ВК"""
+    post_id = int(callback.data.replace("publish_post:", ""))
+    
+    # Получаем пост
+    posts = await db.get_draft_posts()
+    post = next((p for p in posts if p['id'] == post_id), None)
+    
+    if not post:
+        await callback.message.edit_text("❌ Пост не найден")
+        await callback.answer()
+        return
+    
+    try:
+        # Публикуем в ТГ
+        from config import TERION_CHANNEL_ID, DOM_GRAND_CHANNEL_ID
+        import os
+        
+        channel_key = post.get('channel', 'terion')
+        channel_map = {
+            'terion': ('ТЕРИОН', int(TERION_CHANNEL_ID)),
+            'dom_grand': ('ДОМ ГРАНД', int(DOM_GRAND_CHANNEL_ID)),
+            'both': ('ТГ + ВК', int(TERION_CHANNEL_ID))
+        }
+        channel_name, chat_id = channel_map.get(channel_key, ('ТЕРИОН', int(TERION_CHANNEL_ID)))
+        
+        # Форматируем текст
+        title = post.get('title', '') or ''
+        body = post.get('body', '') or ''
+        cta = post.get('cta', '') or ''
+        
+        tg_text = f"<b>{title}</b>\n\n{body}\n\n{cta}" if title else f"{body}\n\n{cta}"
+        
+        # Публикуем в ТГ
+        if post.get('image_url'):
+            await bot.send_photo(
+                chat_id=chat_id,
+                photo=post['image_url'],
+                caption=tg_text,
+                parse_mode='HTML'
+            )
+        else:
+            await bot.send_message(
+                chat_id=chat_id,
+                text=tg_text,
+                parse_mode='HTML'
+            )
+        
+        # Публикуем в ВК если выбран "both"
+        vk_posted = False
+        if channel_key == 'both' and vk_service.vk_token:
+            vk_text = f"{title}\n\n{body}\n\n{cta}" if title else f"{body}\n\n{cta}"
+            
+            if post.get('image_url'):
+                image_path = post['image_url']
+                if image_path.startswith('http'):
+                    vk_post_id = await vk_service.post(vk_text)
+                else:
+                    vk_post_id = await vk_service.post_with_photos(vk_text, [image_path])
+            else:
+                vk_post_id = await vk_service.post(vk_text)
+            
+            vk_posted = vk_post_id is not None
+        
+        # Обновляем статус в БД
+        await db.mark_as_published(post_id)
+        
+        # Обновляем сообщение
+        vk_status = "✅ ВКонтакте" if vk_posted else "⏭️ ВК не выбран"
+        await callback.message.edit_text(
+            f"✅ Пост #{post_id} опубликован!\n\n"
+            f"📍 Канал: {channel_name}\n"
+            f"✅ Telegram: OK\n"
+            f"{vk_status}"
+        )
+        
+        logger.info(f"✅ Пост #{post_id} опубликован: {channel_name}")
+        
+    except Exception as e:
+        logging.error(f"Ошибка публикации поста #{post_id}: {e}")
+        await callback.message.edit_text(
+            f"❌ Ошибка публикации: {e}"
+        )
+    
     await callback.answer()
 
 
