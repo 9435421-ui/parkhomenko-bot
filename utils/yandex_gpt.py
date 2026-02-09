@@ -188,3 +188,12 @@ class YandexGPTClient:
 
 # Singleton instance
 yandex_gpt = YandexGPTClient()
+
+# Alias для совместимости
+async def generate(system_prompt: str, user_message: str, max_tokens: int = 500) -> Optional[str]:
+    """Удобная функция-алиас для generate_response"""
+    return await yandex_gpt.generate_response(
+        user_prompt=user_message,
+        system_prompt=system_prompt,
+        max_tokens=max_tokens
+    )
