@@ -1,13 +1,16 @@
+"""
+Основной бот ТЕРИОН - aiogram версия.
+"""
 import asyncio
 import logging
 from aiogram import Bot, Dispatcher
 from aiogram.fsm.storage.memory import MemoryStorage
 from aiogram.client.default import DefaultBotProperties
-from config import BOT_TOKEN
-from handlers import start as common, quiz, dialog, invest, admin
+
+from config import BOT_TOKEN, GROUP_ID, THREAD_ID_LEADS
+from handlers import start, quiz, dialog, admin
 from database import db
 from utils import kb, router_ai
-from auto_poster import run_auto_poster
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -21,26 +24,29 @@ async def on_startup():
     # Индексируем базу знаний
     await kb.index_documents()
     
-    print("✅ Бот готов к работе")
+    print("✅ Бот ТЕРИОН готов!")
     print(f"📚 База знаний: {len(kb.documents)} документов")
     print(f"🧠 Router AI: {'подключен' if router_ai.api_key else 'не настроен'}")
+    print(f"📤 Группа: {GROUP_ID} (thread: {THREAD_ID_LEADS})")
 
 
 async def main():
-    bot = Bot(token=BOT_TOKEN, default=DefaultBotProperties(parse_mode="HTML"))
+    """Запуск бота"""
+    bot = Bot(
+        token=BOT_TOKEN,
+        default=DefaultBotProperties(parse_mode="HTML")
+    )
     dp = Dispatcher(storage=MemoryStorage())
 
-    dp.include_router(common.router)
+    # Подключаем роутеры
+    dp.include_router(start.router)
     dp.include_router(quiz.router)
-    dp.include_router(invest.router)
     dp.include_router(dialog.router)
     dp.include_router(admin.router)
 
     await on_startup()
     
-    # Запускаем автопостинг в фоновом режиме
-    asyncio.create_task(run_auto_poster(bot))
-    
+    print("🚀 Запуск поллинга...")
     await dp.start_polling(bot)
 
 
