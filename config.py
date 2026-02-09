@@ -8,6 +8,7 @@ load_dotenv()
 
 # === TELEGRAM ===
 BOT_TOKEN = os.getenv("BOT_TOKEN")
+CONTENT_BOT_TOKEN = os.getenv("CONTENT_BOT_TOKEN")
 
 # === ГРУППЫ И КАНАЛЫ ===
 CHANNEL_ID = os.getenv("CHANNEL_ID")
