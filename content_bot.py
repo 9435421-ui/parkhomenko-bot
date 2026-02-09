@@ -166,11 +166,31 @@ def save_photos(message, user_id):
     photos_buffer.pop(user_id, None)
 
 # ==========================
-# Обработка постов
+# Обработка готового поста
 # ==========================
 def handle_ready_post(message):
+    text = message.text
+    
+    # Проверяем - это вопрос или пост?
+    question_starters = ["?", "как", "что", "зачем", "почему", "какой", "какие", "какая", "можно", "нужно", "документы"]
+    is_question = text.lower().startswith(tuple(question_starters)) or "?" in text
+    
+    if is_question:
+        # Это вопрос - не добавляем как пост
+        bot.send_message(
+            message.chat.id,
+            "❌ <b>Это вопрос, а не пост!</b>\n\n"
+            "📝 Кнопка 'Готовый пост' предназначена для готовых текстов постов.\n\n"
+            "💬 Если хотите задать вопрос консультанту — используйте основного бота:\n"
+            "@Parkhovenko_i_kompaniya_bot\n\n"
+            "◀️ Нажмите 'В меню' для других действий.",
+            parse_mode="HTML"
+        )
+        return
+    
+    # Это пост - обрабатываем
     try:
-        lines = message.text.split('\n')
+        lines = text.split('\n')
         title = lines[0] if lines else "Пост"
         body = '\n'.join(lines[1:]) if len(lines) > 1 else lines[0]
         
@@ -183,8 +203,8 @@ def handle_ready_post(message):
         })
         save_posts(posts)
         
-        text = f"📝 <b>Готовый пост</b>\n\n<b>{title}</b>\n\n{body}\n\n👤 @{message.from_user.username or 'admin'}"
-        bot.send_message(LEADS_GROUP_CHAT_ID, text, message_thread_id=THREAD_ID_DRAFTS, parse_mode="HTML")
+        post_text = f"📝 <b>Готовый пост</b>\n\n<b>{title}</b>\n\n{body}\n\n👤 @{message.from_user.username or 'admin'}"
+        bot.send_message(LEADS_GROUP_CHAT_ID, post_text, message_thread_id=THREAD_ID_DRAFTS, parse_mode="HTML")
         
         bot.send_message(message.chat.id, "✅ Пост добавлен в план!")
     except Exception as e:
