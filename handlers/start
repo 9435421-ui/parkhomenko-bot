@@ -1,0 +1,157 @@
+"""
+Главное меню - старт квиза
+"""
+from aiogram import Router, F
+from aiogram.types import Message, CallbackQuery
+from aiogram.filters import CommandStart
+from aiogram.fsm.context import FSMContext
+
+from keyboards.main_menu import get_main_menu, get_admin_menu, get_urgent_btn, get_content_menu
+from handlers.quiz import QuizStates
+from config import ADMIN_ID
+from database import db
+from agents.scout_agent import scout_agent
+
+router = Router()
+
+GREETING_TEXT = (
+    "🏢 <b>Вас приветствует компания ТЕРИОН!</b>\n\n"
+    "Я — Антон, ваш ИИ-помощник по перепланировкам.\n\n"
+    "Нажимая кнопку ниже, вы даете согласие на обработку "
+    "персональных данных, получение уведомлений и информационную переписку.\n\n"
+    "📞 Все консультации носят информационный характер, "
+    "финальное решение подтверждает эксперт ТЕРИОН."
+)
+
+
+@router.message(CommandStart())
+async def handle_start(message: Message, state: FSMContext):
+    """Старт - показываем приветствие"""
+    user_id = message.from_user.id
+    
+    # Очищаем старые состояния
+    await state.clear()
+    
+    # Проверяем админ
+    if str(user_id) == str(ADMIN_ID):
+        await message.answer(
+            "🎯 <b>Главное меню</b>\n\n"
+            "🛠 <b>Создать пост</b> — Текст → Фото → Публикация\n"
+            "🕵️‍♂️ <b>Темы от Шпиона</b> — ScoutAgent ищет идеи\n"
+            "📅 <b>Очередь постов</b> — что запланировано на 12:00\n\n"
+            "Выберите:",
+            reply_markup=get_admin_menu()
+        )
+    else:
+        await message.answer(
+            GREETING_TEXT,
+            reply_markup=get_main_menu(user_id)
+        )
+
+
+@router.message(F.text == "🛠 Создать пост")
+async def create_post_handler(message: Message, state: FSMContext):
+    """Создание поста"""
+    await message.answer(
+        "🛠 <b>Создание поста</b>\n\n"
+        "Выберите формат:",
+        reply_markup=get_content_menu()
+    )
+
+
+@router.message(F.text == "🕵️‍♂️ Темы от Шпиона")
+async def spy_topics_handler(message: Message, state: FSMContext):
+    """Темы от Шпиона - ScoutAgent"""
+    await message.answer("🔍 <b>Шпион ищет трендовые темы...</b>", parse_mode="HTML")
+    
+    try:
+        topics = await scout_agent.scout_topics(count=5)
+        
+        text = "🕵️‍♂️ <b>Темы от Шпиона</b>\n\n"
+        for i, topic in enumerate(topics, 1):
+            text += f"{i}. <b>{topic['title']}</b>\n"
+            text += f"   💡 {topic['insight']}\n\n"
+        
+        await message.answer(text, parse_mode="HTML")
+    except Exception as e:
+        await message.answer(f"❌ Ошибка: {e}")
+
+
+@router.message(F.text == "📅 Очередь постов")
+async def queue_handler(message: Message, state: FSMContext):
+    """Очередь постов"""
+    await message.answer("📅 <b>Очередь постов</b>\n\nЗагрузка...", parse_mode="HTML")
+    
+    try:
+        posts = await db.get_draft_posts()
+        
+        if not posts:
+            await message.answer("📭 Очередь пуста. Создайте первый пост!", parse_mode="HTML")
+            return
+        
+        text = "📅 <b>Очередь постов</b>\n\n"
+        for post in posts[-10:]:
+            status = "⏳" if post.get("status") == "draft" else "📤"
+            topic = post.get("title", "Без темы")
+            text += f"{status} #{post.get('id', '?')} — {topic}\n"
+        
+        await message.answer(text, parse_mode="HTML")
+    except Exception as e:
+        await message.answer(f"❌ Ошибка: {e}")
+
+
+@router.message(lambda m: m.text and m.text.startswith("Срочно:"))
+async def urgent_handler(message: Message, state: FSMContext):
+    """Обработка срочных сообщений от Юлии"""
+    user_id = message.from_user.id
+    
+    if str(user_id) != str(ADMIN_ID):
+        return
+    
+    text = message.text.replace("Срочно:", "").strip()
+    
+    await message.answer(
+        f"🚀 <b>Срочная публикация!</b>\n\n"
+        f"<b>Текст:</b>\n{text}\n\n"
+        f"Опубликовать сейчас вне очереди?",
+        reply_markup=get_urgent_btn(),
+        parse_mode="HTML"
+    )
+
+
+@router.message(F.text == "👤 Мой профиль")
+async def profile_handler(message: Message, state: FSMContext):
+    """Профиль пользователя"""
+    await message.answer(
+        "👤 <b>Мой профиль</b>\n\n"
+        "📊 Статистика:\n"
+        "• Заявок: 0\n"
+        "• Консультаций: 0\n\n"
+        "🎂 День рождения: не указан\n\n"
+        "Настройки в разработке.",
+        parse_mode="HTML"
+    )
+
+
+@router.message(F.text == "📝 Записаться на консультацию")
+async def quiz_start(message: Message, state: FSMContext):
+    """Запуск квиза"""
+    from keyboards.main_menu import get_contact_keyboard
+    
+    await state.clear()
+    await message.answer(
+        GREETING_TEXT,
+        reply_markup=get_contact_keyboard()
+    )
+    await state.set_state(QuizStates.greeting)
+
+
+@router.message(F.text == "💬 Задать вопрос")
+async def question_handler(message: Message, state: FSMContext):
+    """Задать вопрос консультанту"""
+    await message.answer(
+        "💬 <b>Задайте ваш вопрос</b>\n\n"
+        "Наш ИИ-консультант ответит на основе базы знаний "
+        "по перепланировкам и согласованию.",
+        parse_mode="HTML"
+    )
