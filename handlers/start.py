@@ -5,8 +5,8 @@ from aiogram import Router, F
 from aiogram.types import Message
 from aiogram.fsm.context import FSMContext
 
-from keyboards.main_menu import get_consent_keyboard, get_main_menu
-from handlers.quiz import QuizStates
+from keyboards.main_menu import get_consent_keyboard
+from handlers.quiz import QuizStates, get_contact_keyboard
 
 router = Router()
 
@@ -27,14 +27,16 @@ async def handle_start(message: Message, state: FSMContext):
         GREETING_TEXT,
         reply_markup=get_consent_keyboard()
     )
-    await state.set_state(QuizStates.greeting)
+    await state.set_state(QuizStates.consent)
 
 
 @router.message(F.text == "✅ Согласен и хочу продолжить")
 async def handle_consent(message: Message, state: FSMContext):
-    """Согласие - сразу начинаем квиз"""
+    """Согласие - запрашиваем контакт"""
     await message.answer(
-        "🏙️ <b>1. В каком городе находится объект?</b>",
+        "📱 <b>Пожалуйста, поделитесь номером телефона</b>\n\n"
+        "Нажмите кнопку ниже для отправки контакта.",
+        reply_markup=get_contact_keyboard(),
         parse_mode="HTML"
     )
-    await state.set_state(QuizStates.city)
+    await state.set_state(QuizStates.contact)
