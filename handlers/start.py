@@ -2,14 +2,18 @@
 Главное меню - старт квиза
 """
 from aiogram import Router, F
-from aiogram.types import Message
+from aiogram.types import Message, CallbackQuery
 from aiogram.filters import CommandStart
 from aiogram.fsm.context import FSMContext
+import logging
 
-from keyboards.main_menu import get_main_menu, get_admin_menu
+from keyboards.main_menu import get_main_menu, get_admin_menu, get_urgent_btn, get_content_menu
 from handlers.quiz import QuizStates
 from config import ADMIN_ID
+from database import db
+from agents.scout_agent import scout_agent
 
+logger = logging.getLogger(__name__)
 router = Router()
 
 GREETING_TEXT = (
@@ -26,6 +30,7 @@ GREETING_TEXT = (
 async def handle_start(message: Message, state: FSMContext):
     """Старт - показываем приветствие"""
     user_id = message.from_user.id
+    logger.info(f"📨 Сообщение от: {user_id} (@{message.from_user.username})")
     
     # Очищаем старые состояния
     await state.clear()
@@ -34,9 +39,9 @@ async def handle_start(message: Message, state: FSMContext):
     if str(user_id) == str(ADMIN_ID):
         await message.answer(
             "🎯 <b>Главное меню</b>\n\n"
-            "🛠 <b>Создать пост</b> — генерация контента\n"
-            "📅 <b>Контент-план</b> — идеи от Скаута\n"
-            "👤 <b>Мой профиль</b> — настройки и статистика\n\n"
+            "🛠 <b>Создать пост</b> — Текст → Фото → Публикация\n"
+            "🕵️‍♂️ <b>Темы от Шпиона</b> — ScoutAgent ищет идеи\n"
+            "📅 <b>Очередь постов</b> — что запланировано на 12:00\n\n"
             "Выберите:",
             reply_markup=get_admin_menu()
         )
@@ -49,46 +54,71 @@ async def handle_start(message: Message, state: FSMContext):
 
 @router.message(F.text == "🛠 Создать пост")
 async def create_post_handler(message: Message, state: FSMContext):
-    """Создание поста - переход в content"""
-    # TODO: перенаправить в content.py
+    """Создание поста"""
     await message.answer(
         "🛠 <b>Создание поста</b>\n\n"
         "Выберите формат:",
-        reply_markup=get_inline_keyboard("create_post")
+        reply_markup=get_content_menu()
     )
 
 
-@router.message(F.text == "📅 Контент-план")
-async def content_plan_handler(message: Message, state: FSMContext):
-    """Контент-план - запрос идей у Скаута"""
-    from agents.scout_agent import scout_agent
-    import asyncio
-    
-    await message.answer("🔍 Скаут ищет идеи...")
+@router.message(F.text == "🕵️‍♂️ Темы от Шпиона")
+async def spy_topics_handler(message: Message, state: FSMContext):
+    """Темы от Шпиона - ScoutAgent"""
+    await message.answer("🔍 <b>Шпион ищет трендовые темы...</b>", parse_mode="HTML")
     
     try:
-        topics = asyncio.run(scout_agent.scout_topics(count=5))
+        topics = await scout_agent.scout_topics(count=5)
         
-        text = "📅 <b>Контент-план</b>\n\n"
+        text = "🕵️‍♂️ <b>Темы от Шпиона</b>\n\n"
         for i, topic in enumerate(topics, 1):
-            text += f"{i}. {topic['title']}\n"
+            text += f"{i}. <b>{topic['title']}</b>\n"
             text += f"   💡 {topic['insight']}\n\n"
         
         await message.answer(text, parse_mode="HTML")
     except Exception as e:
-        await message.answer(f"Ошибка: {e}")
+        await message.answer(f"❌ Ошибка: {e}")
 
 
-@router.message(F.text == "👤 Мой профиль")
-async def profile_handler(message: Message, state: FSMContext):
-    """Профиль пользователя"""
+@router.message(F.text == "📅 Очередь постов")
+async def queue_handler(message: Message, state: FSMContext):
+    """Очередь постов"""
+    await message.answer("📅 <b>Очередь постов</b>\n\nЗагрузка...", parse_mode="HTML")
+    
+    try:
+        posts = await db.get_draft_posts()
+        
+        if not posts:
+            await message.answer("📭 Очередь пуста. Создайте первый пост!", parse_mode="HTML")
+            return
+        
+        text = "📅 <b>Очередь постов</b>\n\n"
+        for post in posts[-10:]:
+            status = "⏳" if post.get("status") == "draft" else "📤"
+            topic = post.get("title", "Без темы")
+            text += f"{status} #{post.get('id', '?')} — {topic}\n"
+        
+        await message.answer(text, parse_mode="HTML")
+    except Exception as e:
+        await message.answer(f"❌ Ошибка: {e}")
+
+
+@router.message(lambda m: m.text and m.text.startswith("Срочно:"))
+async def urgent_handler(message: Message, state: FSMContext):
+    """Обработка срочных сообщений от Юлии"""
+    user_id = message.from_user.id
+    logger.info(f"🚀 Срочно от: {user_id}")
+    
+    if str(user_id) != str(ADMIN_ID):
+        return
+    
+    text = message.text.replace("Срочно:", "").strip()
+    
     await message.answer(
-        "👤 <b>Мой профиль</b>\n\n"
-        "📊 Статистика:\n"
-        "• Заявок: 0\n"
-        "• Консультаций: 0\n\n"
-        "🎂 День рождения: не указан\n\n"
-        "Настройки в разработке.",
+        f"🚀 <b>Срочная публикация!</b>\n\n"
+        f"<b>Текст:</b>\n{text}\n\n"
+        f"Опубликовать сейчас вне очереди?",
+        reply_markup=get_urgent_btn(),
         parse_mode="HTML"
     )
 
@@ -115,18 +145,3 @@ async def question_handler(message: Message, state: FSMContext):
         "по перепланировкам и согласованию.",
         parse_mode="HTML"
     )
-
-
-def get_inline_keyboard(action: str):
-    """Inline клавиатура для действий"""
-    from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
-    
-    markup = InlineKeyboardMarkup()
-    
-    if action == "create_post":
-        markup.add(InlineKeyboardButton("📸 С фото", callback_data="content_with_photo"))
-        markup.add(InlineKeyboardButton("📝 Только текст", callback_data="content_text_only"))
-        markup.add(InlineKeyboardButton("🎨 Сгенерировать картинку", callback_data="content_gen_image"))
-        markup.add(InlineKeyboardButton("◀️ Назад", callback_data="content_back"))
-    
-    return markup
