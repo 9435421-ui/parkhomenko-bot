@@ -154,9 +154,10 @@ class ViralHooksAgent:
             # Пробуем Router AI
             if self.use_router:
                 try:
-                    response = await router_ai.generate(
+                    response = await router_ai.generate_response(
+                        user_prompt=user_prompt,
                         system_prompt=system_prompt,
-                        user_message=user_prompt
+                        max_tokens=1000
                     )
                     if response:
                         return self._parse_ai_response(response, topic)
@@ -165,9 +166,9 @@ class ViralHooksAgent:
             
             # Fallback на YandexGPT
             try:
-                response = await yandex_gpt.generate(
+                response = await yandex_gpt.generate_response(
+                    user_prompt=user_prompt,
                     system_prompt=system_prompt,
-                    user_message=user_prompt,
                     max_tokens=1000
                 )
                 if response:

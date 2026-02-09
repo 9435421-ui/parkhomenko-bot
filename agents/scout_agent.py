@@ -56,9 +56,9 @@ class ScoutAgent:
         # Проверяем базу знаний
         kb_context = ""
         try:
-            chunks = await self.kb.search(query, limit=3)
+            chunks = await self.kb.get_context(query, max_chunks=3)
             if chunks:
-                kb_context = "\n".join([c['text'][:500] for c in chunks])
+                kb_context = chunks[:500] if isinstance(chunks, str) else ""
         except Exception as e:
             logger.warning(f"KnowledgeBase error: {e}")
         
@@ -70,7 +70,7 @@ class ScoutAgent:
 Требования:
 - Тема должна быть актуальна на {date}
 - Связана с законодательством РФ или практикой согласования
-- Содержит проблему + решение
+- Содержит проблема + решение
 - Вызывает эмоции (страх штрафов, желание решить проблему)
 
 Формат ответа:
@@ -86,16 +86,18 @@ class ScoutAgent:
 Предложи 1 конкретную тему для поста."""
 
             if self.use_router:
-                response = await router_ai.generate(
+                response = await router_ai.generate_response(
+                    user_prompt=user_prompt,
                     system_prompt=system_prompt.format(date=datetime.now().strftime("%B %Y")),
-                    user_message=user_prompt
+                    max_tokens=500
                 )
                 if response:
                     return self._parse_response(response, query)
             
-            response = await yandex_gpt.generate(
+            response = await yandex_gpt.generate_response(
+                user_prompt=user_prompt,
                 system_prompt=system_prompt.format(date=datetime.now().strftime("%B %Y")),
-                user_message=user_prompt
+                max_tokens=500
             )
             if response:
                 return self._parse_response(response, query)
