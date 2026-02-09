@@ -14,6 +14,7 @@ from handlers import start_router, quiz_router, content_router, dialog_router, a
 from database import db
 from utils import kb, router_ai
 from agents.viral_hooks_agent import viral_hooks_agent
+from agents.scout_agent import scout_agent
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -43,6 +44,18 @@ async def on_startup():
             logger.info(f"  {i}. {hook['text']}")
     except Exception as e:
         logger.error(f"❌ ViralHooksAgent error: {e}")
+    
+    # Тест Scout Agent
+    logger.info("\n🔍 Тест Scout Agent...")
+    try:
+        topics = await scout_agent.scout_topics(count=3)
+        logger.info(f"📌 Scout Agent result: {len(topics)} topics found")
+        for i, topic in enumerate(topics, 1):
+            logger.info(f"  {i}. {topic['title']}")
+            logger.info(f"     Почему: {topic['why']}")
+            logger.info(f"     Инсайт: {topic['insight']}")
+    except Exception as e:
+        logger.error(f"❌ Scout Agent error: {e}")
     
     # Запускаем планировщик
     scheduler = AsyncIOScheduler()
