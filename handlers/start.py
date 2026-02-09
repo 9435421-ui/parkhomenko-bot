@@ -3,6 +3,7 @@
 """
 from aiogram import Router, F
 from aiogram.types import Message
+from aiogram.filters import CommandStart
 from aiogram.fsm.context import FSMContext
 
 from keyboards.main_menu import get_contact_keyboard
@@ -20,7 +21,7 @@ GREETING_TEXT = (
 )
 
 
-@router.message(F.text.startswith("/start"))
+@router.message(CommandStart())
 async def handle_start(message: Message, state: FSMContext):
     """Старт - показываем приветствие + кнопка контакта"""
     await state.clear()  # Очищаем старые состояния
