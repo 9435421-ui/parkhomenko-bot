@@ -11,7 +11,8 @@ import logging
 
 from database import db
 from agents.viral_hooks_agent import viral_hooks_agent
-from config import CHANNEL_ID, DOM_GRAND_CHANNEL_ID
+from config import CHANNEL_ID_TERION, CHANNEL_ID_DOM_GRAD, VK_GROUP_ID
+from services.vk_service import vk_service
 
 logger = logging.getLogger(__name__)
 content_router = Router()
@@ -319,7 +320,30 @@ async def handle_publish(callback: CallbackQuery, state: FSMContext):
         await callback.answer("Пост не найден!")
         return
     
-    channel_id = CHANNEL_ID if channel == "terion" else DOM_GRAND_CHANNEL_ID
+    # Выбираем канал
+    if channel == "terion":
+        channel_id = CHANNEL_ID_TERION
+        channel_name = "TERION"
+    elif channel == "dom":
+        channel_id = CHANNEL_ID_DOM_GRAD
+        channel_name = "ДОМ ГРАНД"
+    elif channel == "vk":
+        # Публикуем в ВК
+        vk_result = await vk_service.post(post["body"])
+        if vk_result:
+            await db.update_content_post(post_id, status="published")
+            await callback.message.edit_text(
+                "✅ <b>Опубликовано ВКонтакте!</b>\n\n"
+                f"Пост #{vk_result}",
+                reply_markup=get_content_menu(),
+                parse_mode="HTML"
+            )
+        else:
+            await callback.answer("❌ Ошибка ВК!")
+        return
+    else:
+        await callback.answer("Неизвестный канал!")
+        return
     
     try:
         if post.get("image_url"):
@@ -337,7 +361,11 @@ async def handle_publish(callback: CallbackQuery, state: FSMContext):
             )
         
         await db.update_content_post(post_id, status="published")
-        await callback.answer("✅ Опубликовано!")
+        await callback.message.edit_text(
+            f"✅ <b>Опубликовано в {channel_name}!</b>",
+            reply_markup=get_content_menu(),
+            parse_mode="HTML"
+        )
     except Exception as e:
         logger.error(f"Publish error: {e}")
         await callback.answer(f"❌ Ошибка: {e}")
