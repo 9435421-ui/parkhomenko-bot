@@ -303,9 +303,9 @@ async def publish_all_handler(callback: CallbackQuery, state: FSMContext):
         logger.error(f"DOM_GRAD publish error: {e}")
         results.append("❌ ДОМ ГРАНД")
     
-    # 3. ВКонтакте
+    # 3. ВКонтакте (с CTA квиза)
     try:
-        vk_result = await vk_service.post(post["body"])
+        vk_result = await vk_service.post_with_quiz_cta(post["body"])
         if vk_result:
             results.append(f"✅ ВК (#{vk_result})")
         else:

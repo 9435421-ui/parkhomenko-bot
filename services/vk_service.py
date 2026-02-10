@@ -1,14 +1,19 @@
 """
 Сервис для интеграции с ВКонтакте API.
-Публикация постов в сообщество.
+Публикация постов в сообщество + квиз TERION.
 """
 import os
 import logging
-from typing import Optional, Dict, List
+from typing import Optional, Dict, List, Tuple
 import aiohttp
 from datetime import datetime
+import json
 
 logger = logging.getLogger(__name__)
+
+# Ссылка на квиз TERION - настройте в .env или используйте значение по умолчанию
+QUIZ_LINK = os.getenv("VK_QUIZ_LINK", "https://t.me/TERION_KvizBot?start=quiz")
+QUIZ_CTA = f"\n\n👉 Узнайте, можно ли узаконить вашу перепланировку за 1 минуту: {QUIZ_LINK}"
 
 
 class VKService:
@@ -236,6 +241,58 @@ class VKService:
             }
         
         return None
+
+
+    async def post_with_quiz_cta(
+        self,
+        message: str,
+        attachments: Optional[List[str]] = None,
+        publish_date: Optional[datetime] = None
+    ) -> Optional[int]:
+        """
+        Публикует пост с призывом пройти квиз TERION.
+        
+        Args:
+            message: Текст поста
+            attachments: Список attachment
+            publish_date: Дата публикации
+        
+        Returns:
+            int: post_id или None
+        """
+        # Добавляем CTA квиза к сообщению
+        full_message = f"{message}{QUIZ_CTA}"
+        return await self.post(full_message, attachments=attachments, publish_date=publish_date)
+
+    async def send_welcome_message(self, user_id: int) -> bool:
+        """
+        Отправляет приветственное сообщение от имени Антона.
+        
+        Args:
+            user_id: ID пользователя ВК
+        
+        Returns:
+            bool: Успех
+        """
+        welcome_text = """👋 Здравствуйте! Я — ИИ-помощник Антон из компании ТЕРИОН.
+
+Я помогаю собственникам недвижимости разобраться с вопросами перепланировок и согласований в Москве.
+
+👉 Узнайте за 1 минуту, можно ли узаконить вашу перепланировку — пройдите наш квиз: {QUIZ_LINK}
+
+Или задайте вопрос здесь, и я помогу разобраться!
+
+---
+*Консультация носит информационный характер. Финальное решение подтверждает эксперт ТЕРИОН.*""".format(QUIZ_LINK=QUIZ_LINK)
+        
+        params = {
+            "user_id": user_id,
+            "message": welcome_text,
+            "random_id": 0  # Для уникальности сообщения
+        }
+        
+        result = await self._make_request("messages.send", params)
+        return result is not None
 
 
 # Singleton instance
