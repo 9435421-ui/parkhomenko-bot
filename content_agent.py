@@ -397,3 +397,48 @@ class ContentAgent:
             body = body[:500]
 
         return {'type': 'приветствие', 'title': title, 'body': body, 'cta': cta}
+
+    async def generate_image(self, prompt: str) -> Optional[str]:
+        """Генерирует изображение через Router AI (Flux)"""
+        import aiohttp
+        
+        api_key = os.getenv("ROUTER_AI_IMAGE_KEY", "").strip()
+        model = os.getenv("FLUX_MODEL", "flux-1-dev")
+        url = os.getenv("ROUTER_IMAGE_URL", "https://api.router.ai/v1/image_generation")
+        
+        if not api_key:
+            logger.error("ROUTER_AI_IMAGE_KEY не настроен")
+            return None
+        
+        headers = {
+            "Authorization": f"Bearer {api_key}",
+            "Content-Type": "application/json"
+        }
+        
+        payload = {
+            "model": model,
+            "prompt": prompt,
+            "width": 1024,
+            "height": 1024,
+            "num_images": 1
+        }
+        
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.post(url, headers=headers, json=payload, timeout=aiohttp.ClientTimeout(total=60)) as resp:
+                    if resp.status != 200:
+                        logger.error(f"Image API error: {resp.status}")
+                        return None
+                    
+                    result = await resp.json()
+                    
+                    if result.get("data") and len(result["data"]) > 0:
+                        image_url = result["data"][0].get("url") or result["data"][0].get("image_url")
+                        if image_url:
+                            logger.info(f"Image generated: {image_url}")
+                            return image_url
+                    
+                    return None
+        except Exception as e:
+            logger.error(f"Image generation error: {e}")
+            return None
