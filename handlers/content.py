@@ -13,7 +13,17 @@ from database import db
 from agents.viral_hooks_agent import viral_hooks_agent
 from content_agent import ContentAgent
 from image_gen import generate
-from config import CHANNEL_ID_TERION, CHANNEL_ID_DOM_GRAD, VK_GROUP_ID, LEADS_GROUP_CHAT_ID, THREAD_ID_NEWS, THREAD_ID_CONTENT_PLAN
+from config import (
+    CHANNEL_ID_TERION, 
+    CHANNEL_ID_DOM_GRAD, 
+    VK_GROUP_ID, 
+    LEADS_GROUP_CHAT_ID, 
+    THREAD_ID_NEWS, 
+    THREAD_ID_CONTENT_PLAN,
+    THREAD_ID_DRAFTS,
+    THREAD_ID_LOGS,
+    THREAD_ID_HOT_LEADS
+)
 from services.vk_service import vk_service
 
 content_agent = ContentAgent()
@@ -604,9 +614,21 @@ async def generate_all_posts(callback: CallbackQuery, state: FSMContext):
             
             posts_generated += 1
         
+        # Отправляем черновики в рабочую группу
+        draft_text = f"📝 <b>Черновики постов ({posts_generated})</b>\n\n"
+        for i in range(1, posts_generated + 1):
+            draft_text += f"{i}. Пост #{i} готов к публикации\n"
+        
+        await callback.bot.send_message(
+            chat_id=LEADS_GROUP_CHAT_ID, 
+            message_thread_id=THREAD_ID_DRAFTS, 
+            text=draft_text,
+            parse_mode="HTML"
+        )
+        
         await callback.message.edit_text(
             f"✅ <b>Все {posts_generated} постов сгенерированы!</b>\n\n"
-            f"📝 Посты сохранены в черновики.\n\n"
+            f"📝 Посты сохранены в черновики (ID {THREAD_ID_DRAFTS}).\n\n"
             f"🎨 К каждому посту сгенерировано изображение.\n\n"
             f"📤 Выберите посты для публикации.",
             reply_markup=get_back_btn(),
