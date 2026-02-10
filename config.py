@@ -57,8 +57,8 @@ COMPETITOR_SPY_ENABLED = os.getenv("COMPETITOR_SPY_ENABLED", "false").lower() ==
 GEO_SPY_ENABLED = os.getenv("GEO_SPY_ENABLED", "true").lower() == "true"  # Шпион включен
 
 # === GEO CHATS (Шпион) ===
-GEO_CHAT_ID = int(os.getenv("GEO_CHAT_ID", "-1001234567890"))
-GEO_CHAT_1_ID = int(os.getenv("GEO_CHAT_1_ID", "-1001987654321"))
+GEO_CHAT_ID = os.getenv("GEO_CHAT_ID", "-1001234567890")
+GEO_CHAT_1_ID = os.getenv("GEO_CHAT_1_ID", "-1001987654321")
 
 # === KEYWORDS FOR SPY ===
 SPY_KEYWORDS = [

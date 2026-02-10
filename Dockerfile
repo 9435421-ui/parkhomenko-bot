@@ -1,5 +1,5 @@
 # Dockerfile для бота «Лад в квартире»
-FROM python:3.11-slim
+FROM cr.yandex/mirror/python:3.11-slim
 
 # Устанавливаем рабочую директорию
 WORKDIR /app
