@@ -14,7 +14,7 @@ from database import db
 from utils import router_ai, image_compressor, yandex_vision
 from services.vk_service import vk_service
 
-router = Router()
+admin_router = Router()
 
 # Настройки папок
 UPLOAD_DIR = os.getenv("UPLOAD_DIR", "uploads")
@@ -82,7 +82,7 @@ def get_admin_keyboard():
     )
 
 
-@router.message(F.text == "/admin")
+@admin_router.message(F.text == "/admin")
 async def admin_menu(message: Message):
     """Меню администратора"""
     if message.from_user.id != ADMIN_ID:
@@ -98,7 +98,7 @@ async def admin_menu(message: Message):
     )
 
 
-@router.message(F.text == "📸 Загрузить фото")
+@admin_router.message(F.text == "📸 Загрузить фото")
 async def start_upload_photo(message: Message, state: FSMContext):
     """Начало загрузки фото"""
     if message.from_user.id != ADMIN_ID:
@@ -111,7 +111,7 @@ async def start_upload_photo(message: Message, state: FSMContext):
     )
 
 
-@router.message(PhotoStates.waiting_for_photo, F.photo)
+@admin_router.message(PhotoStates.waiting_for_photo, F.photo)
 async def process_photo(message: Message, state: FSMContext):
     """Обработка загруженного фото"""
     user_id = message.from_user.id
@@ -166,7 +166,7 @@ async def process_photo(message: Message, state: FSMContext):
     await state.set_state(PhotoStates.waiting_for_description)
 
 
-@router.message(PhotoStates.waiting_for_description)
+@admin_router.message(PhotoStates.waiting_for_description)
 async def process_description(message: Message, state: FSMContext):
     """Обработка описания и анализ через ИИ"""
     data = await state.get_data()
@@ -222,7 +222,7 @@ async def analyze_photos_with_ai(photo_paths: list) -> str:
         return "📸 Фото объекта"
 
 
-@router.callback_query(PhotoStates.waiting_for_channel)
+@admin_router.callback_query(PhotoStates.waiting_for_channel)
 async def process_channel(callback: CallbackQuery, state: FSMContext):
     """Выбор канала и сохранение поста"""
     data = await state.get_data()
@@ -311,7 +311,7 @@ async def process_channel(callback: CallbackQuery, state: FSMContext):
     await state.clear()
 
 
-@router.message(F.text == "📋 Мои черновики")
+@admin_router.message(F.text == "📋 Мои черновики")
 async def my_posts(message: Message):
     """Показать черновики админа"""
     if message.from_user.id != ADMIN_ID:
@@ -331,7 +331,7 @@ async def my_posts(message: Message):
     await message.answer(response)
 
 
-@router.callback_query(F.data.startswith("edit_post:"))
+@admin_router.callback_query(F.data.startswith("edit_post:"))
 async def edit_post(callback: CallbackQuery, state: FSMContext):
     """Начало редактирования поста"""
     post_id = int(callback.data.replace("edit_post:", ""))
@@ -357,7 +357,7 @@ async def edit_post(callback: CallbackQuery, state: FSMContext):
     await callback.answer()
 
 
-@router.message(AdminStates.waiting_for_new_caption)
+@admin_router.message(AdminStates.waiting_for_new_caption)
 async def save_edited_caption(message: Message, state: FSMContext):
     """Сохранение отредактированного текста"""
     data = await state.get_data()
@@ -375,7 +375,7 @@ async def save_edited_caption(message: Message, state: FSMContext):
     await state.clear()
 
 
-@router.callback_query(F.data.startswith("delete_post:"))
+@admin_router.callback_query(F.data.startswith("delete_post:"))
 async def delete_post(callback: CallbackQuery):
     """Удаление поста"""
     post_id = int(callback.data.replace("delete_post:", ""))
@@ -388,7 +388,7 @@ async def delete_post(callback: CallbackQuery):
     await callback.answer()
 
 
-@router.callback_query(F.data.startswith("publish_post:"))
+@admin_router.callback_query(F.data.startswith("publish_post:"))
 async def publish_post(callback: CallbackQuery, bot):
     """Публикация поста в ТГ и ВК"""
     post_id = int(callback.data.replace("publish_post:", ""))
@@ -476,7 +476,7 @@ async def publish_post(callback: CallbackQuery, bot):
     await callback.answer()
 
 
-@router.message(F.text == "📊 Статистика")
+@admin_router.message(F.text == "📊 Статистика")
 async def stats(message: Message):
     """Статистика постов"""
     if message.from_user.id != ADMIN_ID:
@@ -493,21 +493,21 @@ async def stats(message: Message):
 
 
 # Обработка команды /upload_photo
-@router.message(F.text == "/upload_photo")
+@admin_router.message(F.text == "/upload_photo")
 async def cmd_upload_photo(message: Message, state: FSMContext):
     """Команда загрузки фото"""
     await start_upload_photo(message, state)
 
 
 # Обработка команды /my_posts
-@router.message(F.text == "/my_posts")
+@admin_router.message(F.text == "/my_posts")
 async def cmd_my_posts(message: Message):
     """Команда показа черновиков"""
     await my_posts(message)
 
 
 # Обработка команды /stats
-@router.message(F.text == "/stats")
+@admin_router.message(F.text == "/stats")
 async def cmd_stats(message: Message):
     """Команда статистики"""
     await stats(message)
