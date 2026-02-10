@@ -27,9 +27,8 @@ class ContentStates(StatesGroup):
     publish = State()
 
 
-# === KEYBOARDS (InlineKeyboardBuilder) ===
+# === KEYBOARDS ===
 def get_content_menu() -> InlineKeyboardMarkup:
-    """Главное меню контента"""
     builder = InlineKeyboardBuilder()
     builder.button(text="📝 Создать пост", callback_data="create_post")
     builder.button(text="📊 Статистика", callback_data="stats")
@@ -39,14 +38,12 @@ def get_content_menu() -> InlineKeyboardMarkup:
 
 
 def get_back_btn() -> InlineKeyboardMarkup:
-    """Кнопка назад"""
     builder = InlineKeyboardBuilder()
     builder.button(text="◀️ В меню", callback_data="content_back")
     return builder.as_markup()
 
 
 def get_publish_btns(post_id: int) -> InlineKeyboardMarkup:
-    """Кнопки публикации"""
     builder = InlineKeyboardBuilder()
     builder.button(text="📤 TERION", callback_data=f"publish_terion_{post_id}")
     builder.button(text="📤 ДОМ ГРАНД", callback_data=f"publish_dom_{post_id}")
@@ -56,16 +53,16 @@ def get_publish_btns(post_id: int) -> InlineKeyboardMarkup:
 
 
 def get_photo_done_keyboard() -> InlineKeyboardMarkup:
-    """Клавиатура после загрузки фото"""
     builder = InlineKeyboardBuilder()
     builder.button(text="✅ Хватит фото", callback_data="ai_photo_done")
     builder.button(text="◀️ В меню", callback_data="content_back")
     return builder.as_markup()
 
 
-# === /START для Content Bot ===
-(message: Message, state: FSMContext):
-    """Старт Content Bot — сразу показываем меню"""
+# === /START ===
+@content_router.message(CommandStart())
+async def content_start(message: Message, state: FSMContext):
+    """Старт Content Bot"""
     await state.clear()
     await message.answer(
         "🎯 <b>Content Bot</b>\n\nВыберите:",
@@ -75,27 +72,18 @@ def get_photo_done_keyboard() -> InlineKeyboardMarkup:
     await state.set_state(ContentStates.main_menu)
 
 
-# === MAIN MENU ===
-@content_router.callback_query(F.data == "mode:content")
-async def content_menu(callback: CallbackQuery, state: FSMContext):
-    """Меню контента"""
-    await callback.message.edit_text(
-        "🎯 <b>Content Bot</b>\n\nВыберите:",
-        reply_markup=get_content_menu(),
-        parse_mode="HTML"
-    )
-    await state.set_state(ContentStates.main_menu)
-    await callback.answer()
-
-
 # === CALLBACKS ===
 @content_router.callback_query(F.data.startswith("content_"))
 async def content_callback(callback: CallbackQuery, state: FSMContext):
-    """Обработка кнопок"""
     data = callback.data
     
     if data == "content_back":
-        await content_menu(callback, state)
+        await callback.message.edit_text(
+            "🎯 <b>Content Bot</b>\n\nВыберите:",
+            reply_markup=get_content_menu(),
+            parse_mode="HTML"
+        )
+        await state.set_state(ContentStates.main_menu)
         return
     
     if data == "create_post":
@@ -185,7 +173,6 @@ async def content_callback(callback: CallbackQuery, state: FSMContext):
 # === AI PHOTO ===
 @content_router.message(ContentStates.ai_photo, F.photo)
 async def ai_photo_handler(message: Message, state: FSMContext):
-    """Получаем фото"""
     data = await state.get_data()
     user_state = data.get("user_state", {})
     photos = user_state.get("photos", [])
@@ -204,7 +191,6 @@ async def ai_photo_handler(message: Message, state: FSMContext):
 
 @content_router.callback_query(ContentStates.ai_photo, F.data == "ai_photo_done")
 async def ai_photo_done(callback: CallbackQuery, state: FSMContext):
-    """Фото готовы"""
     await callback.message.edit_text(
         "🎨 ИИ создаёт варианты...",
         reply_markup=get_back_btn()
@@ -218,13 +204,8 @@ async def ai_photo_done(callback: CallbackQuery, state: FSMContext):
     
     variants = []
     for hook in hooks:
-        text = f"{hook['text']}\n\n💡 Обращайтесь: @Parkhovenko_i_kompaniya_bot"
-        variants.append({
-            "type": hook.get("category", "экспертный"),
-            "text": text,
-            "topic": topic,
-            "photos": photos
-        })
+        text = f"{hook['text']}\n\n💡 @Parkhovenko_i_kompaniya_bot"
+        variants.append({"type": hook.get("category", "экспертный"), "text": text, "topic": topic, "photos": photos})
     
     user_state = data.get("user_state", {})
     user_state["variants"] = variants
@@ -240,17 +221,13 @@ async def ai_photo_done(callback: CallbackQuery, state: FSMContext):
             parse_mode="HTML"
         )
     
-    await callback.message.answer(
-        "Выберите вариант:",
-        reply_markup=get_back_btn()
-    )
+    await callback.message.answer("Выберите вариант:", reply_markup=get_back_btn())
     await state.set_state(ContentStates.select_variant)
 
 
 # === AI TEXT ===
 @content_router.message(ContentStates.ai_text)
 async def ai_text_handler(message: Message, state: FSMContext):
-    """Текст → пост"""
     topic = message.text
     await state.update_data(topic=topic)
     
@@ -276,7 +253,6 @@ async def ai_text_handler(message: Message, state: FSMContext):
 # === AI SERIES ===
 @content_router.message(ContentStates.ai_series)
 async def ai_series_handler(message: Message, state: FSMContext):
-    """Серия постов"""
     topic = message.text
     data = await state.get_data()
     days = data.get("user_state", {}).get("days", 7)
@@ -300,7 +276,6 @@ async def ai_series_handler(message: Message, state: FSMContext):
 
 
 def generate_series_chain(topic: str, days: int):
-    """Генерирует цепочку постов"""
     chain = []
     themes = [
         ("Боль", f"😱 Штрафы за {topic.lower()}"),
@@ -321,7 +296,6 @@ def generate_series_chain(topic: str, days: int):
 
 # === PUBLISH ===
 async def handle_publish(callback: CallbackQuery, state: FSMContext):
-    """Публикация"""
     data = callback.data
     parts = data.split("_")
     if len(parts) < 3:
@@ -358,9 +332,3 @@ async def handle_publish(callback: CallbackQuery, state: FSMContext):
     except Exception as e:
         logger.error(f"Publish error: {e}")
         await callback.answer(f"❌ Ошибка: {e}")
-
-
-(message: Message, state: FSMContext):
-    """Эхо"""
-    current_state = await state.get_state()
-    await message.answer(f"DEBUG: state={current_state}")
