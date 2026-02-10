@@ -55,13 +55,14 @@ def get_publish_btns(post_id: int, include_image: bool = False) -> InlineKeyboar
     builder.button(text="📤 TERION", callback_data=f"publish:terion:{post_id}")
     builder.button(text="📤 ДОМ ГРАНД", callback_data=f"publish:dom:{post_id}")
     builder.button(text="📤 ВК", callback_data=f"publish:vk:{post_id}")
+    builder.button(text="📤 Max", callback_data=f"publish:max:{post_id}")
     
     # Кнопка генерации изображения
     if not include_image:
         builder.button(text="🎨 Сгенерировать ИИ-фото", callback_data=f"gen_image:{post_id}")
     
     builder.button(text="◀️ В меню", callback_data="content_back")
-    builder.adjust(3, 1, 1)
+    builder.adjust(4, 1, 1)
     return builder.as_markup()
 
 
@@ -441,6 +442,16 @@ async def handle_publish(callback: CallbackQuery, state: FSMContext):
             await callback.message.edit_text("✅ <b>Опубликовано ВКонтакте!</b>\n\nПост #" + str(vk_result), reply_markup=get_content_menu(), parse_mode="HTML")
         else:
             await callback.answer("❌ Ошибка ВК!")
+        return
+    elif channel == "max":
+        # Публикация в Max.ru
+        await callback.message.edit_text("📤 <b>Публикую в Max.ru...</b>", parse_mode="HTML")
+        max_result = await content_agent.post_to_max(post_id)
+        if max_result:
+            await db.update_content_post(post_id, status="published")
+            await callback.message.edit_text("✅ <b>Опубликовано в Max.ru!</b>", reply_markup=get_content_menu(), parse_mode="HTML")
+        else:
+            await callback.answer("❌ Ошибка Max.ru!")
         return
     else:
         await callback.answer("Неизвестный канал!")

@@ -434,3 +434,94 @@ class ContentAgent:
         except Exception as e:
             logger.error(f"Image generation error: {e}")
             return None
+
+    async def _get_max_subsite_id(self) -> Optional[str]:
+        """Получает ID сайта из Max.ru API"""
+        import aiohttp
+        
+        device_token = os.getenv("MAX_DEVICE_TOKEN", "").strip()
+        url = "https://api.max.ru/v1.9/subsite/me"
+        
+        if not device_token:
+            logger.error("MAX_DEVICE_TOKEN не настроен")
+            return None
+        
+        headers = {
+            "X-Device-Token": device_token,
+            "Content-Type": "application/json"
+        }
+        
+        try:
+            # Игнорируем SSL проверку
+            connector = aiohttp.TCPConnector(verify_ssl=False)
+            async with aiohttp.ClientSession(connector=connector) as session:
+                async with session.get(url, headers=headers, timeout=aiohttp.ClientTimeout(total=30)) as resp:
+                    if resp.status != 200:
+                        logger.error(f"Max API error: {resp.status}")
+                        return None
+                    
+                    result = await resp.json()
+                    subsite_id = result.get("id") or result.get("subsite_id")
+                    
+                    if subsite_id:
+                        logger.info(f"Max.ru subsite_id: {subsite_id}")
+                        print(f"🔗 Max.ru subsite_id: {subsite_id}")
+                        return subsite_id
+                    
+                    logger.warning(f"Max API response: {result}")
+                    return None
+        except Exception as e:
+            logger.error(f"Max API error: {e}")
+            return None
+
+    async def post_to_max(self, post_id: int, subsite_id: str = None) -> bool:
+        """Публикует пост в Max.ru"""
+        import aiohttp
+        
+        if not subsite_id:
+            subsite_id = await self._get_max_subsite_id()
+        
+        if not subsite_id:
+            logger.error("Не удалось получить subsite_id для Max.ru")
+            return False
+        
+        device_token = os.getenv("MAX_DEVICE_TOKEN", "").strip()
+        url = f"https://api.max.ru/v1.9/subsite/{subsite_id}/content"
+        
+        if not device_token:
+            logger.error("MAX_DEVICE_TOKEN не настроен")
+            return False
+        
+        headers = {
+            "X-Device-Token": device_token,
+            "Content-Type": "application/json"
+        }
+        
+        # Получаем пост из БД
+        from database import db
+        post = await db.get_content_post(post_id)
+        
+        if not post:
+            logger.error(f"Пост {post_id} не найден")
+            return False
+        
+        payload = {
+            "title": post.get("title", ""),
+            "body": post.get("body", ""),
+            "type": "post"
+        }
+        
+        try:
+            connector = aiohttp.TCPConnector(verify_ssl=False)
+            async with aiohttp.ClientSession(connector=connector) as session:
+                async with session.post(url, headers=headers, json=payload, timeout=aiohttp.ClientTimeout(total=60)) as resp:
+                    if resp.status == 200:
+                        logger.info(f"Пост {post_id} опубликован в Max.ru")
+                        return True
+                    else:
+                        error_text = await resp.text()
+                        logger.error(f"Max publish error {resp.status}: {error_text}")
+                        return False
+        except Exception as e:
+            logger.error(f"Max publish error: {e}")
+            return False
