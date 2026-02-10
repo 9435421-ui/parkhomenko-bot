@@ -52,3 +52,7 @@ MINI_APP_URL = os.getenv("MINI_APP_URL", "https://ternion.ru/mini_app/")
 ENABLE_IMAGE_GENERATION = os.getenv("ENABLE_IMAGE_GENERATION", "false").lower() == "true"
 COMPETITOR_SPY_ENABLED = os.getenv("COMPETITOR_SPY_ENABLED", "false").lower() == "true"
 GEO_SPY_ENABLED = os.getenv("GEO_SPY_ENABLED", "false").lower() == "true"
+
+# === GEO CHATS (Шпион) ===
+GEO_CHAT_ID = int(os.getenv("GEO_CHAT_ID", "-1001234567890"))  # Гео-чат для мониторинга
+GEO_CHAT_1_ID = int(os.getenv("GEO_CHAT_1_ID", "-1001987654321"))
