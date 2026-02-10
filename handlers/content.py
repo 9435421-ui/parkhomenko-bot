@@ -46,10 +46,11 @@ def get_back_btn() -> InlineKeyboardMarkup:
 
 
 def get_publish_btns(post_id: int) -> InlineKeyboardMarkup:
+    """Кнопки публикации — формат publish:{channel}:{id}"""
     builder = InlineKeyboardBuilder()
-    builder.button(text="📤 TERION", callback_data=f"publish_terion_{post_id}")
-    builder.button(text="📤 ДОМ ГРАНД", callback_data=f"publish_dom_{post_id}")
-    builder.button(text="📤 ВК", callback_data=f"publish_vk_{post_id}")
+    builder.button(text="📤 TERION", callback_data=f"publish:terion:{post_id}")
+    builder.button(text="📤 ДОМ ГРАНД", callback_data=f"publish:dom:{post_id}")
+    builder.button(text="📤 ВК", callback_data=f"publish:vk:{post_id}")
     builder.button(text="◀️ В меню", callback_data="content_back")
     return builder.as_markup()
 
@@ -222,7 +223,7 @@ async def menu_news_detail(callback: CallbackQuery, state: FSMContext):
 
 
 # === PUBLISH ===
-@content_router.callback_query(F.data.startswith("publish_"))
+@content_router.callback_query(F.data.startswith("publish:"))
 async def menu_publish(callback: CallbackQuery, state: FSMContext):
     """Публикация поста"""
     await callback.answer()
@@ -335,15 +336,20 @@ def generate_series_chain(topic: str, days: int):
 
 
 async def handle_publish(callback: CallbackQuery, state: FSMContext):
-    """Публикация поста в канал"""
+    """Публикация поста в канал — формат publish:{channel}:{id}"""
     data = callback.data
-    parts = data.split("_")
+    # Формат: publish:terion:123 -> ["publish", "terion", "123"]
+    parts = data.split(":")
     if len(parts) < 3:
-        await callback.answer("Ошибка!")
+        await callback.answer("Ошибка формата!")
         return
     
     channel = parts[1]
-    post_id = int(parts[2])
+    try:
+        post_id = int(parts[2])
+    except ValueError:
+        await callback.answer("Ошибка ID!")
+        return
     post = await db.get_content_post(post_id)
     
     if not post:
