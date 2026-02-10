@@ -30,10 +30,11 @@ class ContentStates(StatesGroup):
 # === KEYBOARDS ===
 def get_content_menu() -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
-    builder.button(text="📝 Создать пост", callback_data="create_post")
-    builder.button(text="📊 Статистика", callback_data="stats")
-    builder.button(text="⚙️ Настройки", callback_data="settings")
-    builder.adjust(1)
+    builder.button(text="📝 Создать пост", callback_data="menu:create")
+    builder.button(text="🗓 Контент-план", callback_data="menu:plan")
+    builder.button(text="📸 Пост по фото", callback_data="menu:photo")
+    builder.button(text="✍️ Редактор текста", callback_data="menu:editor")
+    builder.button(text="📰 Новости отрасли", callback_data="menu:news")
     return builder.as_markup()
 
 
@@ -149,6 +150,14 @@ async def content_callback(callback: CallbackQuery, state: FSMContext):
             reply_markup=get_back_btn(),
             parse_mode="HTML"
         )
+        return
+    
+    if data == "menu:news":
+        await show_news(callback, state)
+        return
+        
+    if data.startswith("news:"):
+        await generate_post_from_news(callback, state)
         return
         
     if data.startswith("series_"):
