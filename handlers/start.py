@@ -145,3 +145,71 @@ async def question_handler(message: Message, state: FSMContext):
         "по перепланировкам и согласованию.",
         parse_mode="HTML"
     )
+
+
+# === CALLBACK HANDLERS ===
+@router.callback_query(F.data == "content_back")
+async def content_back_handler(callback: CallbackQuery, state: FSMContext):
+    """Назад в меню"""
+    await state.clear()
+    await callback.message.edit_text(
+        "📝 <b>Создание поста</b>\n\n"
+        "Выберите формат:",
+        reply_markup=get_content_menu()
+    )
+    await callback.answer()
+
+
+@router.callback_query(F.data == "menu:create")
+async def menu_create_handler(callback: CallbackQuery, state: FSMContext):
+    """Меню: Создать пост"""
+    await callback.message.edit_text(
+        "🎨 <b>Генерация поста</b>\n\n"
+        "Введите тему поста:",
+        parse_mode="HTML"
+    )
+    await callback.answer()
+
+
+@router.callback_query(F.data == "menu:editor")
+async def menu_editor_handler(callback: CallbackQuery, state: FSMContext):
+    """Меню: Редактор текста"""
+    await callback.message.edit_text(
+        "✍️ <b>Редактор текста</b>\n\n"
+        "Введите текст для публикации:",
+        parse_mode="HTML"
+    )
+    await callback.answer()
+
+
+@router.callback_query(F.data == "menu:photo")
+async def menu_photo_handler(callback: CallbackQuery, state: FSMContext):
+    """Меню: Пост по фото"""
+    await callback.message.edit_text(
+        "📸 <b>Пост по фото</b>\n\n"
+        "Загрузите фото объекта:",
+        parse_mode="HTML"
+    )
+    await callback.answer()
+
+
+@router.callback_query(F.data == "urgent_publish")
+async def urgent_publish_handler(callback: CallbackQuery, state: FSMContext):
+    """Срочная публикация"""
+    await callback.message.edit_text(
+        "🚀 <b>Срочная публикация отправлена!</b>\n\n"
+        "Пост опубликован вне очереди.",
+        parse_mode="HTML"
+    )
+    await callback.answer()
+
+
+@router.callback_query(F.data == "urgent_edit")
+async def urgent_edit_handler(callback: CallbackQuery, state: FSMContext):
+    """Доработка срочного поста"""
+    await callback.message.edit_text(
+        "📝 <b>Доработка поста</b>\n\n"
+        "Введите исправленный текст:",
+        parse_mode="HTML"
+    )
+    await callback.answer()
