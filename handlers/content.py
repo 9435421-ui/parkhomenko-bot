@@ -123,10 +123,11 @@ async def content_callback(callback: CallbackQuery, state: FSMContext):
         return
         
     if data == "menu:plan":
+        # Показываем длительность серии
         builder = InlineKeyboardBuilder()
-        builder.button(text="7 дней", callback_data="menu:series_7")
-        builder.button(text="14 дней", callback_data="menu:series_14")
-        builder.button(text="30 дней", callback_data="menu:series_30")
+        builder.button(text="7 дней", callback_data="plan_days_7")
+        builder.button(text="14 дней", callback_data="plan_days_14")
+        builder.button(text="30 дней", callback_data="plan_days_30")
         builder.adjust(3)
         
         await callback.message.edit_text(
@@ -135,6 +136,13 @@ async def content_callback(callback: CallbackQuery, state: FSMContext):
             parse_mode="HTML"
         )
         await state.set_state(ContentStates.ai_series)
+        await callback.answer()
+        return
+    
+    if data.startswith("plan_days_"):
+        days = int(data.split("_")[-1])
+        # Генерируем план на выбранное количество дней
+        await show_content_plan(callback, state, days)
         return
         
     if data.startswith("menu:series_"):
@@ -457,9 +465,9 @@ async def generate_post_from_news(callback: CallbackQuery, state: FSMContext):
     await callback.answer()
 
 
-@content_router.callback_query(F.data == "menu:plan")
+# === CONTENT PLAN ===
 async def show_content_plan(callback: CallbackQuery, state: FSMContext, days: int = 7):
-    """Генерирует контент-план и отправляет в топик 83"""
+    """Генерирует конт-план и отправляет в топик"""
     text = f"🗓 <b>Контент-план на {days} дней</b>\n\n"
     
     topics = await scout_agent.scout_topics(count=days)
@@ -471,7 +479,7 @@ async def show_content_plan(callback: CallbackQuery, state: FSMContext, days: in
         insight = topic.get("insight", "")[:40]
         text += f"{i} | {rubric} | {title} | {insight}\n"
     
-    # Отправляем в топик КОНТЕНТ-ПЛАН (83)
+    # В топик КОНТЕНТ-ПЛАН
     await callback.bot.send_message(
         chat_id=LEADS_GROUP_CHAT_ID,
         message_thread_id=THREAD_ID_CONTENT_PLAN,
@@ -484,6 +492,31 @@ async def show_content_plan(callback: CallbackQuery, state: FSMContext, days: in
         reply_markup=get_back_btn(),
         parse_mode="HTML"
     )
+
+
+# === URGENT HANDLERS (for urgent_btn from admin) ===
+@content_router.callback_query(F.data == "urgent_publish")
+async def urgent_publish_handler(callback: CallbackQuery, state: FSMContext):
+    """Срочная публикация - переслать в рабочую группу"""
+    await callback.message.edit_text(
+        "🚀 <b>Срочная публикация!</b>\n\n"
+        "Пост отмечен как срочный и будет опубликован первым.",
+        parse_mode="HTML"
+    )
+    await callback.answer()
+
+
+@content_router.callback_query(F.data == "urgent_edit")
+async def urgent_edit_handler(callback: CallbackQuery, state: FSMContext):
+    """Доработка срочного поста"""
+    await callback.message.edit_text(
+        "📝 <b>Доработка поста</b>\n\n"
+        "Введите исправленный текст:",
+        parse_mode="HTML"
+    )
+    await callback.answer()
+
+
 
 
 # === ScoutAgent заглушка ===
