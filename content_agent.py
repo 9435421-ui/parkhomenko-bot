@@ -72,7 +72,7 @@ class ContentAgent:
 
         payload = {
             "modelUri": f"gpt://{self.folder_id}/yandexgpt/latest",
-            "completionOptions": {"stream": False, "temperature": 0.7, "maxTokens": 2000},
+            "completionOptions": {"stream": False, "temperature": 0.7, "maxTokens": 400},
             "messages": [
                 {"role": "system", "text": system_prompt},
                 {"role": "user", "text": user_prompt}
