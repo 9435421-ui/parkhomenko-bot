@@ -12,7 +12,7 @@ CONTENT_BOT_TOKEN = os.getenv("CONTENT_BOT_TOKEN")  # ДОМ ГРАНД (Кон�
 
 # === VK ===
 VK_TOKEN = os.getenv("VK_TOKEN")
-VK_GROUP_ID = os.getenv("VK_GROUP_ID")
+VK_GROUP_ID = int(os.getenv("VK_GROUP_ID", "235569022"))
 
 # === CHANNELS (ПУБЛИКАЦИЯ) ===
 CHANNEL_ID_TERION = int(os.getenv("CHANNEL_ID_TERION", "-1003612599428"))
@@ -21,6 +21,9 @@ NOTIFICATIONS_CHANNEL_ID = int(os.getenv("NOTIFICATIONS_CHANNEL_ID", "-100347121
 
 # === WORKING GROUP (ОБСУЖДЕНИЕ) ===
 LEADS_GROUP_CHAT_ID = int(os.getenv("LEADS_GROUP_CHAT_ID", "-1003370698977"))
+
+# === QUIZ LINK ===
+VK_QUIZ_LINK = os.getenv("VK_QUIZ_LINK", "https://t.me/TERION_KvizBot?start=quiz")
 
 # === THREADS IN WORKING GROUP ===
 THREAD_ID_KVARTIRY = int(os.getenv("THREAD_ID_KVARTIRY", "2"))
