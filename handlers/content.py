@@ -22,13 +22,18 @@ from config import (
     THREAD_ID_CONTENT_PLAN,
     THREAD_ID_DRAFTS,
     THREAD_ID_LOGS,
-    THREAD_ID_HOT_LEADS
+    THREAD_ID_HOT_LEADS,
+    VK_QUIZ_LINK
 )
 from services.vk_service import vk_service
 
 content_agent = ContentAgent()
 
 logger = logging.getLogger(__name__)
+
+# Логируем подтверждение маршрутизации
+logger.info("Экосистема TERION: Маррутизация настроена")
+
 content_router = Router()
 
 
