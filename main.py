@@ -9,7 +9,23 @@ import logging
 from aiogram import Bot, Dispatcher
 from aiogram.fsm.storage.memory import MemoryStorage
 from aiogram.client.default import DefaultBotProperties
+from aiogram import BaseMiddleware
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
+
+# === Middleware для логирования необработанных callback ===
+class UnhandledCallbackMiddleware(BaseMiddleware):
+    """Логирует все callback, которые не были обработаны"""
+    
+    async def __call__(self, handler, event, data):
+        try:
+            response = await handler(event, data)
+            return response
+        except Exception as e:
+            # Логируем необработанные callback
+            if hasattr(event, 'callback_query'):
+                cb = event.callback_query
+                logger.warning(f"🔔 Unhandled callback: {cb.data} от @{cb.from_user.username}")
+            raise
 
 from config import BOT_TOKEN, CONTENT_BOT_TOKEN, LEADS_GROUP_CHAT_ID, THREAD_ID_KVARTIRY, THREAD_ID_KOMMERCIA, THREAD_ID_DOMA
 from handlers.main_bot import start_router, quiz_router, dialog_router
@@ -81,6 +97,10 @@ async def run_main_bot():
     main_bot = Bot(token=BOT_TOKEN, default=DefaultBotProperties(parse_mode="HTML"))
     dp_main = Dispatcher(storage=MemoryStorage())
     
+    # Middleware для логирования
+    dp_main.message.middleware(UnhandledCallbackMiddleware())
+    dp_main.callback_query.middleware(UnhandledCallbackMiddleware())
+    
     # Роутеры АНТОНА
     dp_main.include_router(start_router)
     dp_main.include_router(quiz_router)
@@ -98,6 +118,10 @@ async def run_content_bot():
     
     content_bot = Bot(token=CONTENT_BOT_TOKEN, default=DefaultBotProperties(parse_mode="HTML"))
     dp_content = Dispatcher(storage=MemoryStorage())
+    
+    # Middleware для логирования
+    dp_content.message.middleware(UnhandledCallbackMiddleware())
+    dp_content.callback_query.middleware(UnhandledCallbackMiddleware())
     
     # Роутеры ДОМ ГРАНДА
     dp_content.include_router(content_router)
