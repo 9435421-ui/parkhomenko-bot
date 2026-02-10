@@ -1,10 +1,8 @@
 """
-Content Agent — модуль генерации контента для Telegram-каналов.
-
-Генерирует посты, изображения и отчёты для каналов ТЕРИОН и ДОМ ГРАНД.
-Использует Router AI (GPT) и Flux для генерации.
+Content Agent — асинхронный модуль генерации контента для Telegram-каналов.
+Использует aiohttp для асинхронных запросов к Router AI (GPT).
 """
-import requests
+import aiohttp
 import os
 import logging
 import random
@@ -15,173 +13,51 @@ logger = logging.getLogger(__name__)
 
 
 class ContentAgent:
-    """Агент для генерации контента"""
+    """Агент для генерации контента (async)"""
 
     def __init__(self):
         self.folder_id = os.getenv("FOLDER_ID")
         self.api_key = os.getenv("ROUTER_AI_KEY") or os.getenv("YANDEX_API_KEY")
         self.image_api_key = os.getenv("ROUTER_AI_IMAGE_KEY") or self.api_key
         self.endpoint = os.getenv("ROUTER_AI_ENDPOINT", "https://api.router.ai/v1/completion")
-        self.image_endpoint = os.getenv("ROUTER_AI_IMAGE_ENDPOINT", "https://api.router.ai/v1/image_generation")
+        
+        # Fallback шаблоны на случай ошибок
+        self.fallback_templates = {
+            'экспертиза': {
+                'title': '📋 Важная информация о перепланировке',
+                'body': 'При перепланировке квартиры важно соблюдать установленные нормы и правила.\n\nОбратитесь к нашим экспертам за консультацией — мы поможем разобраться в тонкостях законодательства.',
+                'cta': '👉 Записаться на консультацию: @Parkhovenko_i_kompaniya_bot'
+            },
+            'живой': {
+                'title': '🏠 Новости ремонтного сезона',
+                'body': 'Весна — время обновления! Многие собственники начинают ремонтные работы.\n\nПомните: любые изменения требуют согласования. Наши специалисты готовы помочь с подготовкой документов.',
+                'cta': '👉 Получить консультацию: @Parkhovenko_i_kompaniya_bot'
+            },
+            'новость': {
+                'title': '📢 Информация для собственников',
+                'body': 'Напоминаем о необходимости соблюдения норм при проведении перепланировок.\n\nНесогласованные изменения могут повлечь штрафы и сложности с продажей недвижимости.',
+                'cta': '👉 Узнать подробности: @Parkhovenko_i_kompaniya_bot'
+            },
+            'поздравление': {
+                'title': '🎂 С праздником!',
+                'body': 'Пусть этот день принесёт вам радость, тепло и уют в вашем доме!\n\nЖелаем здоровья, счастья и благополучия вашей семье.',
+                'cta': ''
+            },
+            'приветствие': {
+                'title': '👋 Добро пожаловать!',
+                'body': 'Мы рады видеть вас в нашем канале!\n\nЗдесь вы найдёте полезную информацию о перепланировках, ремонте и согласовании изменений в квартире.',
+                'cta': '👉 Задать вопрос: @Parkhovenko_i_kompaniya_bot'
+            }
+        }
 
         self.birthday_templates = [
             "Поздравляем вас с днем рождения! Пусть этот день будет наполнен радостью, теплом близких и приятными сюрпризами. Желаем крепкого здоровья, душевного равновесия и исполнения самых заветных желаний.",
             "С днем рождения! Пусть этот особенный день принесет вам море улыбок, тепла от родных и друзей, а также исполнение всех мечтаний. Желаем здоровья, счастья и благополучия на каждый день.",
             "Поздравляем с днем рождения! Пусть этот день будет ярким и незабываемым, наполненным любовью близких и приятными моментами. Желаем крепкого здоровья, семейного тепла и достижения всех поставленных целей.",
-            "С днем рождения! Пусть этот праздник принесет вам заряд положительных эмоций, теплые объятия родных и исполнение желаний. Желаем здоровья, счастья и благополучия в вашей жизни.",
-            "Поздравляем с днем рождения! Пусть этот день будет особенным, наполненным радостью, теплом и заботой близких. Желаем крепкого здоровья, душевного комфорта и исполнения всех мечтаний.",
-            "С днем рождения! Пусть этот праздник станет началом новых радостных событий в вашей жизни. Желаем здоровья, счастья, семейного тепла и исполнения самых сокровенных желаний.",
-            "Поздравляем с днем рождения! Пусть этот день будет ярким и незабываемым, а каждый новый день приносит новые возможности и радости. Желаем крепкого здоровья и благополучия.",
-            "С днем рождения! Желаем вам тепла от близких, радости от маленьких побед и исполнения мечтаний. Пусть этот день станет одним из самых счастливых в вашей жизни."
         ]
 
-    def build_image_prompt(self, post: dict) -> str:
-        """Генерирует промпт для Flux"""
-        post_type = post.get('type')
-        channel = post.get('channel', 'terion')
-        theme = post.get('theme', '')
-
-        terion_prompts = {
-            'экспертиза': "architectural visualization, blueprints, professional office, legal papers, corporate style, clean minimalist design, 4k resolution, no people, TERION brand colors",
-            'живой': "modern apartment renovation Moscow, interior design, realistic lighting, open space kitchen living room, minimalist corporate style, 4k resolution, professional photography look",
-            'новость': "Moscow construction news, architectural update, city building context, professional corporate style, technical aesthetic, 4k resolution, no people, clean business presentation",
-            'поздравление': "elegant celebration background, warm golden lighting, festive decoration soft colors, cozy atmosphere, professional corporate TERION style, 4k resolution",
-            'приветствие': "professional consultation office, modern workspace, clean minimalist design, TERION branding, 4k resolution, welcoming business atmosphere"
-        }
-
-        dom_grand_prompts = {
-            'экспертиза': "construction site, building process, house renovation, technical details, blueprints on site, professional builder aesthetic, construction materials, 4k resolution, DOM GRAND style",
-            'живой': "country house construction, rural property, building site progress, realistic working environment, construction team, modern rural architecture, 4k resolution, DOM GRAND branding",
-            'новость': "building news rural, construction update, house project progress, technical construction photography, professional site documentation, 4k resolution, DOM GRAND aesthetic",
-            'поздравление': "warm country house celebration, rural home atmosphere, festive construction site decoration, cozy home feeling, professional DOM GRAND style, 4k resolution",
-            'приветствие': "construction company office, technical supervision workspace, building plans, professional builder setting, DOM GRAND branding, 4k resolution, welcoming atmosphere"
-        }
-
-        prompts = dom_grand_prompts if channel == 'dom_grand' else terion_prompts
-        base_prompt = prompts.get(post_type, prompts['экспертиза'])
-
-        if theme:
-            base_prompt += f", theme: {theme}"
-
-        return base_prompt
-
-    def generate_posts(self, count=7, post_types=None, theme=None, channel='terion'):
-        """Генерирует N постов"""
-        if post_types is None:
-            post_types = {'экспертиза': count - 1, 'живой': 1}
-
-        posts = []
-        start_date = datetime.now() + timedelta(days=1)
-        start_date = start_date.replace(hour=10, minute=0, second=0)
-
-        for post_type, num in post_types.items():
-            for i in range(num):
-                prompt = self._build_prompt(post_type, theme)
-                text = self._call_yandex_gpt(prompt)
-                title, body, cta = self._parse_response(text)
-
-                post = {
-                    'type': post_type,
-                    'channel': channel,
-                    'theme': theme,
-                    'title': title,
-                    'body': body,
-                    'cta': cta,
-                    'publish_date': start_date + timedelta(days=len(posts)),
-                    'image_prompt': self.build_image_prompt({'type': post_type, 'channel': channel}),
-                    'image_url': None
-                }
-                posts.append(post)
-
-        return posts
-
-    def _build_prompt(self, post_type, theme=None):
-        """Формирует промпт для LLM"""
-        season = self._get_season_context()
-        theme_note = f"\nУчитывай тему недели: {theme}" if theme else ""
-
-        CTA_TEXT = "Напишите нашему ИИ-помощнику Антону, и мы расскажем, что именно нужно сделать в вашей ситуации: @Parkhovenko_i_kompaniya_bot"
-
-        prompts = {
-            'экспертиза': f"""Создай экспертный пост для Telegram-канала по перепланировкам квартир в Москве.
-
-Контекст сезона: {season}{theme_note}
-
-Требования:
-- Разбор одной конкретной нормы, процедуры или типичной ошибки
-- 150–300 слов, экспертно, без воды
-- Конкретный пример или кейс из практики
-- Обязательный CTA: {CTA_TEXT}
-
-Формат ответа:
-[Заголовок или вопрос]
-
-[Основной текст поста]
-
-👉 {CTA_TEXT}""",
-            'живой': f"""Создай «живой» пост для Telegram-канала по перепланировкам.
-
-Контекст сезона: {season}{theme_note}
-
-Требования:
-- Привязка к текущим событиям
-- 150–250 слов, по-человечески, с личной ноткой
-- Мягкий переход к теме перепланировок
-- Обязательный CTA: {CTA_TEXT}
-
-Формат ответа:
-[Сезонный зацеп]
-
-[Связка с темой]
-
-👉 {CTA_TEXT}""",
-            'новость': f"""Создай новостной пост для Telegram-канала по перепланировкам.
-
-Требования:
-- Объявление об изменении норм
-- 120–200 слов, кратко и чётко
-- Что изменилось и чем это чревато
-- Обязательный CTA: {CTA_TEXT}{theme_note}
-
-Формат ответа:
-[Новость простыми словами]
-
-[Что это значит]
-
-👉 {CTA_TEXT}""",
-            'поздравление': f"""Напиши короткое искреннее поздравление с днём рождения.
-
-Требования:
-- 60-100 слов
-- Тёплые пожелания счастья, здоровья, радости
-- Пожелание уюта и тепла в доме
-- Простой дружелюбный язык
-- БЕЗ упоминания работы, услуг, бизнеса
-
-Формат:
-🎂 [Имя]
-
-[Поздравление]"""
-        }
-
-        return prompts.get(post_type, prompts['экспертиза'])
-
-    def _get_season_context(self):
-        """Определяет сезонный контекст"""
-        month = datetime.now().month
-        contexts = {
-            (12, 1, 2): "Зима: снег, отключения ЖКХ, утепление",
-            (3, 4, 5): "Весна: отключение горячей воды, подготовка к ремонтному сезону",
-            (6, 7, 8): "Лето: пик ремонтного сезона",
-            (9, 10, 11): "Осень: включение отопления, завершение ремонтов"
-        }
-        for months, context in contexts.items():
-            if month in months:
-                return context
-        return contexts[(12, 1, 2)]
-
-    def _call_yandex_gpt(self, user_prompt):
-        """Вызов LLM API"""
+    async def _call_yandex_gpt(self, user_prompt: str) -> str:
+        """Асинхронный вызов LLM API через aiohttp"""
         system_prompt = """Ты — контент-менеджер Telegram-канала по перепланировкам квартир в Москве.
 
 Задача: генерировать посты, которые прогревают к заявке в бота @Parkhovenko_i_kompaniya_bot.
@@ -204,14 +80,125 @@ class ContentAgent:
         }
 
         try:
-            response = requests.post(self.endpoint, headers=headers, json=payload, timeout=30)
-            response.raise_for_status()
-            return response.json()['result']['alternatives'][0]['message']['text']
+            async with aiohttp.ClientSession() as session:
+                async with session.post(self.endpoint, headers=headers, json=payload, timeout=aiohttp.ClientTimeout(total=30)) as response:
+                    if response.status != 200:
+                        logger.error(f"GPT API error: {response.status}")
+                        return ""
+                    
+                    data = await response.json()
+                    text = data['result']['alternatives'][0]['message']['text']
+                    
+                    if not text or len(text.strip()) < 10:
+                        logger.warning("GPT returned empty response")
+                        return ""
+                    
+                    return text
+        except aiohttp.ClientError as e:
+            logger.error(f"aiohttp error in GPT call: {e}")
+            return ""
         except Exception as e:
-            logger.error(f"Ошибка LLM: {e}")
-            return f"Ошибка: {e}"
+            logger.error(f"Error in GPT call: {e}")
+            return ""
 
-    def _parse_response(self, text):
+    def _build_prompt(self, post_type: str, theme: str = None) -> str:
+        """Формирует промпт для LLM"""
+        season = self._get_season_context()
+        theme_note = f"\nУчитывай тему недели: {theme}" if theme else ""
+
+        CTA_TEXT = "👉 Напишите нашему ИИ-помощнику Антону: @Parkhovenko_i_kompaniya_bot"
+
+        prompts = {
+            'экспертиза': f"""Создай экспертный пост для Telegram-канала по перепланировкам квартир в Москве.
+
+Контекст сезона: {season}{theme_note}
+
+Требования:
+- Разбор одной конкретной нормы, процедуры или типичной ошибки
+- 150–300 слов, экспертно, без воды
+- Конкретный пример или кейс из практики
+- Обязательный CTA: {CTA_TEXT}
+
+Формат ответа:
+[Заголовок или вопрос]
+
+[Основной текст поста]
+
+{CTA_TEXT}""",
+            'живой': f"""Создай «живой» пост для Telegram-канала по перепланировкам.
+
+Контекст сезона: {season}{theme_note}
+
+Требования:
+- Привязка к текущим событиям
+- 150–250 слов, по-человечески, с личной ноткой
+- Мягкий переход к теме перепланировок
+- Обязательный CTA: {CTA_TEXT}
+
+Формат ответа:
+[Сезонный зацеп]
+
+[Связка с темой]
+
+{CTA_TEXT}""",
+            'новость': f"""Создай новостной пост для Telegram-канала по перепланировкам.
+
+Требования:
+- Объявление об изменении норм
+- 120–200 слов, кратко и чётко
+- Что изменилось и чем это чревато
+- Обязательный CTA: {CTA_TEXT}{theme_note}
+
+Формат ответа:
+[Новость простыми словами]
+
+[Что это значит]
+
+{CTA_TEXT}""",
+            'поздравление': f"""Напиши короткое искреннее поздравление с днём рождения.
+
+Требования:
+- 60-100 слов
+- Тёплые пожелания счастья, здоровья, радости
+- Пожелание уюта и тепла в доме
+- Простой дружелюбный язык
+- БЕЗ упоминания работы, услуг, бизнеса
+
+Формат:
+🎂 [Имя]
+
+[Поздравление]""",
+            'приветствие': f"""Создай приветственное сообщение для нового подписчика.
+
+Требования:
+- 80-120 слов
+- Кратко представить канал
+- 1-2 примера ситуаций
+- CTA к боту @Parkhovenko_i_kompaniya_bot
+
+Формат:
+👋 [Имя]
+
+[Текст 2-3 абзаца]"""
+        }
+
+        return prompts.get(post_type, prompts.get('экспертиза', ''))
+
+    def _get_season_context(self) -> str:
+        """Определяет сезонный контекст"""
+        month = datetime.now().month
+        contexts = {
+            (12, 1, 2): "Зима: снег, отключения ЖКХ, утепление",
+            (3, 4, 5): "Весна: отключение горячей воды, подготовка к ремонтному сезону",
+            (6, 7, 8): "Лето: пик ремонтного сезона",
+            (9, 10, 11): "Осень: включение отопления, завершение ремонтов"
+        }
+        for months, context in contexts.items():
+            if month in months:
+                return context
+        return contexts[(12, 1, 2)]
+
+    def _parse_response(self, text: str):
         """Парсит ответ на title, body, cta"""
         lines = text.strip().split('\n')
         cta_line = None
@@ -235,27 +222,108 @@ class ContentAgent:
         body = '\n'.join(body_lines).strip()
         return title, body, cta
 
-    def generate_image(self, prompt: str) -> Optional[str]:
-        """Генерирует изображение через Router AI / Flux"""
-        try:
-            from image_gen import generate
-            return generate(prompt)
-        except ImportError:
-            logger.error("Модуль image_gen не найден")
-            return None
-        except Exception as e:
-            logger.error(f"Ошибка генерации изображения: {e}")
-            return None
+    def _get_fallback(self, post_type: str) -> dict:
+        """Возвращает fallback шаблон"""
+        fallback = self.fallback_templates.get(post_type, self.fallback_templates['экспертиза'])
+        return fallback.copy()
 
-    def generate_post_with_image(self, post_type: str, theme: str = None, channel: str = 'terion') -> dict:
-        """Генерирует пост и изображение"""
+    async def generate_posts(self, count: int = 7, post_types: dict = None, theme: str = None, channel: str = 'terion'):
+        """Асинхронно генерирует N постов (лимит до 500 знаков)"""
+        if post_types is None:
+            post_types = {'экспертиза': count - 1, 'живой': 1}
+
+        posts = []
+        start_date = datetime.now() + timedelta(days=1)
+        start_date = start_date.replace(hour=10, minute=0, second=0)
+
+        for post_type, num in post_types.items():
+            for i in range(num):
+                prompt = self._build_prompt(post_type, theme)
+                text = await self._call_yandex_gpt(prompt)
+                
+                # Fallback при ошибке
+                if not text:
+                    fallback = self._get_fallback(post_type)
+                    title = fallback['title']
+                    body = fallback['body'][:500]  # Лимит 500 знаков
+                    cta = fallback['cta']
+                else:
+                    title, body, cta = self._parse_response(text)
+                    # Обрезаем до 500 знаков
+                    body = body[:500]
+
+                post = {
+                    'type': post_type,
+                    'channel': channel,
+                    'theme': theme,
+                    'title': title,
+                    'body': body,
+                    'cta': cta,
+                    'publish_date': start_date + timedelta(days=len(posts)),
+                    'image_prompt': self.build_image_prompt({'type': post_type, 'channel': channel}),
+                    'image_url': None
+                }
+                posts.append(post)
+
+        return posts
+
+    def build_image_prompt(self, post: dict) -> str:
+        """Генерирует промпт для Flux"""
+        post_type = post.get('type')
+        channel = post.get('channel', 'terion')
+
+        terion_prompts = {
+            'экспертиза': "architectural visualization, blueprints, professional office, legal papers, corporate style, clean minimalist design, 4k resolution, no people",
+            'живой': "modern apartment renovation Moscow, interior design, realistic lighting, open space kitchen living room, minimalist corporate style, 4k resolution",
+            'новость': "Moscow construction news, architectural update, city building context, professional corporate style, technical aesthetic, 4k resolution",
+            'поздравление': "elegant celebration background, warm golden lighting, festive decoration soft colors, cozy atmosphere, professional style, 4k resolution",
+            'приветствие': "professional consultation office, modern workspace, clean minimalist design, welcoming business atmosphere, 4k resolution"
+        }
+
+        dom_grand_prompts = {
+            'экспертиза': "construction site, building process, house renovation, technical details, blueprints on site, professional builder aesthetic, construction materials, 4k resolution",
+            'живой': "country house construction, rural property, building site progress, realistic working environment, construction team, modern rural architecture, 4k resolution",
+            'новость': "building news rural, construction update, house project progress, technical construction photography, professional site documentation, 4k resolution",
+            'поздравление': "warm country house celebration, rural home atmosphere, festive construction site decoration, cozy home feeling, professional style, 4k resolution",
+            'приветствие': "construction company office, technical supervision workspace, building plans, professional builder setting, welcoming atmosphere, 4k resolution"
+        }
+
+        prompts = dom_grand_prompts if channel == 'dom_grand' else terion_prompts
+        base_prompt = prompts.get(post_type, prompts.get('экспертиза', ''))
+
+        if post.get('theme'):
+            base_prompt += f", theme: {post['theme']}"
+
+        return base_prompt
+
+    async def generate_post_with_image(self, post_type: str, theme: str = None, channel: str = 'terion') -> dict:
+        """Асинхронно генерирует пост и изображение"""
         prompt = self._build_prompt(post_type, theme)
-        text = self._call_yandex_gpt(prompt)
-        title, body, cta = self._parse_response(text)
+        text = await self._call_yandex_gpt(prompt)
+        
+        # Fallback при ошибке
+        if not text:
+            fallback = self._get_fallback(post_type)
+            title = fallback['title']
+            body = fallback['body'][:500]
+            cta = fallback['cta']
+        else:
+            title, body, cta = self._parse_response(text)
+            body = body[:500]
 
         post_dict = {'type': post_type, 'theme': theme, 'channel': channel}
         image_prompt = self.build_image_prompt(post_dict)
-        image_url = self.generate_image(image_prompt)
+        
+        # Генерируем изображение
+        try:
+            from image_gen import generate
+            image_url = await generate(image_prompt) if callable(generate) else None
+        except ImportError:
+            logger.error("Модуль image_gen не найден")
+            image_url = None
+        except Exception as e:
+            logger.error(f"Ошибка генерации изображения: {e}")
+            image_url = None
 
         return {
             'type': post_type,
@@ -268,8 +336,8 @@ class ContentAgent:
             'image_url': image_url
         }
 
-    def generate_greeting_post(self, person_name=None, date=None, occasion='день рождения'):
-        """Генерирует поздравление"""
+    async def generate_greeting_post(self, person_name: str = None, date: str = None, occasion: str = 'день рождения') -> dict:
+        """Асинхронно генерирует поздравление"""
         display_name = person_name if person_name else "наш подписчик"
         prompt = f"""Создай короткое искреннее поздравление.
 
@@ -287,7 +355,7 @@ class ContentAgent:
 
 [Поздравление]"""
 
-        text = self._call_yandex_gpt(prompt)
+        text = await self._call_yandex_gpt(prompt)
 
         # Проверяем на продажи
         banned = ["ремонт", "перепланиров", "услуг", "консультац", "бот", "скидк"]
@@ -298,8 +366,8 @@ class ContentAgent:
         title, body, cta = self._parse_response(text)
         return {'type': 'поздравление', 'title': title, 'body': body, 'cta': cta}
 
-    def generate_welcome_post(self, person_name=None):
-        """Генерирует приветствие"""
+    async def generate_welcome_post(self, person_name: str = None) -> dict:
+        """Асинхронно генерирует приветствие"""
         display_name = person_name if person_name else "новый подписчик"
         prompt = f"""Создай приветственное сообщение.
 
@@ -316,6 +384,16 @@ class ContentAgent:
 
 [Текст 2-3 абзаца]"""
 
-        text = self._call_yandex_gpt(prompt)
-        title, body, cta = self._parse_response(text)
+        text = await self._call_yandex_gpt(prompt)
+        
+        # Fallback при ошибке
+        if not text:
+            fallback = self._get_fallback('приветствие')
+            title = fallback['title']
+            body = fallback['body'][:500]
+            cta = fallback['cta']
+        else:
+            title, body, cta = self._parse_response(text)
+            body = body[:500]
+
         return {'type': 'приветствие', 'title': title, 'body': body, 'cta': cta}
