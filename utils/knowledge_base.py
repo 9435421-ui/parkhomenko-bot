@@ -21,8 +21,8 @@ class KnowledgeBase:
             print(f"⚠️ Папка {self.docs_dir} не найдена")
             return
         
-        # Исключаем дублирующие папки
-        exclude_dirs = {'knowledge_base', '__pycache__', '.git', 'backups', 'migrations', 'mini_app'}
+        # Исключаем системные папки
+        exclude_dirs = {'knowledge_base', '__pycache__', '.git', 'backups', 'migrations', 'mini_app', 'uploads'}
         
         document_count = 0
         
