@@ -57,12 +57,15 @@ def get_publish_btns(post_id: int, include_image: bool = False) -> InlineKeyboar
     builder.button(text="📤 ВК", callback_data=f"publish:vk:{post_id}")
     builder.button(text="📤 Max", callback_data=f"publish:max:{post_id}")
     
+    # Кнопка публикации ВЕЗДЕ
+    builder.button(text="🚀 Опубликовать ВЕЗДЕ", callback_data=f"publish_all:{post_id}")
+    
     # Кнопка генерации изображения
     if not include_image:
         builder.button(text="🎨 Сгенерировать ИИ-фото", callback_data=f"gen_image:{post_id}")
     
     builder.button(text="◀️ В меню", callback_data="content_back")
-    builder.adjust(4, 1, 1)
+    builder.adjust(4, 1, 1, 1)
     return builder.as_markup()
 
 
@@ -261,6 +264,73 @@ async def menu_publish(callback: CallbackQuery, state: FSMContext):
     """Публикация поста"""
     await callback.answer()
     await handle_publish(callback, state)
+
+
+# === PUBLISH ALL (EVERYWHERE) ===
+@content_router.callback_query(F.data.startswith("publish_all:"))
+async def publish_all_handler(callback: CallbackQuery, state: FSMContext):
+    """Публикация поста ВЕЗДЕ: TG + VK + Max"""
+    post_id = int(callback.data.split(":")[1])
+    post = await db.get_content_post(post_id)
+    
+    if not post:
+        await callback.answer("❌ Пост не найден")
+        return
+    
+    await callback.message.edit_text("🚀 <b>Публикую ВЕЗДЕ!</b>\n\nTG → VK → Max", parse_mode="HTML")
+    
+    results = []
+    
+    # 1. TERION
+    try:
+        if post.get("image_url"):
+            await callback.bot.send_photo(chat_id=CHANNEL_ID_TERION, photo=post["image_url"], caption=post["body"], parse_mode="HTML")
+        else:
+            await callback.bot.send_message(chat_id=CHANNEL_ID_TERION, text=post["body"], parse_mode="HTML")
+        results.append("✅ TERION")
+    except Exception as e:
+        logger.error(f"TERION publish error: {e}")
+        results.append("❌ TERION")
+    
+    # 2. ДОМ ГРАНД
+    try:
+        if post.get("image_url"):
+            await callback.bot.send_photo(chat_id=CHANNEL_ID_DOM_GRAD, photo=post["image_url"], caption=post["body"], parse_mode="HTML")
+        else:
+            await callback.bot.send_message(chat_id=CHANNEL_ID_DOM_GRAD, text=post["body"], parse_mode="HTML")
+        results.append("✅ ДОМ ГРАНД")
+    except Exception as e:
+        logger.error(f"DOM_GRAD publish error: {e}")
+        results.append("❌ ДОМ ГРАНД")
+    
+    # 3. ВКонтакте
+    try:
+        vk_result = await vk_service.post(post["body"])
+        if vk_result:
+            results.append(f"✅ ВК (#{vk_result})")
+        else:
+            results.append("❌ ВК")
+    except Exception as e:
+        logger.error(f"VK publish error: {e}")
+        results.append("❌ ВК")
+    
+    # 4. Max.ru
+    try:
+        max_result = await content_agent.post_to_max(post_id)
+        if max_result:
+            results.append("✅ Max.ru")
+        else:
+            results.append("❌ Max.ru")
+    except Exception as e:
+        logger.error(f"Max publish error: {e}")
+        results.append("❌ Max.ru")
+    
+    # Обновляем статус
+    await db.update_content_post(post_id, status="published")
+    
+    # Результат
+    result_text = "🚀 <b>Публикация завершена!</b>\n\n" + "\n".join(results)
+    await callback.message.edit_text(result_text, reply_markup=get_content_menu(), parse_mode="HTML")
 
 
 # === GENERATE IMAGE ===
