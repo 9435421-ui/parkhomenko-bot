@@ -21,9 +21,15 @@ class KnowledgeBase:
             print(f"⚠️ Папка {self.docs_dir} не найдена")
             return
         
+        # Исключаем дублирующие папки
+        exclude_dirs = {'knowledge_base', '__pycache__', '.git', 'backups', 'migrations', 'mini_app'}
+        
         document_count = 0
         
         for root, dirs, files in os.walk(self.docs_dir):
+            # Исключаем системные папки из обхода
+            dirs[:] = [d for d in dirs if d not in exclude_dirs]
+            
             for filename in files:
                 if filename.endswith(('.md', '.txt')):
                     filepath = os.path.join(root, filename)
