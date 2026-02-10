@@ -200,11 +200,11 @@ async def menu_news(callback: CallbackQuery, state: FSMContext):
 # === MENU: NEWS DETAIL ===
 @content_router.callback_query(F.data.startswith("menu:news:"))
 async def menu_news_detail(callback: CallbackQuery, state: FSMContext):
-    """Генерирует пост из новости"""
+    """Генерирует пост из новости С АВТО-ГЕНЕРАЦИЕЙ КАРТИНКИ"""
     await callback.answer()
     news_id = int(callback.data.replace("menu:news:", ""))
     
-    await callback.message.edit_text("📝 <b>Создание поста из новости</b>\n\n🎨 Генерирую...", parse_mode="HTML")
+    await callback.message.edit_text("📝 <b>Создание поста из новости</b>\n\n🎨 Генерируем пост и картинку...", parse_mode="HTML")
     
     try:
         data = await state.get_data()
@@ -221,12 +221,28 @@ async def menu_news_detail(callback: CallbackQuery, state: FSMContext):
         post_id = await db.add_content_post(title=title, body=text, cta="Записаться: @Parkhovenko_i_kompaniya_bot", channel="draft")
         await state.update_data({"post_id": post_id})
         
-        # Используем get_publish_btns с кнопкой генерации изображения
-        await callback.message.edit_text(
-            f"✨ <b>Пост готов!</b>\n\n{text}\n\n",
-            reply_markup=get_publish_btns(post_id),
-            parse_mode="HTML"
-        )
+        # АВТО-генерация картинки
+        await callback.message.edit_text("🎨 <b>Генерируем изображение...</b>", parse_mode="HTML")
+        image_url = await content_agent.generate_image(prompt=title)
+        
+        if image_url:
+            await db.update_content_post(post_id, image_url=image_url)
+            await callback.message.answer_photo(
+                photo=image_url,
+                caption=f"✨ <b>Пост готов!</b>\n\n{text}",
+                reply_markup=get_publish_btns(post_id, include_image=True),
+                parse_mode="HTML"
+            )
+        else:
+            # Placeholder если картинка недоступна
+            placeholder = "https://via.placeholder.com/1024x1024.png?text=Новость+ TERION"
+            await db.update_content_post(post_id, image_url=placeholder)
+            await callback.message.answer_photo(
+                photo=placeholder,
+                caption=f"✨ <b>Пост готов!</b>\n\n{text}",
+                reply_markup=get_publish_btns(post_id),
+                parse_mode="HTML"
+            )
         
     except Exception as e:
         logger.error(f"Generate from news error: {e}")
@@ -437,7 +453,7 @@ async def handle_publish(callback: CallbackQuery, state: FSMContext):
 
 # === CONTENT PLAN ===
 async def show_content_plan(callback: CallbackQuery, state: FSMContext, days: int = 7):
-    """Генерирует контент-план"""
+    """Генерирует контент-план с кнопкой генерации всех постов"""
     text = f"🗓 <b>Контент-план на {days} дней</b>\n\n"
     
     topics = await scout_agent.scout_topics(count=days)
@@ -448,9 +464,69 @@ async def show_content_plan(callback: CallbackQuery, state: FSMContext, days: in
         title = topic.get("title", "")[:30]
         insight = topic.get("insight", "")[:40]
         text += f"{i} | {rubric} | {title} | {insight}\n"
+        await state.update_data({f"plan_topic_{i}": topic})
+    
+    await state.update_data({"plan_days": days})
+    
+    # Кнопки управления планом
+    builder = InlineKeyboardBuilder()
+    builder.button(text="🤖 Сгенерировать все посты", callback_data="gen_all_posts")
+    builder.button(text="◀️ В меню", callback_data="content_back")
     
     await callback.bot.send_message(chat_id=LEADS_GROUP_CHAT_ID, message_thread_id=THREAD_ID_CONTENT_PLAN, text=text, parse_mode="HTML")
-    await callback.message.edit_text(f"{text}\n\n✅ Отправлено в рабочую группу!", reply_markup=get_back_btn(), parse_mode="HTML")
+    await callback.message.edit_text(f"{text}\n\n✅ Отправлено в рабочую группу!", reply_markup=builder.as_markup(), parse_mode="HTML")
+
+
+# === GENERATE ALL POSTS FROM PLAN ===
+@content_router.callback_query(F.data == "gen_all_posts")
+async def generate_all_posts(callback: CallbackQuery, state: FSMContext):
+    """Генерирует все посты из плана"""
+    await callback.answer("🚀 Генерируем все посты...")
+    
+    data = await state.get_data()
+    days = data.get("plan_days", 7)
+    
+    await callback.message.edit_text(f"🗓 <b>Генерируем {days} постов...</b>\n\n🎨 Это займёт несколько минут...", parse_mode="HTML")
+    
+    try:
+        posts_generated = 0
+        
+        for i in range(1, days + 1):
+            topic = data.get(f"plan_topic_{i}", {})
+            title = topic.get("title", f"Пост {i}")
+            
+            # Генерируем пост
+            hooks = await viral_hooks_agent.generate_hooks(title, count=1)
+            hook = hooks[0] if hooks else {"text": f"📰 {title}"}
+            
+            text = f"<b>{hook['text']}</b>\n\n💡 {topic.get('insight', '')}\n\n👉 @Parkhovenko_i_kompaniya_bot"
+            
+            post_id = await db.add_content_post(
+                title=title, 
+                body=text, 
+                cta="👉 @Parkhovenko_i_kompaniya_bot", 
+                channel="draft"
+            )
+            
+            # Генерируем картинку
+            image_url = await content_agent.generate_image(prompt=title)
+            if image_url:
+                await db.update_content_post(post_id, image_url=image_url)
+            
+            posts_generated += 1
+        
+        await callback.message.edit_text(
+            f"✅ <b>Все {posts_generated} постов сгенерированы!</b>\n\n"
+            f"📝 Посты сохранены в черновики.\n\n"
+            f"🎨 К каждому посту сгенерировано изображение.\n\n"
+            f"📤 Выберите посты для публикации.",
+            reply_markup=get_back_btn(),
+            parse_mode="HTML"
+        )
+        
+    except Exception as e:
+        logger.error(f"Generate all posts error: {e}")
+        await callback.message.edit_text(f"❌ Ошибка: {e}", reply_markup=get_back_btn(), parse_mode="HTML")
 
 
 # === URGENT HANDLERS ===
