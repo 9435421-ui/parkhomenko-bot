@@ -52,8 +52,8 @@ class ContentRepurposingAgent:
             result = await yandex_gpt.generate(prompt, content)
             if result:
                 return [p.strip() for p in result.split('\n') if p.strip()]
-        except:
-            pass
+        except Exception as e:
+            logger.error(f"Ошибка извлечения ключевых пунктов: {e}")
         return []
     
     async def generate_hashtags(self, content: str, count: int = 10) -> List[str]:
@@ -68,8 +68,8 @@ class ContentRepurposingAgent:
             result = await yandex_gpt.generate(prompt, content)
             if result:
                 return [h.strip() for h in result.split() if h.strip().startswith('#')]
-        except:
-            pass
+        except Exception as e:
+            logger.error(f"Ошибка генерации хештегов: {e}")
         return []
 
 
