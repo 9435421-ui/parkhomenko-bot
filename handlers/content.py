@@ -507,11 +507,11 @@ async def generate_all_posts(callback: CallbackQuery, state: FSMContext):
             hooks = await viral_hooks_agent.generate_hooks(title, count=1)
             hook = hooks[0] if hooks else {"text": f"📰 {title}"}
             
-            text = f"<b>{hook['text']}</b>\n\n💡 {topic.get('insight', '')}\n\n👉 @Parkhovenko_i_kompaniya_bot"
+            post_text = f"<b>{hook['text']}</b>\n\n💡 {topic.get('insight', '')}\n\n👉 @Parkhovenko_i_kompaniya_bot"
             
             post_id = await db.add_content_post(
                 title=title, 
-                body=text, 
+                body=post_text, 
                 cta="👉 @Parkhovenko_i_kompaniya_bot", 
                 channel="draft"
             )
@@ -535,6 +535,35 @@ async def generate_all_posts(callback: CallbackQuery, state: FSMContext):
     except Exception as e:
         logger.error(f"Generate all posts error: {e}")
         await callback.message.edit_text(f"❌ Ошибка: {e}", reply_markup=get_back_btn(), parse_mode="HTML")
+
+
+# === SELECT VARIANT ===
+@content_router.callback_query(F.data.startswith("select_variant_"))
+async def select_variant_handler(callback: CallbackQuery, state: FSMContext):
+    """Выбор варианта поста из фото"""
+    await callback.answer()
+    
+    variant_num = int(callback.data.replace("select_variant_", ""))
+    data = await state.get_data()
+    variants = data.get("user_state", {}).get("variants", [])
+    
+    if variant_num <= len(variants):
+        variant = variants[variant_num - 1]
+        
+        post_id = await db.add_content_post(
+            title=variant["topic"],
+            body=variant["text"],
+            cta="👉 @Parkhovenko_i_kompaniya_bot",
+            channel="draft"
+        )
+        
+        await callback.message.edit_text(
+            f"✨ <b>Пост готов!</b>\n\n{variant['text']}",
+            reply_markup=get_publish_btns(post_id),
+            parse_mode="HTML"
+        )
+    else:
+        await callback.answer("Вариант не найден")
 
 
 # === URGENT HANDLERS ===
