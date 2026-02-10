@@ -75,7 +75,7 @@ async def content_start(message: Message, state: FSMContext):
 
 
 # === CALLBACKS ===
-@content_router.callback_query(F.data.startswith("content_"))
+@content_router.callback_query(F.data.startswith("menu:"))
 async def content_callback(callback: CallbackQuery, state: FSMContext):
     data = callback.data
     
@@ -88,7 +88,7 @@ async def content_callback(callback: CallbackQuery, state: FSMContext):
         await state.set_state(ContentStates.main_menu)
         return
     
-    if data == "create_post":
+    if data == "menu:create":
         builder = InlineKeyboardBuilder()
         builder.button(text="📸 Фото + ИИ-пост", callback_data="ai_photo")
         builder.button(text="📝 Только текст", callback_data="ai_text")
@@ -102,7 +102,7 @@ async def content_callback(callback: CallbackQuery, state: FSMContext):
         )
         return
     
-    if data == "ai_photo":
+    if data == "menu:photo":
         await state.update_data(user_state={"step": "ai_photo_wait_photo"})
         await callback.message.edit_text(
             "📸 <b>Фото + ИИ-пост</b>\n\nЗагрузите фото объекта:",
@@ -112,7 +112,7 @@ async def content_callback(callback: CallbackQuery, state: FSMContext):
         await state.set_state(ContentStates.ai_photo)
         return
         
-    if data == "ai_text":
+    if data == "menu:editor":
         await state.update_data(user_state={"step": "ai_text_wait_topic"})
         await callback.message.edit_text(
             "📝 <b>Только текст</b>\n\nВведите тему поста:",
@@ -122,11 +122,11 @@ async def content_callback(callback: CallbackQuery, state: FSMContext):
         await state.set_state(ContentStates.ai_text)
         return
         
-    if data == "ai_series":
+    if data == "menu:plan":
         builder = InlineKeyboardBuilder()
-        builder.button(text="7 дней", callback_data="series_7")
-        builder.button(text="14 дней", callback_data="series_14")
-        builder.button(text="30 дней", callback_data="series_30")
+        builder.button(text="7 дней", callback_data="menu:series_7")
+        builder.button(text="14 дней", callback_data="menu:series_14")
+        builder.button(text="30 дней", callback_data="menu:series_30")
         builder.adjust(3)
         
         await callback.message.edit_text(
@@ -137,23 +137,7 @@ async def content_callback(callback: CallbackQuery, state: FSMContext):
         await state.set_state(ContentStates.ai_series)
         return
         
-    if data == "stats":
-        await callback.message.edit_text(
-            "📊 <b>Статистика</b>\n\nВ разработке...",
-            reply_markup=get_back_btn(),
-            parse_mode="HTML"
-        )
-        return
-        
-    if data == "settings":
-        await callback.message.edit_text(
-            "⚙️ <b>Настройки</b>\n\nВ разработке...",
-            reply_markup=get_back_btn(),
-            parse_mode="HTML"
-        )
-        return
-    
-    if data.startswith("series_"):
+    if data.startswith("menu:series_"):
         days = int(data.split("_")[1])
         user_state = {"step": "series_wait_topic", "days": days}
         await state.update_data(user_state=user_state)
@@ -421,7 +405,7 @@ async def show_news(callback: CallbackQuery, state: FSMContext):
     await callback.answer()
 
 
-@content_router.callback_query(F.data.startswith("news:"))
+@content_router.callback_query(F.data.startswith("menu:news:"))
 async def generate_post_from_news(callback: CallbackQuery, state: FSMContext):
     """Генерирует пост из новости"""
     news_id = int(callback.data.replace("news:", ""))
