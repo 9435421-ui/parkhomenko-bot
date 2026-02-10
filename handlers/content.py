@@ -3,6 +3,7 @@ Content Handler — создание и публикация контента (a
 """
 from aiogram import Router, F
 from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup
+from aiogram.filters import CommandStart
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
@@ -60,6 +61,18 @@ def get_photo_done_keyboard() -> InlineKeyboardMarkup:
     builder.button(text="✅ Хватит фото", callback_data="ai_photo_done")
     builder.button(text="◀️ В меню", callback_data="content_back")
     return builder.as_markup()
+
+
+# === /START для Content Bot ===
+(message: Message, state: FSMContext):
+    """Старт Content Bot — сразу показываем меню"""
+    await state.clear()
+    await message.answer(
+        "🎯 <b>Content Bot</b>\n\nВыберите:",
+        reply_markup=get_content_menu(),
+        parse_mode="HTML"
+    )
+    await state.set_state(ContentStates.main_menu)
 
 
 # === MAIN MENU ===
@@ -347,9 +360,7 @@ async def handle_publish(callback: CallbackQuery, state: FSMContext):
         await callback.answer(f"❌ Ошибка: {e}")
 
 
-# === ECHO ===
-@content_router.message()
-async def content_echo(message: Message, state: FSMContext):
+(message: Message, state: FSMContext):
     """Эхо"""
     current_state = await state.get_state()
     await message.answer(f"DEBUG: state={current_state}")
