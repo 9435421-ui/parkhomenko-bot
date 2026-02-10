@@ -221,16 +221,21 @@ async def menu_news_detail(callback: CallbackQuery, state: FSMContext):
         post_id = await db.add_content_post(title=title, body=text, cta="Записаться: @Parkhovenko_i_kompaniya_bot", channel="draft")
         await state.update_data({"post_id": post_id})
         
-        # АВТО-генерация картинки
+        # АВТО-генерация картинки с try/except
         await callback.message.edit_text("🎨 <b>Генерируем изображение...</b>", parse_mode="HTML")
-        image_url = await content_agent.generate_image(prompt=title)
+        
+        try:
+            image_url = await content_agent.generate_image(prompt=title)
+        except Exception as e:
+            logger.error(f"Image gen error: {e}")
+            image_url = None
         
         if image_url:
             await db.update_content_post(post_id, image_url=image_url)
             await callback.message.answer_photo(
                 photo=image_url,
                 caption=f"✨ <b>Пост готов!</b>\n\n{text}",
-                reply_markup=get_publish_btns(post_id, include_image=True),
+                reply_markup=get_publish_btns(post_id),
                 parse_mode="HTML"
             )
         else:
@@ -260,7 +265,7 @@ async def menu_publish(callback: CallbackQuery, state: FSMContext):
 # === GENERATE IMAGE ===
 @content_router.callback_query(F.data.startswith("gen_image:"))
 async def generate_image_handler(callback: CallbackQuery):
-    """Генерация изображения Flux для поста"""
+    """Генерация изображения Flux для поста с try/except"""
     post_id = int(callback.data.split(":")[1])
     post = await db.get_content_post(post_id)
     
@@ -270,8 +275,12 @@ async def generate_image_handler(callback: CallbackQuery):
     
     await callback.message.edit_text("🎨 <b>Flux создаёт шедевр...</b>\nЭто займет около 15-20 секунд.", parse_mode="HTML")
     
-    # Генерируем изображение через content_agent
-    image_url = await content_agent.generate_image(prompt=post['title'])
+    # Безопасная генерация изображения
+    try:
+        image_url = await content_agent.generate_image(prompt=post['title'])
+    except Exception as e:
+        logger.error(f"Image gen error: {e}")
+        image_url = None
     
     if image_url:
         await db.update_content_post(post_id, image_url=image_url)
@@ -282,12 +291,11 @@ async def generate_image_handler(callback: CallbackQuery):
             parse_mode="HTML"
         )
     else:
-        # Картинка недоступна - показываем fallback сообщение
+        # Картинка недоступна - показываем fallback с кнопками
         await callback.message.edit_text(
             f"🎨 <b>Картинка временно недоступна</b>\n\n"
             f"Но ваш пост готов!\n\n"
             f"<b>{post['title']}</b>\n\n"
-            f"{post['body']}\n\n"
             f"📤 Выберите канал для публикации:",
             reply_markup=get_publish_btns(post_id),
             parse_mode="HTML"
