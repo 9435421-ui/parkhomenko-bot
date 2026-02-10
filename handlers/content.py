@@ -19,7 +19,7 @@ from config import (
 )
 
 logger = logging.getLogger(__name__)
-router = Router()
+content_router = Router()
 
 
 # === FSM STATES ===
@@ -65,7 +65,7 @@ def get_publish_btns(post_id: int):
 
 
 # === MAIN MENU ===
-@router.callback_query(F.data == "mode:content")
+@content_router.callback_query(F.data == "mode:content")
 async def content_menu(callback: CallbackQuery, state: FSMContext):
     """Меню контента"""
     await callback.message.edit_text(
@@ -84,7 +84,7 @@ async def content_menu(callback: CallbackQuery, state: FSMContext):
 
 
 # === CALLBACKS ===
-@router.callback_query(F.data.startswith("content_"))
+@content_router.callback_query(F.data.startswith("content_"))
 async def content_callback(callback: CallbackQuery, state: FSMContext):
     """Обработка кнопок меню"""
     user_id = callback.from_user.id
@@ -151,7 +151,7 @@ async def content_callback(callback: CallbackQuery, state: FSMContext):
 
 
 # === AI PHOTO ===
-@router.message(ContentStates.ai_photo, F.photo)
+@content_router.message(ContentStates.ai_photo, F.photo)
 async def ai_photo_handler(message: Message, state: FSMContext):
     """Получаем фото"""
     data = await state.get_data()
@@ -175,7 +175,7 @@ async def ai_photo_handler(message: Message, state: FSMContext):
     )
 
 
-@router.callback_query(ContentStates.ai_photo, F.data == "ai_photo_done")
+@content_router.callback_query(ContentStates.ai_photo, F.data == "ai_photo_done")
 async def ai_photo_done(callback: CallbackQuery, state: FSMContext):
     """Фото готовы — ждём тему"""
     await callback.message.edit_text(
@@ -227,7 +227,7 @@ async def ai_photo_done(callback: CallbackQuery, state: FSMContext):
 
 
 # === AI TEXT ===
-@router.message(ContentStates.ai_text)
+@content_router.message(ContentStates.ai_text)
 async def ai_text_handler(message: Message, state: FSMContext):
     """Получаем тему → генерируем пост"""
     topic = message.text
@@ -260,7 +260,7 @@ async def ai_text_handler(message: Message, state: FSMContext):
 
 
 # === AI SERIES ===
-@router.message(ContentStates.ai_series)
+@content_router.message(ContentStates.ai_series)
 async def ai_series_handler(message: Message, state: FSMContext):
     """Серия постов"""
     topic = message.text
@@ -397,7 +397,7 @@ async def handle_publish(callback: CallbackQuery, state: FSMContext):
 
 
 # === ECHO ===
-@router.message()
+@content_router.message()
 async def content_echo(message: Message, state: FSMContext):
     """Эхо для отладки"""
     current_state = await state.get_state()
