@@ -153,18 +153,6 @@ async def content_callback(callback: CallbackQuery, state: FSMContext):
         )
         return
     
-    if data == "menu:plan":
-        await show_content_plan(callback, state)
-        return
-    
-    if data == "menu:news":
-        await show_news(callback, state)
-        return
-    
-    if data.startswith("news:"):
-        await generate_post_from_news(callback, state)
-        return
-        
     if data.startswith("series_"):
         days = int(data.split("_")[1])
         user_state = {"step": "series_wait_topic", "days": days}
@@ -375,7 +363,7 @@ async def handle_publish(callback: CallbackQuery, state: FSMContext):
         await callback.answer(f"❌ Ошибка: {e}")
 
 
-# === NEWS: Показ новостей и отправка в THREAD_ID_NEWS ===
+@content_router.callback_query(F.data == "menu:news")
 async def show_news(callback: CallbackQuery, state: FSMContext):
     """Показывает новости от ScoutAgent и отправляет в топик 780"""
     await callback.message.edit_text(
@@ -433,6 +421,7 @@ async def show_news(callback: CallbackQuery, state: FSMContext):
     await callback.answer()
 
 
+@content_router.callback_query(F.data.startswith("news:"))
 async def generate_post_from_news(callback: CallbackQuery, state: FSMContext):
     """Генерирует пост из новости"""
     news_id = int(callback.data.replace("news:", ""))
@@ -484,7 +473,7 @@ async def generate_post_from_news(callback: CallbackQuery, state: FSMContext):
     await callback.answer()
 
 
-# === CONTENT PLAN: Генерация и отправка в THREAD_ID_CONTENT_PLAN ===
+@content_router.callback_query(F.data == "menu:plan")
 async def show_content_plan(callback: CallbackQuery, state: FSMContext, days: int = 7):
     """Генерирует контент-план и отправляет в топик 83"""
     text = f"🗓 <b>Контент-план на {days} дней</b>\n\n"
