@@ -385,7 +385,7 @@ async def show_news(callback: CallbackQuery, state: FSMContext):
         
         builder = InlineKeyboardBuilder()
         for i, topic in enumerate(topics[:5], 1):
-            builder.button(text=f"📝 Пост из новости {i}", callback_data=f"news:{i}")
+            builder.button(text=f"📝 Пост из новости {i}", callback_data=f"menu:news:{i}")
         builder.button(text="◀️ В меню", callback_data="content_back")
         
         await callback.message.edit_text(
@@ -408,7 +408,7 @@ async def show_news(callback: CallbackQuery, state: FSMContext):
 @content_router.callback_query(F.data.startswith("menu:news:"))
 async def generate_post_from_news(callback: CallbackQuery, state: FSMContext):
     """Генерирует пост из новости"""
-    news_id = int(callback.data.replace("news:", ""))
+    news_id = int(callback.data.replace("menu:news:", ""))
     
     await callback.message.edit_text(
         "📝 <b>Создание поста из новости</b>\n\n🎨 Генерирую...",
