@@ -4,6 +4,7 @@ Content Handler — создание и публикация контента (a
 """
 from aiogram import Router, F
 from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton
+from aiogram.filters import CommandStart
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from datetime import datetime
@@ -62,6 +63,25 @@ def get_publish_btns(post_id: int):
     )
     markup.add(InlineKeyboardButton("◀️ В меню", callback_data="content_back"))
     return markup
+
+
+@content_router.message(CommandStart())
+async def content_start(message: Message, state: FSMContext):
+    """Старт для контент-бота - показываем меню контент-бота"""
+    logger.info(f"Content Bot: Сообщение от: {message.from_user.id} (@{message.from_user.username})")
+    await state.clear()
+    await message.answer(
+        "🎯 <b>Content Bot</b>\\n\\n"
+        "🤖 <b>AI-агенты делают рутину за вас!</b>\\n\\n"
+        "📸 <b>Фото + ИИ-пост</b> — загрузите фото, ИИ создаст пост\\n"
+        "📝 <b>Только текст → ИИ</b> — тема, ИИ улучшит\\n"
+        "📅 <b>Серия постов</b> — тема + дней, ИИ сделает цепочку\\n"
+        "📋 <b>Мои посты</b> — просмотр и публикация\\n\\n"
+        "Выберите:",
+        reply_markup=get_content_menu(),
+        parse_mode="HTML"
+    )
+    await state.set_state(ContentStates.main_menu)
 
 
 # === MAIN MENU ===
