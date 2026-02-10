@@ -11,7 +11,7 @@ import logging
 
 from database import db
 from agents.viral_hooks_agent import viral_hooks_agent
-from config import CHANNEL_ID_TERION, CHANNEL_ID_DOM_GRAD, VK_GROUP_ID
+from config import CHANNEL_ID_TERION, CHANNEL_ID_DOM_GRAD, VK_GROUP_ID, LEADS_GROUP_CHAT_ID, THREAD_ID_NEWS, THREAD_ID_CONTENT_PLAN
 from services.vk_service import vk_service
 
 logger = logging.getLogger(__name__)
@@ -153,10 +153,14 @@ async def content_callback(callback: CallbackQuery, state: FSMContext):
         )
         return
     
+    if data == "menu:plan":
+        await show_content_plan(callback, state)
+        return
+    
     if data == "menu:news":
         await show_news(callback, state)
         return
-        
+    
     if data.startswith("news:"):
         await generate_post_from_news(callback, state)
         return
@@ -369,3 +373,151 @@ async def handle_publish(callback: CallbackQuery, state: FSMContext):
     except Exception as e:
         logger.error(f"Publish error: {e}")
         await callback.answer(f"❌ Ошибка: {e}")
+
+
+# === NEWS: Показ новостей и отправка в THREAD_ID_NEWS ===
+async def show_news(callback: CallbackQuery, state: FSMContext):
+    """Показывает новости от ScoutAgent и отправляет в топик 780"""
+    await callback.message.edit_text(
+        "📰 <b>Новости отрасли</b>\n\n🔍 Ищем актуальные новости...",
+        parse_mode="HTML"
+    )
+    
+    try:
+        topics = await scout_agent.scout_topics(count=5)
+        
+        if not topics:
+            await callback.message.edit_text(
+                "📰 <b>Новости</b>\n\nНе удалось найти новости.",
+                reply_markup=get_back_btn(),
+                parse_mode="HTML"
+            )
+            await callback.answer()
+            return
+        
+        text = "📰 <b>Актуальные новости</b>\n\n"
+        
+        for i, topic in enumerate(topics, 1):
+            title = topic.get("title", "Новость")[:50]
+            insight = topic.get("insight", "")[:80]
+            text += f"{i}. <b>{title}</b>\n   💡 {insight}\n\n"
+            await state.update_data({f"news_{i}": topic})
+        
+        # Отправляем в топик НОВОСТИ (780)
+        await callback.bot.send_message(
+            chat_id=LEADS_GROUP_CHAT_ID,
+            message_thread_id=THREAD_ID_NEWS,
+            text=f"📰 <b>Новости от ScoutAgent</b>\n\n{text}",
+            parse_mode="HTML"
+        )
+        
+        builder = InlineKeyboardBuilder()
+        for i, topic in enumerate(topics[:5], 1):
+            builder.button(text=f"📝 Пост из новости {i}", callback_data=f"news:{i}")
+        builder.button(text="◀️ В меню", callback_data="content_back")
+        
+        await callback.message.edit_text(
+            text + "📝 Нажмите на кнопку для создания поста.",
+            reply_markup=builder.as_markup(),
+            parse_mode="HTML"
+        )
+        
+    except Exception as e:
+        logger.error(f"News error: {e}")
+        await callback.message.edit_text(
+            f"❌ Ошибка: {e}",
+            reply_markup=get_back_btn(),
+            parse_mode="HTML"
+        )
+    
+    await callback.answer()
+
+
+async def generate_post_from_news(callback: CallbackQuery, state: FSMContext):
+    """Генерирует пост из новости"""
+    news_id = int(callback.data.replace("news:", ""))
+    
+    await callback.message.edit_text(
+        "📝 <b>Создание поста из новости</b>\n\n🎨 Генерирую...",
+        parse_mode="HTML"
+    )
+    
+    try:
+        data = await state.get_data()
+        topic = data.get(f"news_{news_id}", {})
+        
+        title = topic.get("title", "Новость")
+        insight = topic.get("insight", "")
+        
+        hooks = await viral_hooks_agent.generate_hooks(title, count=1)
+        hook = hooks[0] if hooks else {"text": f"📰 {title}"}
+        
+        text = f"<b>{hook['text']}</b>\n\n💡 {insight}\n\n📚 Читайте подробности!\n💡 @Parkhovenko_i_kompaniya_bot"
+        
+        post_id = await db.add_content_post(
+            title=title,
+            body=text,
+            cta="Записаться: @Parkhovenko_i_kompaniya_bot",
+            channel="draft"
+        )
+        
+        await state.update_data({"post_id": post_id})
+        
+        builder = InlineKeyboardBuilder()
+        builder.button(text="📤 Опубликовать", callback_data=f"publish:dom:{post_id}")
+        builder.button(text="◀️ В меню", callback_data="content_back")
+        
+        await callback.message.edit_text(
+            f"✨ <b>Пост готов!</b>\n\n{text}\n\n",
+            reply_markup=builder.as_markup(),
+            parse_mode="HTML"
+        )
+        
+    except Exception as e:
+        logger.error(f"Generate from news error: {e}")
+        await callback.message.edit_text(
+            f"❌ Ошибка: {e}",
+            reply_markup=get_back_btn(),
+            parse_mode="HTML"
+        )
+    
+    await callback.answer()
+
+
+# === CONTENT PLAN: Генерация и отправка в THREAD_ID_CONTENT_PLAN ===
+async def show_content_plan(callback: CallbackQuery, state: FSMContext, days: int = 7):
+    """Генерирует контент-план и отправляет в топик 83"""
+    text = f"🗓 <b>Контент-план на {days} дней</b>\n\n"
+    
+    topics = await scout_agent.scout_topics(count=days)
+    rubrics = ["💡 Полезный", "📊 Кейс", "🔥 Акция", "❤️ Эмоция"]
+    
+    for i, topic in enumerate(topics, 1):
+        rubric = rubrics[i % len(rubrics)]
+        title = topic.get("title", "")[:30]
+        insight = topic.get("insight", "")[:40]
+        text += f"{i} | {rubric} | {title} | {insight}\n"
+    
+    # Отправляем в топик КОНТЕНТ-ПЛАН (83)
+    await callback.bot.send_message(
+        chat_id=LEADS_GROUP_CHAT_ID,
+        message_thread_id=THREAD_ID_CONTENT_PLAN,
+        text=text,
+        parse_mode="HTML"
+    )
+    
+    await callback.message.edit_text(
+        f"{text}\n\n✅ Отправлено в рабочую группу!",
+        reply_markup=get_back_btn(),
+        parse_mode="HTML"
+    )
+
+
+# === ScoutAgent заглушка ===
+try:
+    from agents.scout_agent import scout_agent
+except ImportError:
+    class DummyScout:
+        async def scout_topics(self, count=3):
+            return [{"title": f"Тема {i}", "insight": "Актуальная информация"} for i in range(1, count+1)]
+    scout_agent = DummyScout()
