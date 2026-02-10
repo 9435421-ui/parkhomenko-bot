@@ -239,7 +239,7 @@ async def process_plan(message: Message, state: FSMContext, bot: Bot):
     try:
         await bot.send_message(
             chat_id=LEADS_GROUP_CHAT_ID,
-            message_thread_id=THREAD_ID_KVARTIRY,
+            message_thread_id=thread_id,
             text=f"📱 <b>Новый контакт!</b>\n👤 {user_name}\n📞 {phone}",
             parse_mode="HTML"
         )
