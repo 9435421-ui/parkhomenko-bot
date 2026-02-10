@@ -283,6 +283,37 @@ class Database:
             await cursor.execute("DELETE FROM content_plan WHERE id = ?", (post_id,))
             await self.conn.commit()
 
+    # Алиас для совместимости с handlers/content.py
+    async def add_content_post(self, title: str, body: str, cta: str, channel: str = "draft",
+                              scheduled_date: datetime = None, **kwargs) -> int:
+        """Алиас для save_post — добавить пост в контент-план"""
+        return await self.save_post(
+            post_type=kwargs.get("type", "post"),
+            title=title,
+            body=body,
+            cta=cta,
+            channel=channel,
+            publish_date=scheduled_date or datetime.now(),
+            theme=kwargs.get("theme"),
+            image_url=kwargs.get("image_url"),
+            admin_id=kwargs.get("admin_id"),
+            status="draft"
+        )
+
+    async def update_content_post(self, post_id: int, **kwargs):
+        """Алиас — обновить пост"""
+        if "status" in kwargs:
+            await self.mark_as_published(post_id)
+        else:
+            await self.update_content_plan_entry(post_id, **kwargs)
+
+    async def get_content_post(self, post_id: int):
+        """Получить пост по ID"""
+        async with self.conn.cursor() as cursor:
+            await cursor.execute("SELECT * FROM content_plan WHERE id = ?", (post_id,))
+            row = await cursor.fetchone()
+            return dict(row) if row else None
+
     async def get_max_publish_date(self, status: str = 'approved') -> Optional[datetime]:
         async with self.conn.cursor() as cursor:
             await cursor.execute("SELECT MAX(publish_date) FROM content_plan WHERE status = ?", (status,))
