@@ -11,8 +11,12 @@ import logging
 
 from database import db
 from agents.viral_hooks_agent import viral_hooks_agent
+from content_agent import ContentAgent
+from image_gen import generate
 from config import CHANNEL_ID_TERION, CHANNEL_ID_DOM_GRAD, VK_GROUP_ID, LEADS_GROUP_CHAT_ID, THREAD_ID_NEWS, THREAD_ID_CONTENT_PLAN
 from services.vk_service import vk_service
+
+content_agent = ContentAgent()
 
 logger = logging.getLogger(__name__)
 content_router = Router()
@@ -45,13 +49,19 @@ def get_back_btn() -> InlineKeyboardMarkup:
     return builder.as_markup()
 
 
-def get_publish_btns(post_id: int) -> InlineKeyboardMarkup:
+def get_publish_btns(post_id: int, include_image: bool = False) -> InlineKeyboardMarkup:
     """Кнопки публикации — формат publish:{channel}:{id}"""
     builder = InlineKeyboardBuilder()
     builder.button(text="📤 TERION", callback_data=f"publish:terion:{post_id}")
     builder.button(text="📤 ДОМ ГРАНД", callback_data=f"publish:dom:{post_id}")
     builder.button(text="📤 ВК", callback_data=f"publish:vk:{post_id}")
+    
+    # Кнопка генерации изображения
+    if not include_image:
+        builder.button(text="🎨 Сгенерировать ИИ-фото", callback_data=f"gen_image:{post_id}")
+    
     builder.button(text="◀️ В меню", callback_data="content_back")
+    builder.adjust(3, 1, 1)
     return builder.as_markup()
 
 
@@ -211,11 +221,12 @@ async def menu_news_detail(callback: CallbackQuery, state: FSMContext):
         post_id = await db.add_content_post(title=title, body=text, cta="Записаться: @Parkhovenko_i_kompaniya_bot", channel="draft")
         await state.update_data({"post_id": post_id})
         
-        builder = InlineKeyboardBuilder()
-        builder.button(text="📤 Опубликовать", callback_data=f"publish:dom:{post_id}")
-        builder.button(text="◀️ В меню", callback_data="content_back")
-        
-        await callback.message.edit_text(f"✨ <b>Пост готов!</b>\n\n{text}\n\n", reply_markup=builder.as_markup(), parse_mode="HTML")
+        # Используем get_publish_btns с кнопкой генерации изображения
+        await callback.message.edit_text(
+            f"✨ <b>Пост готов!</b>\n\n{text}\n\n",
+            reply_markup=get_publish_btns(post_id),
+            parse_mode="HTML"
+        )
         
     except Exception as e:
         logger.error(f"Generate from news error: {e}")
@@ -228,6 +239,30 @@ async def menu_publish(callback: CallbackQuery, state: FSMContext):
     """Публикация поста"""
     await callback.answer()
     await handle_publish(callback, state)
+
+
+# === GENERATE IMAGE ===
+@content_router.callback_query(F.data.startswith("gen_image:"))
+async def generate_image_handler(callback: CallbackQuery):
+    """Генерация изображения Flux для поста"""
+    post_id = int(callback.data.split(":")[1])
+    post = await db.get_content_post(post_id)
+    
+    await callback.message.edit_text("🎨 <b>Flux создаёт шедевр...</b>\nЭто займет около 15-20 секунд.", parse_mode="HTML")
+    
+    # Генерируем изображение через image_gen
+    image_url = await generate(prompt=post['title'])
+    
+    if image_url:
+        await db.update_content_post(post_id, image_url=image_url)
+        await callback.message.answer_photo(
+            photo=image_url,
+            caption=f"✨ Изображение готово для поста: <b>{post['title']}</b>",
+            reply_markup=get_publish_btns(post_id),
+            parse_mode="HTML"
+        )
+    else:
+        await callback.answer("❌ Ошибка генерации фото")
 
 
 # === AI PHOTO ===
