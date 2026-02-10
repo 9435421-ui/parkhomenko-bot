@@ -8,7 +8,7 @@ from aiogram.fsm.state import State, StatesGroup
 from aiogram.fsm.context import FSMContext
 
 from database import db
-from config import GROUP_ID, THREAD_ID_LEADS, THREAD_ID_KVARTIRY, THREAD_ID_KOMMERCIA, THREAD_ID_DOMA
+from config import LEADS_GROUP_CHAT_ID, THREAD_ID_KVARTIRY, THREAD_ID_KOMMERCIA, THREAD_ID_DOMA
 
 router = Router()
 
@@ -68,7 +68,7 @@ def get_thread_id(object_type: str) -> int:
     elif "дом" in object_type.lower():
         return THREAD_ID_DOMA
     else:
-        return THREAD_ID_LEADS
+        return THREAD_ID_KVARTIRY
 
 
 # === GREETING -> CONTACT ===
@@ -238,8 +238,8 @@ async def process_plan(message: Message, state: FSMContext, bot: Bot):
     # Отправляем уведомление о новом контакте
     try:
         await bot.send_message(
-            chat_id=GROUP_ID,
-            message_thread_id=THREAD_ID_LEADS,
+            chat_id=LEADS_GROUP_CHAT_ID,
+            message_thread_id=THREAD_ID_KVARTIRY,
             text=f"📱 <b>Новый контакт!</b>\n👤 {user_name}\n📞 {phone}",
             parse_mode="HTML"
         )
@@ -264,7 +264,7 @@ async def process_plan(message: Message, state: FSMContext, bot: Bot):
     try:
         if has_photo and photo_id:
             await bot.send_photo(
-                chat_id=GROUP_ID,
+                chat_id=LEADS_GROUP_CHAT_ID,
                 message_thread_id=thread_id,
                 photo=photo_id,
                 caption=lead_text,
@@ -272,7 +272,7 @@ async def process_plan(message: Message, state: FSMContext, bot: Bot):
             )
         else:
             await bot.send_message(
-                chat_id=GROUP_ID,
+                chat_id=LEADS_GROUP_CHAT_ID,
                 message_thread_id=thread_id,
                 text=lead_text,
                 parse_mode="HTML"
