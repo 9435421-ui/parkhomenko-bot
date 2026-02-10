@@ -8,13 +8,13 @@
 """
 import os
 import logging
-import requests
+import aiohttp
 from typing import Optional
 
 logger = logging.getLogger(__name__)
 
 
-def generate(prompt: str) -> Optional[str]:
+async def generate(prompt: str) -> Optional[str]:
     """
     Генерирует изображение по текстовому промпту через Router AI (Flux).
 
@@ -36,8 +36,8 @@ def generate(prompt: str) -> Optional[str]:
         logger.error("ROUTER_AI_IMAGE_KEY не настроен в переменных окружения")
         return None
 
-    # API Router AI для генерации изображений (пробуем альтернативный endpoint)
-    url = os.getenv("ROUTER_IMAGE_URL", "https://router.huge.ai/api/image_generation")
+    # API Router AI для генерации изображений
+    url = os.getenv("ROUTER_IMAGE_URL", "https://api.router.ai/v1/image_generation")
 
     headers = {
         "Authorization": f"Bearer {ROUTER_AI_IMAGE_KEY}",
@@ -53,23 +53,26 @@ def generate(prompt: str) -> Optional[str]:
     }
 
     try:
-        response = requests.post(url, headers=headers, json=payload, timeout=60)
-        response.raise_for_status()
+        async with aiohttp.ClientSession() as session:
+            async with session.post(url, headers=headers, json=payload, timeout=aiohttp.ClientTimeout(total=60)) as response:
+                if response.status != 200:
+                    logger.error(f"Image API error: {response.status}")
+                    return None
+                
+                result = await response.json()
 
-        result = response.json()
+                # Получаем URL изображения
+                if result.get("data") and len(result["data"]) > 0:
+                    image_url = result["data"][0].get("url") or result["data"][0].get("image_url")
+                    if image_url:
+                        logger.info(f"Изображение успешно сгенерировано: {image_url}")
+                        return image_url
 
-        # Получаем URL изображения
-        if result.get("data") and len(result["data"]) > 0:
-            image_url = result["data"][0].get("url") or result["data"][0].get("image_url")
-            if image_url:
-                logger.info(f"Изображение успешно сгенерировано: {image_url}")
-                return image_url
+                logger.warning(f"Не удалось получить URL изображения: {result}")
+                return None
 
-        logger.warning(f"Не удалось получить URL изображения: {result}")
-        return None
-
-    except requests.exceptions.Timeout:
-        logger.error("Таймаут при генерации изображения")
+    except aiohttp.ClientError as e:
+        logger.error(f"aiohttp error при генерации изображения: {e}")
         return None
     except Exception as e:
         logger.error(f"Ошибка генерации изображения: {e}")

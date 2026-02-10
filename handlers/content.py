@@ -250,19 +250,40 @@ async def generate_image_handler(callback: CallbackQuery):
     
     await callback.message.edit_text("🎨 <b>Flux создаёт шедевр...</b>\nЭто займет около 15-20 секунд.", parse_mode="HTML")
     
-    # Генерируем изображение через image_gen
-    image_url = await generate(prompt=post['title'])
-    
-    if image_url:
-        await db.update_content_post(post_id, image_url=image_url)
-        await callback.message.answer_photo(
-            photo=image_url,
-            caption=f"✨ Изображение готово для поста: <b>{post['title']}</b>",
+    try:
+        # Генерируем изображение через image_gen
+        image_url = await generate(prompt=post['title'])
+        
+        if image_url:
+            await db.update_content_post(post_id, image_url=image_url)
+            await callback.message.answer_photo(
+                photo=image_url,
+                caption=f"✨ Изображение готово для поста: <b>{post['title']}</b>",
+                reply_markup=get_publish_btns(post_id),
+                parse_mode="HTML"
+            )
+        else:
+            # Картинка недоступна - показываем только текст
+            await callback.message.edit_text(
+                f"🎨 <b>Картинка временно недоступна</b>\n\n"
+                f"Но ваш пост готов!\n\n"
+                f"<b>{post['title']}</b>\n\n"
+                f"{post['body']}\n\n"
+                f"📤 Выберите канал для публикации:",
+                reply_markup=get_publish_btns(post_id),
+                parse_mode="HTML"
+            )
+    except Exception as e:
+        logger.error(f"Image generation error: {e}")
+        await callback.message.edit_text(
+            f"🎨 <b>Картинка временно недоступна</b>\n\n"
+            f"Но ваш пост готов!\n\n"
+            f"<b>{post['title']}</b>\n\n"
+            f"{post['body']}\n\n"
+            f"📤 Выберите канал для публикации:",
             reply_markup=get_publish_btns(post_id),
             parse_mode="HTML"
         )
-    else:
-        await callback.answer("❌ Ошибка генерации фото")
 
 
 # === AI PHOTO ===
