@@ -61,112 +61,178 @@ def get_photo_done_keyboard() -> InlineKeyboardMarkup:
     return builder.as_markup()
 
 
+def get_plan_days_keyboard() -> InlineKeyboardMarkup:
+    builder = InlineKeyboardBuilder()
+    builder.button(text="7 дней", callback_data="plan_days_7")
+    builder.button(text="14 дней", callback_data="plan_days_14")
+    builder.button(text="30 дней", callback_data="plan_days_30")
+    builder.adjust(3)
+    return builder.as_markup()
+
+
 # === /START ===
 @content_router.message(CommandStart())
 async def content_start(message: Message, state: FSMContext):
     """Старт Content Bot"""
     await state.clear()
-    await message.answer(
-        "🎯 <b>Content Bot</b>\n\nВыберите:",
-        reply_markup=get_content_menu(),
-        parse_mode="HTML"
-    )
+    await message.answer("🎯 <b>Content Bot</b>\n\nВыберите:", reply_markup=get_content_menu(), parse_mode="HTML")
     await state.set_state(ContentStates.main_menu)
 
 
-# === CALLBACKS ===
-@content_router.callback_query(F.data.startswith("menu:"))
-async def content_callback(callback: CallbackQuery, state: FSMContext):
-    data = callback.data
-    
-    if data == "content_back":
-        await callback.message.edit_text(
-            "🎯 <b>Content Bot</b>\n\nВыберите:",
-            reply_markup=get_content_menu(),
-            parse_mode="HTML"
-        )
-        await state.set_state(ContentStates.main_menu)
-        return
-    
-    if data == "menu:create":
-        builder = InlineKeyboardBuilder()
-        builder.button(text="📸 Фото + ИИ-пост", callback_data="ai_photo")
-        builder.button(text="📝 Только текст", callback_data="ai_text")
-        builder.button(text="📅 Серия постов", callback_data="ai_series")
-        builder.adjust(1)
-        
-        await callback.message.edit_text(
-            "📝 <b>Создание поста</b>\n\nВыберите формат:",
-            reply_markup=builder.as_markup(),
-            parse_mode="HTML"
-        )
-        return
-    
-    if data == "menu:photo":
-        await state.update_data(user_state={"step": "ai_photo_wait_photo"})
-        await callback.message.edit_text(
-            "📸 <b>Фото + ИИ-пост</b>\n\nЗагрузите фото объекта:",
-            reply_markup=get_back_btn(),
-            parse_mode="HTML"
-        )
-        await state.set_state(ContentStates.ai_photo)
-        return
-        
-    if data == "menu:editor":
-        await state.update_data(user_state={"step": "ai_text_wait_topic"})
-        await callback.message.edit_text(
-            "📝 <b>Только текст</b>\n\nВведите тему поста:",
-            reply_markup=get_back_btn(),
-            parse_mode="HTML"
-        )
-        await state.set_state(ContentStates.ai_text)
-        return
-        
-    if data == "menu:plan":
-        # Показываем длительность серии
-        builder = InlineKeyboardBuilder()
-        builder.button(text="7 дней", callback_data="plan_days_7")
-        builder.button(text="14 дней", callback_data="plan_days_14")
-        builder.button(text="30 дней", callback_data="plan_days_30")
-        builder.adjust(3)
-        
-        await callback.message.edit_text(
-            "📅 <b>Серия постов</b>\n\nВыберите длительность:",
-            reply_markup=builder.as_markup(),
-            parse_mode="HTML"
-        )
-        await state.set_state(ContentStates.ai_series)
-        await callback.answer()
-        return
-    
-    if data.startswith("plan_days_"):
-        days = int(data.split("_")[-1])
-        # Генерируем план на выбранное количество дней
-        await show_content_plan(callback, state, days)
-        return
-        
-    if data.startswith("menu:series_"):
-        days = int(data.split("_")[1])
-        user_state = {"step": "series_wait_topic", "days": days}
-        await state.update_data(user_state=user_state)
-        await callback.message.edit_text(
-            f"📅 <b>Серия на {days} дней</b>\n\nВведите тему:",
-            reply_markup=get_back_btn(),
-            parse_mode="HTML"
-        )
-        await state.set_state(ContentStates.ai_series)
-        return
-        
-    if data.startswith("publish_"):
-        await handle_publish(callback, state)
-        return
-    
+# === NAVIGATION ===
+@content_router.callback_query(F.data == "content_back")
+async def content_back(callback: CallbackQuery, state: FSMContext):
+    """Назад в главное меню"""
     await callback.answer()
+    await state.clear()
+    await callback.message.edit_text("🎯 <b>Content Bot</b>\n\nВыберите:", reply_markup=get_content_menu(), parse_mode="HTML")
+    await state.set_state(ContentStates.main_menu)
+
+
+# === MENU: CREATE ===
+@content_router.callback_query(F.data == "menu:create")
+async def menu_create(callback: CallbackQuery, state: FSMContext):
+    """Меню: Создать пост"""
+    await callback.answer()
+    builder = InlineKeyboardBuilder()
+    builder.button(text="📸 Фото + ИИ-пост", callback_data="menu:photo")
+    builder.button(text="📝 Только текст", callback_data="menu:editor")
+    builder.button(text="📅 Серия постов", callback_data="menu:series")
+    builder.adjust(1)
+    await callback.message.edit_text("📝 <b>Создание поста</b>\n\nВыберите формат:", reply_markup=builder.as_markup(), parse_mode="HTML")
+
+
+# === MENU: PHOTO ===
+@content_router.callback_query(F.data == "menu:photo")
+async def menu_photo(callback: CallbackQuery, state: FSMContext):
+    """Меню: Пост по фото"""
+    await callback.answer()
+    await state.update_data(user_state={"step": "ai_photo_wait_photo"})
+    await callback.message.edit_text("📸 <b>Фото + ИИ-пост</b>\n\nЗагрузите фото объекта:", reply_markup=get_back_btn(), parse_mode="HTML")
+    await state.set_state(ContentStates.ai_photo)
+
+
+# === MENU: EDITOR ===
+@content_router.callback_query(F.data == "menu:editor")
+async def menu_editor(callback: CallbackQuery, state: FSMContext):
+    """Меню: Редактор текста"""
+    await callback.answer()
+    await state.update_data(user_state={"step": "ai_text_wait_topic"})
+    await callback.message.edit_text("📝 <b>Только текст</b>\n\nВведите тему поста:", reply_markup=get_back_btn(), parse_mode="HTML")
+    await state.set_state(ContentStates.ai_text)
+
+
+# === MENU: SERIES ===
+@content_router.callback_query(F.data == "menu:series")
+async def menu_series(callback: CallbackQuery, state: FSMContext):
+    """Меню: Серия постов"""
+    await callback.answer()
+    await callback.message.edit_text("📅 <b>Серия постов</b>\n\nВыберите длительность:", reply_markup=get_plan_days_keyboard(), parse_mode="HTML")
+    await state.set_state(ContentStates.ai_series)
+
+
+# === MENU: PLAN DAYS ===
+@content_router.callback_query(F.data.startswith("plan_days_"))
+async def menu_plan_days(callback: CallbackQuery, state: FSMContext):
+    """Выбор длительности плана"""
+    await callback.answer()
+    days = int(callback.data.split("_")[-1])
+    user_state = {"step": "series_wait_topic", "days": days}
+    await state.update_data(user_state=user_state)
+    await callback.message.edit_text(f"📅 <b>Серия на {days} дней</b>\n\nВведите тему:", reply_markup=get_back_btn(), parse_mode="HTML")
+
+
+# === MENU: PLAN ===
+@content_router.callback_query(F.data == "menu:plan")
+async def menu_plan(callback: CallbackQuery, state: FSMContext):
+    """Меню: Контент-план"""
+    await callback.answer()
+    await show_content_plan(callback, state, days=7)
+
+
+# === MENU: NEWS ===
+@content_router.callback_query(F.data == "menu:news")
+async def menu_news(callback: CallbackQuery, state: FSMContext):
+    """Меню: Новости отрасли"""
+    await callback.answer()
+    await callback.message.edit_text("📰 <b>Новости отрасли</b>\n\n🔍 Ищем актуальные новости...", parse_mode="HTML")
+    
+    try:
+        topics = await scout_agent.scout_topics(count=5)
+        
+        if not topics:
+            await callback.message.edit_text("📰 <b>Новости</b>\n\nНе удалось найти новости.", reply_markup=get_back_btn(), parse_mode="HTML")
+            return
+        
+        text = "📰 <b>Актуальные новости</b>\n\n"
+        
+        for i, topic in enumerate(topics, 1):
+            title = topic.get("title", "Новость")[:50]
+            insight = topic.get("insight", "")[:80]
+            text += f"{i}. <b>{title}</b>\n   💡 {insight}\n\n"
+            await state.update_data({f"news_{i}": topic})
+        
+        await callback.bot.send_message(chat_id=LEADS_GROUP_CHAT_ID, message_thread_id=THREAD_ID_NEWS, text=f"📰 <b>Новости от ScoutAgent</b>\n\n{text}", parse_mode="HTML")
+        
+        builder = InlineKeyboardBuilder()
+        for i, topic in enumerate(topics[:5], 1):
+            builder.button(text=f"📝 Пост из новости {i}", callback_data=f"menu:news:{i}")
+        builder.button(text="◀️ В меню", callback_data="content_back")
+        
+        await callback.message.edit_text(text + "📝 Нажмите на кнопку для создания поста.", reply_markup=builder.as_markup(), parse_mode="HTML")
+        
+    except Exception as e:
+        logger.error(f"News error: {e}")
+        await callback.message.edit_text(f"❌ Ошибка: {e}", reply_markup=get_back_btn(), parse_mode="HTML")
+
+
+# === MENU: NEWS DETAIL ===
+@content_router.callback_query(F.data.startswith("menu:news:"))
+async def menu_news_detail(callback: CallbackQuery, state: FSMContext):
+    """Генерирует пост из новости"""
+    await callback.answer()
+    news_id = int(callback.data.replace("menu:news:", ""))
+    
+    await callback.message.edit_text("📝 <b>Создание поста из новости</b>\n\n🎨 Генерирую...", parse_mode="HTML")
+    
+    try:
+        data = await state.get_data()
+        topic = data.get(f"news_{news_id}", {})
+        
+        title = topic.get("title", "Новость")
+        insight = topic.get("insight", "")
+        
+        hooks = await viral_hooks_agent.generate_hooks(title, count=1)
+        hook = hooks[0] if hooks else {"text": f"📰 {title}"}
+        
+        text = f"<b>{hook['text']}</b>\n\n💡 {insight}\n\n📚 Читайте подробности!\n💡 @Parkhovenko_i_kompaniya_bot"
+        
+        post_id = await db.add_content_post(title=title, body=text, cta="Записаться: @Parkhovenko_i_kompaniya_bot", channel="draft")
+        await state.update_data({"post_id": post_id})
+        
+        builder = InlineKeyboardBuilder()
+        builder.button(text="📤 Опубликовать", callback_data=f"publish:dom:{post_id}")
+        builder.button(text="◀️ В меню", callback_data="content_back")
+        
+        await callback.message.edit_text(f"✨ <b>Пост готов!</b>\n\n{text}\n\n", reply_markup=builder.as_markup(), parse_mode="HTML")
+        
+    except Exception as e:
+        logger.error(f"Generate from news error: {e}")
+        await callback.message.edit_text(f"❌ Ошибка: {e}", reply_markup=get_back_btn(), parse_mode="HTML")
+
+
+# === PUBLISH ===
+@content_router.callback_query(F.data.startswith("publish_"))
+async def menu_publish(callback: CallbackQuery, state: FSMContext):
+    """Публикация поста"""
+    await callback.answer()
+    await handle_publish(callback, state)
 
 
 # === AI PHOTO ===
 @content_router.message(ContentStates.ai_photo, F.photo)
 async def ai_photo_handler(message: Message, state: FSMContext):
+    """Обработка фото"""
     data = await state.get_data()
     user_state = data.get("user_state", {})
     photos = user_state.get("photos", [])
@@ -177,18 +243,14 @@ async def ai_photo_handler(message: Message, state: FSMContext):
     await state.update_data(user_state=user_state)
     
     count = len(photos)
-    await message.answer(
-        f"✅ Фото {count}!\n\nТеперь введите тему поста:",
-        reply_markup=get_photo_done_keyboard()
-    )
+    await message.answer(f"✅ Фото {count}!\n\nТеперь введите тему поста:", reply_markup=get_photo_done_keyboard())
 
 
 @content_router.callback_query(ContentStates.ai_photo, F.data == "ai_photo_done")
 async def ai_photo_done(callback: CallbackQuery, state: FSMContext):
-    await callback.message.edit_text(
-        "🎨 ИИ создаёт варианты...",
-        reply_markup=get_back_btn()
-    )
+    """Генерация вариантов из фото"""
+    await callback.answer()
+    await callback.message.edit_text("🎨 ИИ создаёт варианты...", reply_markup=get_back_btn())
     
     data = await state.get_data()
     topic = data.get("topic", "перепланировка")
@@ -209,11 +271,7 @@ async def ai_photo_done(callback: CallbackQuery, state: FSMContext):
         preview = v["text"][:200] + "..."
         builder = InlineKeyboardBuilder()
         builder.button(text=f"✅ Выбрать {i}", callback_data=f"select_variant_{i}")
-        await callback.message.answer(
-            f"📝 <b>Вариант {i}: {v['type']}</b>\n\n{preview}",
-            reply_markup=builder.as_markup(),
-            parse_mode="HTML"
-        )
+        await callback.message.answer(f"📝 <b>Вариант {i}: {v['type']}</b>\n\n{preview}", reply_markup=builder.as_markup(), parse_mode="HTML")
     
     await callback.message.answer("Выберите вариант:", reply_markup=get_back_btn())
     await state.set_state(ContentStates.select_variant)
@@ -222,6 +280,7 @@ async def ai_photo_done(callback: CallbackQuery, state: FSMContext):
 # === AI TEXT ===
 @content_router.message(ContentStates.ai_text)
 async def ai_text_handler(message: Message, state: FSMContext):
+    """Генерация поста из текста"""
     topic = message.text
     await state.update_data(topic=topic)
     
@@ -230,23 +289,15 @@ async def ai_text_handler(message: Message, state: FSMContext):
     
     text = f"<b>{hook['text']}</b>\n\n💡 @Parkhovenko_i_kompaniya_bot"
     
-    post_id = await db.add_content_post(
-        title=topic,
-        body=text,
-        cta="Записаться: @Parkhovenko_i_kompaniya_bot",
-        channel="draft"
-    )
+    post_id = await db.add_content_post(title=topic, body=text, cta="Записаться: @Parkhovenko_i_kompaniya_bot", channel="draft")
     
-    await message.answer(
-        f"📝 <b>Пост готов!</b>\n\n{text}",
-        reply_markup=get_publish_btns(post_id),
-        parse_mode="HTML"
-    )
+    await message.answer(f"📝 <b>Пост готов!</b>\n\n{text}", reply_markup=get_publish_btns(post_id), parse_mode="HTML")
 
 
 # === AI SERIES ===
 @content_router.message(ContentStates.ai_series)
 async def ai_series_handler(message: Message, state: FSMContext):
+    """Генерация серии постов"""
     topic = message.text
     data = await state.get_data()
     days = data.get("user_state", {}).get("days", 7)
@@ -254,13 +305,7 @@ async def ai_series_handler(message: Message, state: FSMContext):
     chain = generate_series_chain(topic, days)
     
     for item in chain:
-        await db.add_content_post(
-            title=item["topic"],
-            body=item["text"],
-            cta="@Parkhovenko_i_kompaniya_bot",
-            channel="draft",
-            scheduled_date=item.get("date")
-        )
+        await db.add_content_post(title=item["topic"], body=item["text"], cta="@Parkhovenko_i_kompaniya_bot", channel="draft", scheduled_date=item.get("date"))
     
     text = f"📅 <b>Серия на {days} дней готова!</b>\n\n"
     for item in chain[:5]:
@@ -270,6 +315,7 @@ async def ai_series_handler(message: Message, state: FSMContext):
 
 
 def generate_series_chain(topic: str, days: int):
+    """Генерирует цепочку постов"""
     chain = []
     themes = [
         ("Боль", f"😱 Штрафы за {topic.lower()}"),
@@ -288,8 +334,8 @@ def generate_series_chain(topic: str, days: int):
     return chain
 
 
-# === PUBLISH ===
 async def handle_publish(callback: CallbackQuery, state: FSMContext):
+    """Публикация поста в канал"""
     data = callback.data
     parts = data.split("_")
     if len(parts) < 3:
@@ -304,7 +350,6 @@ async def handle_publish(callback: CallbackQuery, state: FSMContext):
         await callback.answer("Пост не найден!")
         return
     
-    # Выбираем канал
     if channel == "terion":
         channel_id = CHANNEL_ID_TERION
         channel_name = "TERION"
@@ -312,16 +357,10 @@ async def handle_publish(callback: CallbackQuery, state: FSMContext):
         channel_id = CHANNEL_ID_DOM_GRAD
         channel_name = "ДОМ ГРАНД"
     elif channel == "vk":
-        # Публикуем в ВК
         vk_result = await vk_service.post(post["body"])
         if vk_result:
             await db.update_content_post(post_id, status="published")
-            await callback.message.edit_text(
-                "✅ <b>Опубликовано ВКонтакте!</b>\n\n"
-                f"Пост #{vk_result}",
-                reply_markup=get_content_menu(),
-                parse_mode="HTML"
-            )
+            await callback.message.edit_text("✅ <b>Опубликовано ВКонтакте!</b>\n\nПост #" + str(vk_result), reply_markup=get_content_menu(), parse_mode="HTML")
         else:
             await callback.answer("❌ Ошибка ВК!")
         return
@@ -331,143 +370,20 @@ async def handle_publish(callback: CallbackQuery, state: FSMContext):
     
     try:
         if post.get("image_url"):
-            await callback.bot.send_photo(
-                chat_id=channel_id,
-                photo=post["image_url"],
-                caption=post["body"],
-                parse_mode="HTML"
-            )
+            await callback.bot.send_photo(chat_id=channel_id, photo=post["image_url"], caption=post["body"], parse_mode="HTML")
         else:
-            await callback.bot.send_message(
-                chat_id=channel_id,
-                text=post["body"],
-                parse_mode="HTML"
-            )
+            await callback.bot.send_message(chat_id=channel_id, text=post["body"], parse_mode="HTML")
         
         await db.update_content_post(post_id, status="published")
-        await callback.message.edit_text(
-            f"✅ <b>Опубликовано в {channel_name}!</b>",
-            reply_markup=get_content_menu(),
-            parse_mode="HTML"
-        )
+        await callback.message.edit_text(f"✅ <b>Опубликовано в {channel_name}!</b>", reply_markup=get_content_menu(), parse_mode="HTML")
     except Exception as e:
         logger.error(f"Publish error: {e}")
         await callback.answer(f"❌ Ошибка: {e}")
 
 
-@content_router.callback_query(F.data == "menu:news")
-async def show_news(callback: CallbackQuery, state: FSMContext):
-    """Показывает новости от ScoutAgent и отправляет в топик 780"""
-    await callback.message.edit_text(
-        "📰 <b>Новости отрасли</b>\n\n🔍 Ищем актуальные новости...",
-        parse_mode="HTML"
-    )
-    
-    try:
-        topics = await scout_agent.scout_topics(count=5)
-        
-        if not topics:
-            await callback.message.edit_text(
-                "📰 <b>Новости</b>\n\nНе удалось найти новости.",
-                reply_markup=get_back_btn(),
-                parse_mode="HTML"
-            )
-            await callback.answer()
-            return
-        
-        text = "📰 <b>Актуальные новости</b>\n\n"
-        
-        for i, topic in enumerate(topics, 1):
-            title = topic.get("title", "Новость")[:50]
-            insight = topic.get("insight", "")[:80]
-            text += f"{i}. <b>{title}</b>\n   💡 {insight}\n\n"
-            await state.update_data({f"news_{i}": topic})
-        
-        # Отправляем в топик НОВОСТИ (780)
-        await callback.bot.send_message(
-            chat_id=LEADS_GROUP_CHAT_ID,
-            message_thread_id=THREAD_ID_NEWS,
-            text=f"📰 <b>Новости от ScoutAgent</b>\n\n{text}",
-            parse_mode="HTML"
-        )
-        
-        builder = InlineKeyboardBuilder()
-        for i, topic in enumerate(topics[:5], 1):
-            builder.button(text=f"📝 Пост из новости {i}", callback_data=f"menu:news:{i}")
-        builder.button(text="◀️ В меню", callback_data="content_back")
-        
-        await callback.message.edit_text(
-            text + "📝 Нажмите на кнопку для создания поста.",
-            reply_markup=builder.as_markup(),
-            parse_mode="HTML"
-        )
-        
-    except Exception as e:
-        logger.error(f"News error: {e}")
-        await callback.message.edit_text(
-            f"❌ Ошибка: {e}",
-            reply_markup=get_back_btn(),
-            parse_mode="HTML"
-        )
-    
-    await callback.answer()
-
-
-@content_router.callback_query(F.data.startswith("menu:news:"))
-async def generate_post_from_news(callback: CallbackQuery, state: FSMContext):
-    """Генерирует пост из новости"""
-    news_id = int(callback.data.replace("menu:news:", ""))
-    
-    await callback.message.edit_text(
-        "📝 <b>Создание поста из новости</b>\n\n🎨 Генерирую...",
-        parse_mode="HTML"
-    )
-    
-    try:
-        data = await state.get_data()
-        topic = data.get(f"news_{news_id}", {})
-        
-        title = topic.get("title", "Новость")
-        insight = topic.get("insight", "")
-        
-        hooks = await viral_hooks_agent.generate_hooks(title, count=1)
-        hook = hooks[0] if hooks else {"text": f"📰 {title}"}
-        
-        text = f"<b>{hook['text']}</b>\n\n💡 {insight}\n\n📚 Читайте подробности!\n💡 @Parkhovenko_i_kompaniya_bot"
-        
-        post_id = await db.add_content_post(
-            title=title,
-            body=text,
-            cta="Записаться: @Parkhovenko_i_kompaniya_bot",
-            channel="draft"
-        )
-        
-        await state.update_data({"post_id": post_id})
-        
-        builder = InlineKeyboardBuilder()
-        builder.button(text="📤 Опубликовать", callback_data=f"publish:dom:{post_id}")
-        builder.button(text="◀️ В меню", callback_data="content_back")
-        
-        await callback.message.edit_text(
-            f"✨ <b>Пост готов!</b>\n\n{text}\n\n",
-            reply_markup=builder.as_markup(),
-            parse_mode="HTML"
-        )
-        
-    except Exception as e:
-        logger.error(f"Generate from news error: {e}")
-        await callback.message.edit_text(
-            f"❌ Ошибка: {e}",
-            reply_markup=get_back_btn(),
-            parse_mode="HTML"
-        )
-    
-    await callback.answer()
-
-
 # === CONTENT PLAN ===
 async def show_content_plan(callback: CallbackQuery, state: FSMContext, days: int = 7):
-    """Генерирует конт-план и отправляет в топик"""
+    """Генерирует контент-план"""
     text = f"🗓 <b>Контент-план на {days} дней</b>\n\n"
     
     topics = await scout_agent.scout_topics(count=days)
@@ -479,47 +395,26 @@ async def show_content_plan(callback: CallbackQuery, state: FSMContext, days: in
         insight = topic.get("insight", "")[:40]
         text += f"{i} | {rubric} | {title} | {insight}\n"
     
-    # В топик КОНТЕНТ-ПЛАН
-    await callback.bot.send_message(
-        chat_id=LEADS_GROUP_CHAT_ID,
-        message_thread_id=THREAD_ID_CONTENT_PLAN,
-        text=text,
-        parse_mode="HTML"
-    )
-    
-    await callback.message.edit_text(
-        f"{text}\n\n✅ Отправлено в рабочую группу!",
-        reply_markup=get_back_btn(),
-        parse_mode="HTML"
-    )
+    await callback.bot.send_message(chat_id=LEADS_GROUP_CHAT_ID, message_thread_id=THREAD_ID_CONTENT_PLAN, text=text, parse_mode="HTML")
+    await callback.message.edit_text(f"{text}\n\n✅ Отправлено в рабочую группу!", reply_markup=get_back_btn(), parse_mode="HTML")
 
 
-# === URGENT HANDLERS (for urgent_btn from admin) ===
+# === URGENT HANDLERS ===
 @content_router.callback_query(F.data == "urgent_publish")
-async def urgent_publish_handler(callback: CallbackQuery, state: FSMContext):
-    """Срочная публикация - переслать в рабочую группу"""
-    await callback.message.edit_text(
-        "🚀 <b>Срочная публикация!</b>\n\n"
-        "Пост отмечен как срочный и будет опубликован первым.",
-        parse_mode="HTML"
-    )
+async def urgent_publish(callback: CallbackQuery, state: FSMContext):
+    """Срочная публикация"""
     await callback.answer()
+    await callback.message.edit_text("🚀 <b>Срочная публикация!</b>\n\nПост отмечен как срочный.", parse_mode="HTML")
 
 
 @content_router.callback_query(F.data == "urgent_edit")
-async def urgent_edit_handler(callback: CallbackQuery, state: FSMContext):
+async def urgent_edit(callback: CallbackQuery, state: FSMContext):
     """Доработка срочного поста"""
-    await callback.message.edit_text(
-        "📝 <b>Доработка поста</b>\n\n"
-        "Введите исправленный текст:",
-        parse_mode="HTML"
-    )
     await callback.answer()
+    await callback.message.edit_text("📝 <b>Доработка поста</b>\n\nВведите исправленный текст:", parse_mode="HTML")
 
 
-
-
-# === ScoutAgent заглушка ===
+# === ScoutAgent Dummy ===
 try:
     from agents.scout_agent import scout_agent
 except ImportError:
