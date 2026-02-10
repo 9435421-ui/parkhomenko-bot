@@ -3,12 +3,14 @@ Content Handler — TERION Ecosystem (v2.0)
 Публикация контента: TG + VK + Max + Geo Spy
 """
 from aiogram import Router, F
-from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup
-from aiogram.filters import CommandStart
+from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, ReplyKeyboardMarkup, KeyboardButton
+from aiogram.filters import CommandStart, ContentTypesFilter
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
+from PIL import Image
 import logging
+import io
 
 from database import db
 from agents.viral_hooks_agent import viral_hooks_agent
@@ -30,9 +32,6 @@ from services.vk_service import vk_service
 content_agent = ContentAgent()
 logger = logging.getLogger(__name__)
 
-# Логируем подтверждение маршрутизации
-logger.info("Экосистема TERION: Маршрутизация настроена")
-
 content_router = Router()
 
 
@@ -48,8 +47,17 @@ class ContentStates(StatesGroup):
 
 
 # === KEYBOARDS ===
+def get_main_reply_menu() -> ReplyKeyboardMarkup:
+    """Reply-меню TERION"""
+    kb = [
+        [KeyboardButton(text="📸 Фото + пост"), KeyboardButton(text="📅 7 дней прогрева")],
+        [KeyboardButton(text="🎨 ИИ-Визуал"), KeyboardButton(text="📋 Интерактивный План")]
+    ]
+    return ReplyKeyboardMarkup(keyboard=kb, resize_keyboard=True)
+
+
 def get_content_menu() -> InlineKeyboardMarkup:
-    """Главное меню TERION"""
+    """Главное меню TERION (inline)"""
     builder = InlineKeyboardBuilder()
     builder.button(text="📝 Создать пост", callback_data="menu:create")
     builder.button(text="🗓 Контент-план", callback_data="menu:plan")
@@ -87,10 +95,68 @@ def get_publish_btns(post_id: int) -> InlineKeyboardMarkup:
 # === /START ===
 @content_router.message(CommandStart())
 async def content_start(message: Message, state: FSMContext):
-    """Старт Content Bot TERION"""
+    """Старт Content Bot TERION - Reply-меню"""
     await state.clear()
-    await message.answer("🎯 <b>TERION Content Bot</b>\n\nВыберите:", reply_markup=get_content_menu(), parse_mode="HTML")
+    await message.answer(
+        "🎯 <b>TERION Content Bot</b>\n\nВыберите действие в меню ниже:", 
+        reply_markup=get_main_reply_menu(), 
+        parse_mode="HTML"
+    )
     await state.set_state(ContentStates.main_menu)
+
+
+# === REPLY MENU HANDLERS ===
+@content_router.message(F.text == "📸 Фото + пост")
+async def reply_menu_photo(callback: Message, state: FSMContext):
+    """Reply-кнопка: Фото + пост"""
+    await state.update_data(user_state={"step": "photo_wait"})
+    await callback.answer(
+        "📸 <b>Фото + пост</b>\n\n"
+        "1️⃣ Загрузите фото объекта\n"
+        "2️⃣ Напишите текст поста\n"
+        "3️⃣ Пост отправится в рабочую группу\n\n"
+        f"<b>Загрузите фото:</b>",
+        reply_markup=get_main_reply_menu(),
+        parse_mode="HTML"
+    )
+    await state.set_state(ContentStates.ai_photo)
+
+
+@content_router.message(F.text == "📅 7 дней прогрева")
+async def reply_menu_series(callback: Message, state: FSMContext):
+    """Reply-кнопка: 7 дней прогрева"""
+    await state.update_data(user_state={"step": "series_wait", "days": 7})
+    await callback.answer(
+        "📅 <b>7 дней прогрева</b>\n\n"
+        "Создаём цепочку постов для прогрева аудитории.\n\n"
+        "Введите тему или продукт:",
+        reply_markup=get_main_reply_menu(),
+        parse_mode="HTML"
+    )
+    await state.set_state(ContentStates.ai_series)
+
+
+@content_router.message(F.text == "🎨 ИИ-Визуал")
+async def reply_menu_visual(callback: Message, state: FSMContext):
+    """Reply-кнопка: ИИ-Визуал"""
+    await callback.answer(
+        "🎨 <b>ИИ-Визуал</b>\n\n"
+        "Введите описание изображения для генерации:\n\n"
+        "Например: современная квартира, скандинавский стиль",
+        reply_markup=get_main_reply_menu(),
+        parse_mode="HTML"
+    )
+
+
+@content_router.message(F.text == "📋 Интерактивный План")
+async def reply_menu_plan(callback: Message, state: FSMContext):
+    """Reply-кнопка: Интерактивный План"""
+    await callback.answer(
+        "📋 <b>Интерактивный План</b>\n\n"
+        "Выберите длительность контент-плана:",
+        reply_markup=get_main_reply_menu(),
+        parse_mode="HTML"
+    )
 
 
 # === NAVIGATION ===
