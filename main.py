@@ -13,7 +13,8 @@ from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
 from config import BOT_TOKEN, CONTENT_BOT_TOKEN, GROUP_ID, THREAD_ID_LEADS
 from handlers.main_bot import start_router, quiz_router, dialog_router
-from handlers.content_bot import content_router, admin_router
+from handlers import content_router
+from handlers import admin_router
 from database import db
 from utils import kb, router_ai
 from agents.viral_hooks_agent import viral_hooks_agent
