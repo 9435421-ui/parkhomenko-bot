@@ -4,7 +4,7 @@ Content Handler — TERION Ecosystem (v2.0)
 """
 from aiogram import Router, F
 from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, ReplyKeyboardMarkup, KeyboardButton
-from aiogram.filters import CommandStart, ContentTypesFilter
+from aiogram.filters import CommandStart
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
@@ -107,10 +107,11 @@ async def content_start(message: Message, state: FSMContext):
 
 # === REPLY MENU HANDLERS ===
 @content_router.message(F.text == "📸 Фото + пост")
-async def reply_menu_photo(callback: Message, state: FSMContext):
+async def reply_menu_photo(message: Message, state: FSMContext):
     """Reply-кнопка: Фото + пост"""
+    logger.info("Нажата кнопка '📸 Фото + пост'")
     await state.update_data(user_state={"step": "photo_wait"})
-    await callback.answer(
+    await message.answer(
         "📸 <b>Фото + пост</b>\n\n"
         "1️⃣ Загрузите фото объекта\n"
         "2️⃣ Напишите текст поста\n"
@@ -123,10 +124,11 @@ async def reply_menu_photo(callback: Message, state: FSMContext):
 
 
 @content_router.message(F.text == "📅 7 дней прогрева")
-async def reply_menu_series(callback: Message, state: FSMContext):
+async def reply_menu_series(message: Message, state: FSMContext):
     """Reply-кнопка: 7 дней прогрева"""
+    logger.info("Нажата кнопка '📅 7 дней прогрева'")
     await state.update_data(user_state={"step": "series_wait", "days": 7})
-    await callback.answer(
+    await message.answer(
         "📅 <b>7 дней прогрева</b>\n\n"
         "Создаём цепочку постов для прогрева аудитории.\n\n"
         "Введите тему или продукт:",
@@ -137,9 +139,10 @@ async def reply_menu_series(callback: Message, state: FSMContext):
 
 
 @content_router.message(F.text == "🎨 ИИ-Визуал")
-async def reply_menu_visual(callback: Message, state: FSMContext):
+async def reply_menu_visual(message: Message, state: FSMContext):
     """Reply-кнопка: ИИ-Визуал"""
-    await callback.answer(
+    logger.info("Нажата кнопка '🎨 ИИ-Визуал'")
+    await message.answer(
         "🎨 <b>ИИ-Визуал</b>\n\n"
         "Введите описание изображения для генерации:\n\n"
         "Например: современная квартира, скандинавский стиль",
@@ -149,9 +152,10 @@ async def reply_menu_visual(callback: Message, state: FSMContext):
 
 
 @content_router.message(F.text == "📋 Интерактивный План")
-async def reply_menu_plan(callback: Message, state: FSMContext):
+async def reply_menu_plan(message: Message, state: FSMContext):
     """Reply-кнопка: Интерактивный План"""
-    await callback.answer(
+    logger.info("Нажата кнопка '📋 Интерактивный План'")
+    await message.answer(
         "📋 <b>Интерактивный План</b>\n\n"
         "Выберите длительность контент-плана:",
         reply_markup=get_main_reply_menu(),
