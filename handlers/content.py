@@ -903,12 +903,51 @@ async def save_draft(callback: CallbackQuery, state: FSMContext):
     await state.clear()
 
 
+# === HELPERS ===
+
+async def safe_edit_message(message, text, reply_markup=None):
+    """Безопасное редактирование — учитывает тип сообщения"""
+    try:
+        if message.photo:
+            # Если есть фото — редактируем caption
+            await message.edit_caption(
+                caption=text,
+                reply_markup=reply_markup,
+                parse_mode="HTML"
+            )
+        else:
+            # Если текст — редактируем текст
+            await message.edit_text(
+                text=text,
+                reply_markup=reply_markup,
+                parse_mode="HTML"
+            )
+    except Exception as e:
+        # Если не получилось — отправляем новое
+        await message.answer(text=text, reply_markup=reply_markup, parse_mode="HTML")
+
+
 @content_router.callback_query(F.data.startswith("edit:"))
-async def edit_post(callback: CallbackQuery, state: FSMContext):
+async def edit_handler(callback: CallbackQuery, state: FSMContext):
     """Редактирование поста"""
-    await callback.answer("✏️ Введите новый текст:")
-    # Можно добавить FSM для редактирования
-    await callback.message.answer("📝 <b>Введите новый текст поста:</b>", parse_mode="HTML")
+    post_id = int(callback.data.split(":")[1])
+    post = await db.get_content_post(post_id)
+
+    if not post:
+        await callback.answer("❌ Пост не найден")
+        return
+
+    await state.update_data({"edit_post_id": post_id})
+    
+    # Отправляем новое сообщение вместо редактирования
+    await callback.message.answer(
+        f"✏️ <b>Редактирование поста #{post_id}</b>\n\n"
+        f"<b>Текущий текст:</b>\n{post['body'][:500]}...\n\n"
+        f"Введите новый текст:",
+        parse_mode="HTML"
+    )
+    await callback.answer()
+    await state.set_state(ContentStates.edit_post)
 
 
 @content_router.callback_query(F.data == "cancel")
