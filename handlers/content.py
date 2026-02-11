@@ -20,6 +20,8 @@ import os
 import tempfile
 from datetime import datetime, timedelta
 from typing import Optional
+from PIL import Image
+import io
 
 from database import db
 from handlers.vk_publisher import VKPublisher
@@ -234,6 +236,41 @@ async def download_photo(bot: Bot, file_id: str) -> Optional[bytes]:
     return None
 
 
+async def compress_image(image_bytes: bytes, max_size: int = 1024, quality: int = 85) -> bytes:
+    """Сжатие изображения для экономии токенов Vision API"""
+    try:
+        img = Image.open(io.BytesIO(image_bytes))
+        # Конвертируем в RGB если нужно
+        if img.mode in ('RGBA', 'P', 'LA'):
+            background = Image.new('RGB', img.size, (255, 255, 255))
+            if img.mode == 'P':
+                img = img.convert('RGBA')
+            if img.mode in ('RGBA', 'LA'):
+                background.paste(img, mask=img.split()[-1] if img.mode in ('RGBA', 'LA') else None)
+                img = background
+            else:
+                img = img.convert('RGB')
+        # Уменьшаем если большое
+        if max(img.size) > max_size:
+            ratio = max_size / max(img.size)
+            new_size = (int(img.size[0] * ratio), int(img.size[1] * ratio))
+            img = img.resize(new_size, Image.Resampling.LANCZOS)
+            logger.info(f"Image resized: {img.size}")
+        # Сохраняем с указанным качеством
+        output = io.BytesIO()
+        img.save(output, format='JPEG', quality=quality, optimize=True)
+        compressed = output.getvalue()
+        # Логируем экономию
+        original_kb = len(image_bytes) / 1024
+        compressed_kb = len(compressed) / 1024
+        savings = (1 - len(compressed) / len(image_bytes)) * 100
+        logger.info(f"Image compressed: {original_kb:.1f}KB → {compressed_kb:.1f}KB ({savings:.0f}% saved)")
+        return compressed
+    except Exception as e:
+        logger.error(f"Compression error: {e}")
+        return image_bytes
+
+
 async def show_preview(
     message: Message,
     text: str,
@@ -311,16 +348,18 @@ async def process_photo(message: Message, state: FSMContext):
     photo = message.photo[-1]
     file_id = photo.file_id
     
-    await message.answer("🔍 <b>Анализирую фото...</b>", parse_mode="HTML")
-    
-    # Скачиваем и анализируем
+    # Скачиваем и сжимаем
     image_bytes = await download_photo(message.bot, file_id)
     if not image_bytes:
         await message.answer("❌ Ошибка загрузки фото", reply_markup=get_main_menu())
         await state.clear()
         return
     
-    image_b64 = base64.b64encode(image_bytes).decode()
+    await message.answer("🗜 <b>Сжимаю фото...</b>", parse_mode="HTML")
+    compressed_bytes = await compress_image(image_bytes, max_size=1024, quality=85)
+    
+    await message.answer("🔍 <b>Анализирую фото...</b>", parse_mode="HTML")
+    image_b64 = base64.b64encode(compressed_bytes).decode()
     
     prompt = (
         "Ты — эксперт по перепланировкам. Опиши фото интерьера для поста. "
@@ -995,11 +1034,26 @@ async def save_draft(callback: CallbackQuery, state: FSMContext):
 
 
 @content_router.callback_query(F.data.startswith("edit:"))
-async def edit_post(callback: CallbackQuery, state: FSMContext):
+async def edit_handler(callback: CallbackQuery, state: FSMContext):
     """Редактирование поста"""
-    await callback.answer("✏️ Введите новый текст:")
-    # Можно добавить FSM для редактирования
-    await callback.message.answer("📝 <b>Введите новый текст поста:</b>", parse_mode="HTML")
+    post_id = int(callback.data.split(":")[1])
+    post = await db.get_content_post(post_id)
+
+    if not post:
+        await callback.answer("❌ Пост не найден")
+        return
+
+    await state.update_data({"edit_post_id": post_id})
+    
+    # Отправляем новое сообщение (безопасно для фото)
+    await callback.message.answer(
+        f"✏️ <b>Редактирование поста #{post_id}</b>\n\n"
+        f"<b>Текущий текст:</b>\n{post['body'][:500]}...\n\n"
+        f"Введите новый текст:",
+        parse_mode="HTML"
+    )
+    await callback.answer()
+    await state.set_state(ContentStates.preview_mode)
 
 
 @content_router.callback_query(F.data == "cancel")
