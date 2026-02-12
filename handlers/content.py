@@ -1,6 +1,6 @@
 """
 Content Handler — TERION Ecosystem (RouterAI + YandexART Edition)
-TG + VK публикация, AI-генерация контента
+TG + VK публикация, AI-генерация контента, квиз-интеграция
 """
 from aiogram import Router, F, Bot
 from aiogram.types import (
@@ -20,14 +20,15 @@ import os
 import tempfile
 import io
 import asyncio
+import re
 from datetime import datetime, timedelta
 from typing import Optional
 
 from database import db
 from config import (
     CONTENT_BOT_TOKEN,
-    TERION_CHANNEL_ID,
-    DOM_GRAND_CHANNEL_ID,
+    CHANNEL_ID_TERION,
+    CHANNEL_ID_DOM_GRAD,
     LEADS_GROUP_CHAT_ID,
     THREAD_ID_DRAFTS,
     THREAD_ID_CONTENT_PLAN,
@@ -38,7 +39,8 @@ from config import (
     FOLDER_ID,
     VK_TOKEN,
     VK_GROUP_ID,
-    VK_QUIZ_LINK
+    VK_QUIZ_LINK,
+    MAX_API_KEY
 )
 
 logger = logging.getLogger(__name__)
@@ -76,6 +78,7 @@ class YandexArtClient:
                     json=payload
                 ) as resp:
                     if resp.status != 200:
+                        logger.error(f"YandexART HTTP {resp.status}")
                         return None
                     data = await resp.json()
                     op_id = data.get("id")
@@ -83,7 +86,7 @@ class YandexArtClient:
                         return None
                     
                     # Polling
-                    for _ in range(30):
+                    for i in range(30):
                         await asyncio.sleep(2)
                         async with session.get(
                             f"https://operation.api.cloud.yandex.net/operations/{op_id}",
@@ -108,7 +111,7 @@ class RouterAIClient:
             "Content-Type": "application/json"
         }
     
-    async def generate(self, prompt: str, model: str = "quin", max_tokens: int = 2000) -> Optional[str]:
+    async def generate(self, prompt: str, model: str = "gpt-4o", max_tokens: int = 2000) -> Optional[str]:
         """Генерация текста"""
         payload = {
             "model": model,
@@ -127,14 +130,16 @@ class RouterAIClient:
                     if resp.status == 200:
                         data = await resp.json()
                         return data["choices"][0]["message"]["content"]
+                    else:
+                        logger.error(f"RouterAI HTTP {resp.status}: {await resp.text()}")
         except Exception as e:
             logger.error(f"RouterAI error: {e}")
         return None
     
     async def analyze_image(self, image_b64: str, prompt: str) -> Optional[str]:
-        """Анализ изображения через Gemini"""
+        """Анализ изображения через Gemini 1.5 Flash"""
         payload = {
-            "model": "gemini-2.5-flash-image",
+            "model": "gemini-1.5-flash",
             "messages": [{
                 "role": "user",
                 "content": [
@@ -142,7 +147,7 @@ class RouterAIClient:
                     {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{image_b64}"}}
                 ]
             }],
-            "max_tokens": 1000
+            "max_tokens": 1500
         }
         
         try:
@@ -160,12 +165,12 @@ class RouterAIClient:
         return None
     
     async def generate_image_gemini(self, prompt: str) -> Optional[str]:
-        """Генерация изображения через Gemini 2.5 Flash Image"""
+        """Генерация изображения через Gemini"""
         payload = {
-            "model": "gemini-2.5-flash-image",
+            "model": "gemini-1.5-flash",
             "messages": [{
                 "role": "user",
-                "content": f"Generate image: {prompt}. Professional architectural photography style."
+                "content": f"Generate image: {prompt}. Professional architectural photography, interior design, high quality, no text."
             }],
             "max_tokens": 2000
         }
@@ -180,9 +185,8 @@ class RouterAIClient:
                     if resp.status == 200:
                         data = await resp.json()
                         content = data["choices"][0]["message"]["content"]
-                        # Парсим base64 если есть
+                        # Парсим base64
                         if "data:image" in content:
-                            import re
                             match = re.search(r'data:image/[^;]+;base64,([^"\']+)', content)
                             if match:
                                 return match.group(1)
@@ -200,7 +204,7 @@ router_ai = RouterAIClient(ROUTER_AI_KEY)
 # === VK PUBLISHER ===
 
 class VKPublisher:
-    """Публикация в ВКонтакте с кнопками"""
+    """Публикация в ВКонтакте с кнопками квиз/консультация"""
     
     def __init__(self, token: str, group_id: int):
         self.token = token
@@ -208,7 +212,6 @@ class VKPublisher:
         self.api_version = "5.199"
     
     async def _make_request(self, method: str, params: dict) -> Optional[dict]:
-        """Запрос к API VK"""
         params.update({"access_token": self.token, "v": self.api_version})
         
         try:
@@ -225,28 +228,20 @@ class VKPublisher:
     
     async def upload_photo(self, image_data: bytes) -> Optional[str]:
         """Загрузка фото на сервер ВК"""
-        # Получаем URL для загрузки
         upload_data = await self._make_request("photos.getWallUploadServer", {"group_id": self.group_id})
-        if not upload_data:
+        if not upload_data or not upload_data.get("upload_url"):
             return None
         
-        upload_url = upload_data.get("upload_url")
-        if not upload_url:
-            return None
-        
-        # Загружаем файл
         try:
             async with aiohttp.ClientSession() as session:
                 form = aiohttp.FormData()
                 form.add_field("photo", image_data, filename="photo.jpg", content_type="image/jpeg")
                 
-                async with session.post(upload_url, data=form) as resp:
+                async with session.post(upload_data["upload_url"], data=form) as resp:
                     result = await resp.json()
-                    
                     if "error" in result:
                         return None
                     
-                    # Сохраняем фото
                     save_data = await self._make_request(
                         "photos.saveWallPhoto",
                         {
@@ -264,8 +259,8 @@ class VKPublisher:
             logger.error(f"VK upload error: {e}")
         return None
     
-    async def create_buttons(self) -> str:
-        """Создание кнопок для поста ВК"""
+    def create_buttons(self) -> str:
+        """Кнопки: Квиз и Консультация"""
         buttons = {
             "inline": True,
             "buttons": [
@@ -276,7 +271,7 @@ class VKPublisher:
         return json.dumps(buttons, ensure_ascii=False)
     
     async def post_to_wall(self, message: str, photo_id: Optional[str] = None) -> Optional[int]:
-        """Публикация поста на стену"""
+        """Публикация поста"""
         attachments = [photo_id] if photo_id else []
         
         params = {
@@ -284,18 +279,16 @@ class VKPublisher:
             "from_group": 1,
             "message": message,
             "attachments": ",".join(attachments),
-            "keyboard": await self.create_buttons()
+            "keyboard": self.create_buttons()
         }
         
         result = await self._make_request("wall.post", params)
         return result.get("post_id") if result else None
     
     async def post_text_only(self, message: str) -> Optional[int]:
-        """Только текст"""
         return await self.post_to_wall(message, None)
     
     async def post_with_photo(self, message: str, image_bytes: bytes) -> Optional[int]:
-        """С фото"""
         photo_id = await self.upload_photo(image_bytes)
         if not photo_id:
             return await self.post_text_only(message)
@@ -310,22 +303,21 @@ vk_publisher = VKPublisher(VK_TOKEN, VK_GROUP_ID)
 
 class ContentStates(StatesGroup):
     main_menu = State()
-    photo_topic = State()        # Тема перед загрузкой фото
-    photo_upload = State()     # Загрузка фото
-    preview_mode = State()     # Превью перед публикацией
-    ai_text = State()          # Генерация текста
-    ai_series = State()        # Серия постов
-    ai_visual_select = State() # Выбор модели (Яндекс/Gemini)
-    ai_visual_prompt = State() # Ввод промпта для изображения
-    ai_plan = State()          # Контент-план
-    ai_news = State()          # Новости
-    edit_post = State()        # Редактирование
+    photo_topic = State()
+    photo_upload = State()
+    preview_mode = State()
+    ai_text = State()
+    ai_series = State()
+    ai_visual_select = State()
+    ai_visual_prompt = State()
+    ai_plan = State()
+    ai_news = State()
+    edit_post = State()
 
 
 # === KEYBOARDS ===
 
 def get_main_menu() -> ReplyKeyboardMarkup:
-    """Главное меню"""
     kb = [
         [KeyboardButton(text="📸 Фото → Описание → Пост")],
         [KeyboardButton(text="🎨 ИИ-Визуал"), KeyboardButton(text="📅 Серия постов")],
@@ -336,7 +328,6 @@ def get_main_menu() -> ReplyKeyboardMarkup:
 
 
 def get_preview_keyboard(post_id: int, has_image: bool = False) -> InlineKeyboardMarkup:
-    """Превью перед публикацией"""
     builder = InlineKeyboardBuilder()
     builder.button(text="🚀 Опубликовать везде", callback_data=f"pub_all:{post_id}")
     builder.button(text="📱 Только TG", callback_data=f"pub_tg:{post_id}")
@@ -357,7 +348,6 @@ def get_back_btn() -> InlineKeyboardMarkup:
 # === HELPERS ===
 
 async def download_photo(bot: Bot, file_id: str) -> Optional[bytes]:
-    """Скачать фото"""
     try:
         file = await bot.get_file(file_id)
         with tempfile.NamedTemporaryFile(suffix=".jpg", delete=False) as tmp:
@@ -372,13 +362,10 @@ async def download_photo(bot: Bot, file_id: str) -> Optional[bytes]:
 
 
 async def compress_image(image_bytes: bytes, max_size: int = 1024, quality: int = 85) -> bytes:
-    """Сжатие изображения"""
     try:
         img = Image.open(io.BytesIO(image_bytes))
-        
         if img.mode in ('RGBA', 'P'):
             img = img.convert('RGB')
-        
         if max(img.size) > max_size:
             ratio = max_size / max(img.size)
             new_size = (int(img.size[0] * ratio), int(img.size[1] * ratio))
@@ -386,14 +373,19 @@ async def compress_image(image_bytes: bytes, max_size: int = 1024, quality: int 
         
         output = io.BytesIO()
         img.save(output, format='JPEG', quality=quality, optimize=True)
-        return output.getvalue()
+        compressed = output.getvalue()
+        
+        original_kb = len(image_bytes) / 1024
+        compressed_kb = len(compressed) / 1024
+        logger.info(f"Image: {original_kb:.1f}KB → {compressed_kb:.1f}KB ({(1-len(compressed)/len(image_bytes))*100:.0f}%)")
+        
+        return compressed
     except Exception as e:
         logger.error(f"Compression error: {e}")
         return image_bytes
 
 
 async def show_preview(message: Message, text: str, image_file_id: Optional[str] = None, post_id: Optional[int] = None):
-    """Показать превью поста"""
     if not post_id:
         post_id = await db.add_content_post(
             title="Preview",
@@ -404,24 +396,16 @@ async def show_preview(message: Message, text: str, image_file_id: Optional[str]
         )
     
     kb = get_preview_keyboard(post_id, bool(image_file_id))
+    caption = f"👁 <b>Предпросмотр</b>\n\n{text[:700]}{'...' if len(text) > 700 else ''}"
     
     if image_file_id:
-        await message.answer_photo(
-            photo=image_file_id,
-            caption=f"👁 <b>Предпросмотр</b>\n\n{text[:700]}...",
-            reply_markup=kb,
-            parse_mode="HTML"
-        )
+        await message.answer_photo(photo=image_file_id, caption=caption, reply_markup=kb, parse_mode="HTML")
     else:
-        await message.answer(
-            f"👁 <b>Предпросмотр</b>\n\n{text[:700]}...",
-            reply_markup=kb,
-            parse_mode="HTML"
-        )
+        await message.answer(caption, reply_markup=kb, parse_mode="HTML")
     return post_id
 
 
-# === GLOBAL MENU HANDLER ===
+# === GLOBAL MENU ===
 
 @content_router.message(F.text.in_([
     "📸 Фото → Описание → Пост",
@@ -432,7 +416,6 @@ async def show_preview(message: Message, text: str, image_file_id: Optional[str]
     "📝 Быстрый текст"
 ]))
 async def global_menu_handler(message: Message, state: FSMContext):
-    """Глобальный обработчик меню — работает всегда"""
     await state.clear()
     text = message.text
     
@@ -453,7 +436,6 @@ async def global_menu_handler(message: Message, state: FSMContext):
 # === 📸 ФОТО WORKFLOW ===
 
 async def photo_start(message: Message, state: FSMContext):
-    """Начало с фото — сначала тема"""
     await message.answer(
         "📸 <b>Фото → Описание → Пост</b>\n\n"
         "Шаг 1/2: Введите <b>тему поста</b>:\n\n"
@@ -469,7 +451,6 @@ async def photo_start(message: Message, state: FSMContext):
 
 @content_router.message(ContentStates.photo_topic)
 async def process_photo_topic(message: Message, state: FSMContext):
-    """Получили тему → просим фото"""
     topic = message.text
     await state.update_data(photo_topic=topic)
     
@@ -483,20 +464,14 @@ async def process_photo_topic(message: Message, state: FSMContext):
 
 @content_router.message(ContentStates.photo_upload, F.photo)
 async def process_photo(message: Message, state: FSMContext):
-    """Обработка фото с AI-анализом"""
     data = await state.get_data()
     topic = data.get('photo_topic', 'Перепланировка')
     
     photo = message.photo[-1]
     file_id = photo.file_id
     
-    await message.answer(
-        f"🔍 <b>Анализирую фото...</b>\n"
-        f"Тема: {topic}",
-        parse_mode="HTML"
-    )
+    await message.answer(f"🔍 <b>Анализирую фото...</b>\nТема: {topic}", parse_mode="HTML")
     
-    # Скачиваем и сжимаем
     image_bytes = await download_photo(message.bot, file_id)
     if not image_bytes:
         await message.answer("❌ Ошибка загрузки", reply_markup=get_main_menu())
@@ -506,16 +481,15 @@ async def process_photo(message: Message, state: FSMContext):
     compressed = await compress_image(image_bytes, max_size=1024)
     image_b64 = base64.b64encode(compressed).decode()
     
-    # Экспертный промпт
     prompt = (
         f"Ты — эксперт по перепланировкам. Тема: «{topic}»\n\n"
         f"Проанализируй фото и напиши пост:\n"
-        f"1. <b>Заголовок</b> — конкретный, без фантастики\n"
-        f"2. <b>Описание</b> — что на фото, особенности\n"
+        f"1. <b>Заголовок</b> — конкретный, без фантастики типа 'за 3 дня'\n"
+        f"2. <b>Описание</b> — что на фото, особенности объекта\n"
         f"3. <b>Экспертный комментарий</b> — нюансы перепланировки\n"
         f"4. <b>Важно</b> — юридические/технические моменты\n"
-        f"5. <b>Призыв</b> — консультация\n\n"
-        f"Без обещаний 'за 3 дня'. Реальные сроки. 400-700 знаков."
+        f"5. <b>Призыв</b> — консультация @terion_bot\n\n"
+        f"Требования: реальные сроки, без обещаний 'за 3 дня', 400-700 знаков, эмодзи."
     )
     
     description = await router_ai.analyze_image(image_b64, prompt)
@@ -532,7 +506,6 @@ async def process_photo(message: Message, state: FSMContext):
             f"#перепланировка #терион"
         )
     
-    # Добавляем квиз-ссылку если нет
     if VK_QUIZ_LINK not in description:
         description += f"\n\n📍 <a href='{VK_QUIZ_LINK}'>Пройти квиз</a>"
     
@@ -548,17 +521,16 @@ async def process_photo(message: Message, state: FSMContext):
     
     await message.answer_photo(
         photo=file_id,
-        caption=f"👁 <b>Предпросмотр</b>\n\n{description[:700]}...",
+        caption=f"👁 <b>Предпросмотр</b>\n\n{description[:700]}{'...' if len(description) > 700 else ''}",
         reply_markup=get_preview_keyboard(post_id, True),
         parse_mode="HTML"
     )
     await state.set_state(ContentStates.preview_mode)
 
 
-# === 🎨 ИИ-ВИЗУАЛ (выбор модели) ===
+# === 🎨 ИИ-ВИЗУАЛ ===
 
 async def visual_select_model(message: Message, state: FSMContext):
-    """Выбор модели для генерации"""
     await message.answer(
         "🎨 <b>Генерация изображения</b>\n\n"
         "Выберите модель:\n\n"
@@ -575,7 +547,6 @@ async def visual_select_model(message: Message, state: FSMContext):
 
 @content_router.callback_query(F.data.startswith("visual_model:"))
 async def visual_model_selected(callback: CallbackQuery, state: FSMContext):
-    """Выбрана модель"""
     model = callback.data.split(":")[1]
     await state.update_data(visual_model=model)
     
@@ -596,7 +567,6 @@ async def visual_model_selected(callback: CallbackQuery, state: FSMContext):
 
 @content_router.message(ContentStates.ai_visual_prompt)
 async def ai_visual_handler(message: Message, state: FSMContext):
-    """Генерация изображения"""
     data = await state.get_data()
     model = data.get('visual_model', 'yandex')
     user_prompt = message.text
@@ -607,15 +577,9 @@ async def ai_visual_handler(message: Message, state: FSMContext):
         parse_mode="HTML"
     )
     
-    # Улучшаем промпт
     enhanced = f"{user_prompt}, professional architectural photography, interior design, high quality, detailed, no text, no watermarks"
     
-    # Генерация
-    image_b64 = None
-    if model == 'yandex':
-        image_b64 = await yandex_art.generate(enhanced)
-    else:
-        image_b64 = await router_ai.generate_image_gemini(enhanced)
+    image_b64 = await yandex_art.generate(enhanced) if model == 'yandex' else await router_ai.generate_image_gemini(enhanced)
     
     if not image_b64:
         await message.answer(
@@ -625,7 +589,6 @@ async def ai_visual_handler(message: Message, state: FSMContext):
         await state.clear()
         return
     
-    # Отправляем
     try:
         image_bytes = base64.b64decode(image_b64)
         with tempfile.NamedTemporaryFile(suffix=".jpg", delete=False) as tmp:
@@ -648,7 +611,7 @@ async def ai_visual_handler(message: Message, state: FSMContext):
         )
         os.unlink(tmp_path)
     except Exception as e:
-        logger.error(f"Send image error: {e}")
+        logger.error(f"Send error: {e}")
         await message.answer("❌ Ошибка отправки", reply_markup=get_main_menu())
     
     await state.clear()
@@ -656,7 +619,6 @@ async def ai_visual_handler(message: Message, state: FSMContext):
 
 @content_router.callback_query(F.data == "visual_back")
 async def visual_back(callback: CallbackQuery, state: FSMContext):
-    """Назад к выбору модели"""
     await callback.answer()
     await visual_select_model(callback.message, state)
 
@@ -664,7 +626,6 @@ async def visual_back(callback: CallbackQuery, state: FSMContext):
 # === 📅 СЕРИЯ ПОСТОВ ===
 
 async def series_start(message: Message, state: FSMContext):
-    """Серия постов"""
     await message.answer(
         "📅 <b>Серия постов</b>\n\n"
         "Введите через запятую:\n"
@@ -678,7 +639,6 @@ async def series_start(message: Message, state: FSMContext):
 
 @content_router.message(ContentStates.ai_series)
 async def ai_series_handler(message: Message, state: FSMContext):
-    """Генерация серии"""
     text = message.text.strip()
     
     try:
@@ -702,13 +662,14 @@ async def ai_series_handler(message: Message, state: FSMContext):
     prompt = (
         f"Создай {days} постов для прогрева по теме «{topic}». "
         f"Перепланировки, недвижимость, экспертный контент.\n\n"
-        f"Формат: День N: Заголовок\nТекст 80-120 слов\nПризыв к действию"
+        f"Формат: День N: Заголовок\nТекст 80-120 слов\nПризыв к действию\n\n"
+        f"Тон: экспертный, доверительный. Добавь эмодзи."
     )
     
     result = await router_ai.generate(prompt, max_tokens=4000)
     
     if not result:
-        await message.answer("❌ Ошибка", reply_markup=get_main_menu())
+        await message.answer("❌ Ошибка генерации", reply_markup=get_main_menu())
         await state.clear()
         return
     
@@ -719,7 +680,6 @@ async def ai_series_handler(message: Message, state: FSMContext):
         status="draft"
     )
     
-    # Отправляем в черновики
     await message.bot.send_message(
         chat_id=LEADS_GROUP_CHAT_ID,
         message_thread_id=THREAD_ID_DRAFTS,
@@ -727,7 +687,6 @@ async def ai_series_handler(message: Message, state: FSMContext):
         parse_mode="HTML"
     )
     
-    # Спрашиваем про изображения
     await message.answer(
         f"✅ <b>Серия готова!</b>\n"
         f"📊 {days} постов\n\n"
@@ -744,7 +703,6 @@ async def ai_series_handler(message: Message, state: FSMContext):
 
 @content_router.callback_query(F.data.startswith("gen_series_img:"))
 async def generate_series_images(callback: CallbackQuery, state: FSMContext):
-    """Генерация обложек для серии"""
     parts = callback.data.split(":")
     model = parts[1]
     topic = parts[2]
@@ -752,8 +710,7 @@ async def generate_series_images(callback: CallbackQuery, state: FSMContext):
     
     await callback.answer("🎨 Генерация...")
     await callback.message.edit_text(
-        f"⏳ <b>Генерация {days} обложек...</b>\n"
-        f"Модель: {'Яндекс АРТ' if model == 'yandex' else 'Gemini Nano'}",
+        f"⏳ <b>Генерация {days} обложек...</b>",
         parse_mode="HTML"
     )
     
@@ -762,10 +719,7 @@ async def generate_series_images(callback: CallbackQuery, state: FSMContext):
         
         await callback.message.answer(f"🎨 <b>День {i}...</b>", parse_mode="HTML")
         
-        if model == 'yandex':
-            image_b64 = await yandex_art.generate(art_prompt)
-        else:
-            image_b64 = await router_ai.generate_image_gemini(art_prompt)
+        image_b64 = await yandex_art.generate(art_prompt) if model == 'yandex' else await router_ai.generate_image_gemini(art_prompt)
         
         if image_b64:
             image_bytes = base64.b64decode(image_b64)
@@ -780,17 +734,12 @@ async def generate_series_images(callback: CallbackQuery, state: FSMContext):
             )
             os.unlink(tmp_path)
     
-    await callback.message.answer(
-        "✅ <b>Все обложки готовы!</b>",
-        reply_markup=get_main_menu(),
-        parse_mode="HTML"
-    )
+    await callback.message.answer("✅ <b>Все обложки готовы!</b>", reply_markup=get_main_menu(), parse_mode="HTML")
 
 
 # === 📋 КОНТЕНТ-ПЛАН ===
 
 async def plan_start(message: Message, state: FSMContext):
-    """Контент-план"""
     await message.answer(
         "📋 <b>Контент-план</b>\n\n"
         "Введите через запятую:\n"
@@ -804,7 +753,6 @@ async def plan_start(message: Message, state: FSMContext):
 
 @content_router.message(ContentStates.ai_plan)
 async def ai_plan_handler(message: Message, state: FSMContext):
-    """Генерация плана"""
     text = message.text.strip()
     
     try:
@@ -828,7 +776,7 @@ async def ai_plan_handler(message: Message, state: FSMContext):
     prompt = (
         f"Контент-план на {days} дней. Тема: «{topic}»\n"
         f"Перепланировки, согласование, дизайн.\n\n"
-        f"Для каждого дня: заголовок, содержание (2-3 предл), формат."
+        f"Для каждого дня: заголовок, содержание (2-3 предл), формат (текст/фото/карусель)."
     )
     
     plan = await router_ai.generate(prompt, max_tokens=3000)
@@ -845,7 +793,6 @@ async def ai_plan_handler(message: Message, state: FSMContext):
         parse_mode="HTML"
     )
     
-    # Спрашиваем про арты
     await message.answer(
         f"✅ <b>План готов!</b>\n\n"
         f"<b>Сгенерировать арты?</b>",
@@ -862,7 +809,6 @@ async def ai_plan_handler(message: Message, state: FSMContext):
 # === 📰 НОВОСТЬ ===
 
 async def news_start(message: Message, state: FSMContext):
-    """Новостной пост"""
     await message.answer(
         "📰 <b>Экспертная новость</b>\n\n"
         "Введите тему:\n"
@@ -877,7 +823,6 @@ async def news_start(message: Message, state: FSMContext):
 
 @content_router.message(ContentStates.ai_news)
 async def ai_news_handler(message: Message, state: FSMContext):
-    """Генерация новости"""
     topic = message.text
     
     await message.answer("🔍 <b>Пишу новость...</b>", parse_mode="HTML")
@@ -896,7 +841,6 @@ async def ai_news_handler(message: Message, state: FSMContext):
         await state.clear()
         return
     
-    # Добавляем квиз
     if VK_QUIZ_LINK not in news:
         news += f"\n\n📍 <a href='{VK_QUIZ_LINK}'>Пройти квиз</a>"
     
@@ -908,7 +852,6 @@ async def ai_news_handler(message: Message, state: FSMContext):
 # === 📝 БЫСТРЫЙ ТЕКСТ ===
 
 async def quick_start(message: Message, state: FSMContext):
-    """Быстрый текст"""
     await message.answer(
         "📝 <b>Быстрый текст</b>\n\n"
         "Введите тему:",
@@ -920,7 +863,6 @@ async def quick_start(message: Message, state: FSMContext):
 
 @content_router.message(ContentStates.ai_text)
 async def ai_text_handler(message: Message, state: FSMContext):
-    """Генерация текста"""
     topic = message.text
     
     await message.answer("⏳ <b>Пишу...</b>", parse_mode="HTML")
@@ -928,7 +870,7 @@ async def ai_text_handler(message: Message, state: FSMContext):
     prompt = (
         f"Пост для TG на тему «{topic}». "
         f"Экспертный, живой стиль. 100-150 слов. "
-        f"Эмодзи + призыв к консультации."
+        f"Эмодзи + призыв к консультации @terion_bot"
     )
     
     text = await router_ai.generate(prompt)
@@ -938,7 +880,6 @@ async def ai_text_handler(message: Message, state: FSMContext):
         await state.clear()
         return
     
-    # Добавляем квиз
     if VK_QUIZ_LINK not in text:
         text += f"\n\n📍 <a href='{VK_QUIZ_LINK}'>Пройти квиз</a> @terion_bot"
     
@@ -951,7 +892,6 @@ async def ai_text_handler(message: Message, state: FSMContext):
 
 @content_router.callback_query(F.data.startswith("pub_all:"))
 async def publish_all(callback: CallbackQuery, state: FSMContext):
-    """Публикация везде: TG + VK"""
     post_id = int(callback.data.split(":")[1])
     post = await db.get_content_post(post_id)
     
@@ -961,7 +901,6 @@ async def publish_all(callback: CallbackQuery, state: FSMContext):
     
     await callback.answer("🚀 Публикую...")
     
-    # Добавляем квиз если нет
     text = post['body']
     if VK_QUIZ_LINK not in text:
         text += f"\n\n📍 <a href='{VK_QUIZ_LINK}'>Пройти квиз</a>"
@@ -971,9 +910,9 @@ async def publish_all(callback: CallbackQuery, state: FSMContext):
     # TG TERION
     try:
         if post.get("image_url"):
-            await callback.bot.send_photo(TERION_CHANNEL_ID, post["image_url"], text, parse_mode="HTML")
+            await callback.bot.send_photo(CHANNEL_ID_TERION, post["image_url"], text, parse_mode="HTML")
         else:
-            await callback.bot.send_message(TERION_CHANNEL_ID, text, parse_mode="HTML")
+            await callback.bot.send_message(CHANNEL_ID_TERION, text, parse_mode="HTML")
         results.append("✅ TERION TG")
     except Exception as e:
         results.append(f"❌ TERION: {e}")
@@ -981,32 +920,24 @@ async def publish_all(callback: CallbackQuery, state: FSMContext):
     # TG ДОМ ГРАНД
     try:
         if post.get("image_url"):
-            await callback.bot.send_photo(DOM_GRAND_CHANNEL_ID, post["image_url"], text, parse_mode="HTML")
+            await callback.bot.send_photo(CHANNEL_ID_DOM_GRAD, post["image_url"], text, parse_mode="HTML")
         else:
-            await callback.bot.send_message(DOM_GRAND_CHANNEL_ID, text, parse_mode="HTML")
+            await callback.bot.send_message(CHANNEL_ID_DOM_GRAD, text, parse_mode="HTML")
         results.append("✅ ДОМ ГРАНД TG")
     except Exception as e:
         results.append(f"❌ ДОМ ГРАНД: {e}")
     
     # VK
     try:
-        image_bytes = None
-        if post.get("image_url"):
-            # Скачиваем для VK
-            image_bytes = await download_photo(callback.bot, post["image_url"])
-        
-        if image_bytes:
-            vk_id = await vk_publisher.post_with_photo(text, image_bytes)
-        else:
-            vk_id = await vk_publisher.post_text_only(text)
-        
+        image_bytes = await download_photo(callback.bot, post["image_url"]) if post.get("image_url") else None
+        vk_id = await vk_publisher.post_with_photo(text, image_bytes) if image_bytes else await vk_publisher.post_text_only(text)
         results.append(f"✅ VK (post{vk_id})" if vk_id else "❌ VK")
     except Exception as e:
         results.append(f"❌ VK: {e}")
     
     await db.update_content_post(post_id, status="published")
     
-    # Лог в рабочую группу
+    # Лог
     await callback.bot.send_message(
         chat_id=LEADS_GROUP_CHAT_ID,
         message_thread_id=THREAD_ID_LOGS,
@@ -1024,7 +955,6 @@ async def publish_all(callback: CallbackQuery, state: FSMContext):
 
 @content_router.callback_query(F.data.startswith("pub_tg:"))
 async def publish_tg_only(callback: CallbackQuery, state: FSMContext):
-    """Только Telegram"""
     post_id = int(callback.data.split(":")[1])
     post = await db.get_content_post(post_id)
     
@@ -1032,31 +962,24 @@ async def publish_tg_only(callback: CallbackQuery, state: FSMContext):
     if VK_QUIZ_LINK not in text:
         text += f"\n\n📍 <a href='{VK_QUIZ_LINK}'>Пройти квиз</a>"
     
-    results = []
-    
     try:
         if post.get("image_url"):
-            await callback.bot.send_photo(TERION_CHANNEL_ID, post["image_url"], text, parse_mode="HTML")
-            await callback.bot.send_photo(DOM_GRAND_CHANNEL_ID, post["image_url"], text, parse_mode="HTML")
+            await callback.bot.send_photo(CHANNEL_ID_TERION, post["image_url"], text, parse_mode="HTML")
+            await callback.bot.send_photo(CHANNEL_ID_DOM_GRAD, post["image_url"], text, parse_mode="HTML")
         else:
-            await callback.bot.send_message(TERION_CHANNEL_ID, text, parse_mode="HTML")
-            await callback.bot.send_message(DOM_GRAND_CHANNEL_ID, text, parse_mode="HTML")
+            await callback.bot.send_message(CHANNEL_ID_TERION, text, parse_mode="HTML")
+            await callback.bot.send_message(CHANNEL_ID_DOM_GRAD, text, parse_mode="HTML")
         results = ["✅ TERION", "✅ ДОМ ГРАНД"]
     except Exception as e:
         results = [f"❌ {e}"]
     
     await db.update_content_post(post_id, status="published")
-    await callback.message.edit_text(
-        f"✅ <b>TG:</b>\n" + "\n".join(results),
-        reply_markup=get_main_menu(),
-        parse_mode="HTML"
-    )
+    await callback.message.edit_text(f"✅ <b>TG:</b>\n" + "\n".join(results), reply_markup=get_main_menu(), parse_mode="HTML")
     await state.clear()
 
 
 @content_router.callback_query(F.data.startswith("pub_vk:"))
 async def publish_vk_only(callback: CallbackQuery, state: FSMContext):
-    """Только VK"""
     post_id = int(callback.data.split(":")[1])
     post = await db.get_content_post(post_id)
     
@@ -1065,21 +988,11 @@ async def publish_vk_only(callback: CallbackQuery, state: FSMContext):
         text += f"\n\n📍 <a href='{VK_QUIZ_LINK}'>Пройти квиз</a>"
     
     try:
-        image_bytes = None
-        if post.get("image_url"):
-            image_bytes = await download_photo(callback.bot, post["image_url"])
-        
-        if image_bytes:
-            vk_id = await vk_publisher.post_with_photo(text, image_bytes)
-        else:
-            vk_id = await vk_publisher.post_text_only(text)
+        image_bytes = await download_photo(callback.bot, post["image_url"]) if post.get("image_url") else None
+        vk_id = await vk_publisher.post_with_photo(text, image_bytes) if image_bytes else await vk_publisher.post_text_only(text)
         
         await db.update_content_post(post_id, status="published")
-        await callback.message.edit_text(
-            f"✅ <b>VK:</b> post{vk_id}" if vk_id else "❌ Ошибка VK",
-            reply_markup=get_main_menu(),
-            parse_mode="HTML"
-        )
+        await callback.message.edit_text(f"✅ <b>VK:</b> post{vk_id}" if vk_id else "❌ Ошибка VK", reply_markup=get_main_menu(), parse_mode="HTML")
     except Exception as e:
         await callback.message.edit_text(f"❌ Ошибка: {e}", reply_markup=get_main_menu())
     
@@ -1088,26 +1001,14 @@ async def publish_vk_only(callback: CallbackQuery, state: FSMContext):
 
 @content_router.callback_query(F.data.startswith("draft:"))
 async def save_draft(callback: CallbackQuery, state: FSMContext):
-    """В черновики"""
     post_id = int(callback.data.split(":")[1])
     post = await db.get_content_post(post_id)
     
     try:
         if post.get("image_url"):
-            await callback.bot.send_photo(
-                LEADS_GROUP_CHAT_ID,
-                post["image_url"],
-                f"📝 <b>Черновик #{post_id}</b>\n\n{post['body']}",
-                message_thread_id=THREAD_ID_DRAFTS,
-                parse_mode="HTML"
-            )
+            await callback.bot.send_photo(LEADS_GROUP_CHAT_ID, post["image_url"], f"📝 <b>Черновик #{post_id}</b>\n\n{post['body']}", message_thread_id=THREAD_ID_DRAFTS, parse_mode="HTML")
         else:
-            await callback.bot.send_message(
-                LEADS_GROUP_CHAT_ID,
-                f"📝 <b>Черновик #{post_id}</b>\n\n{post['body']}",
-                message_thread_id=THREAD_ID_DRAFTS,
-                parse_mode="HTML"
-            )
+            await callback.bot.send_message(LEADS_GROUP_CHAT_ID, f"📝 <b>Черновик #{post_id}</b>\n\n{post['body']}", message_thread_id=THREAD_ID_DRAFTS, parse_mode="HTML")
         
         await db.update_content_post(post_id, status="in_drafts")
         await callback.message.edit_text("✅ В черновиках (топик 85)", reply_markup=get_main_menu())
@@ -1119,7 +1020,6 @@ async def save_draft(callback: CallbackQuery, state: FSMContext):
 
 @content_router.callback_query(F.data.startswith("edit:"))
 async def edit_handler(callback: CallbackQuery, state: FSMContext):
-    """Редактирование"""
     post_id = int(callback.data.split(":")[1])
     post = await db.get_content_post(post_id)
     
@@ -1128,19 +1028,13 @@ async def edit_handler(callback: CallbackQuery, state: FSMContext):
         return
     
     await state.update_data(edit_post_id=post_id)
-    await callback.message.answer(
-        f"✏️ <b>Редактирование #{post_id}</b>\n\n"
-        f"Текущий текст:\n{post['body'][:500]}...\n\n"
-        f"Введите новый текст:",
-        parse_mode="HTML"
-    )
+    await callback.message.answer(f"✏️ <b>Редактирование #{post_id}</b>\n\nТекущий текст:\n{post['body'][:500]}...\n\nВведите новый текст:", parse_mode="HTML")
     await callback.answer()
     await state.set_state(ContentStates.edit_post)
 
 
 @content_router.message(ContentStates.edit_post)
 async def edit_post_handler(message: Message, state: FSMContext):
-    """Сохранение редактирования"""
     data = await state.get_data()
     post_id = data.get("edit_post_id")
     
@@ -1153,7 +1047,6 @@ async def edit_post_handler(message: Message, state: FSMContext):
 
 @content_router.callback_query(F.data == "cancel")
 async def cancel_handler(callback: CallbackQuery, state: FSMContext):
-    """Отмена"""
     await callback.answer("❌ Отменено")
     await state.clear()
     await callback.message.edit_text("❌ Отменено", reply_markup=get_main_menu())
@@ -1161,35 +1054,78 @@ async def cancel_handler(callback: CallbackQuery, state: FSMContext):
 
 @content_router.callback_query(F.data == "back_menu")
 async def back_to_menu(callback: CallbackQuery, state: FSMContext):
-    """Назад в меню"""
     await callback.answer()
     await state.clear()
-    await callback.message.answer(
-        "🎯 <b>TERION Content Bot</b>",
-        reply_markup=get_main_menu(),
-        parse_mode="HTML"
-    )
+    await callback.message.answer("🎯 <b>TERION Content Bot</b>", reply_markup=get_main_menu(), parse_mode="HTML")
 
-
-# === ОБРАБОТКА ОШИБОК ===
 
 @content_router.message(ContentStates.photo_upload)
 async def wrong_photo(message: Message):
-    """Если прислали не фото"""
     await message.answer("❌ Пожалуйста, отправьте фото или нажмите «Назад»")
 
 
 @content_router.message(CommandStart())
 async def cmd_start(message: Message, state: FSMContext):
-    """Старт"""
     await state.clear()
-    await message.answer(
-        "🎯 <b>TERION Content Bot</b>\n\n"
-        "Создание и публикация контента:\n"
-        "• Telegram (TERION + ДОМ ГРАНД)\n"
-        "• ВКонтакте (с кнопками)\n\n"
-        "Выберите действие:",
-        reply_markup=get_main_menu(),
-        parse_mode="HTML"
-    )
+    await message.answer("🎯 <b>TERION Content Bot</b>\n\nСоздание и публикация контента:\n• Telegram (TERION + ДОМ ГРАНД)\n• ВКонтакте (с кнопками)\n\nВыберите действие:", reply_markup=get_main_menu(), parse_mode="HTML")
     await state.set_state(ContentStates.main_menu)
+# === ЛОГИКА ПУБЛИКАЦИИ ===
+    results = []
+    # TG Публикация
+    try:
+        if post['image_url']:
+            await callback.bot.send_photo(CHANNEL_ID_TERION, post['image_url'], caption=text, parse_mode="HTML")
+            await callback.bot.send_photo(CHANNEL_ID_DOM_GRAD, post['image_url'], caption=text, parse_mode="HTML")
+        else:
+            await callback.bot.send_message(CHANNEL_ID_TERION, text, parse_mode="HTML")
+            await callback.bot.send_message(CHANNEL_ID_DOM_GRAD, text, parse_mode="HTML")
+        results.append("✅ TG")
+    except Exception as e:
+        logger.error(f"TG Pub error: {e}")
+        results.append("❌ TG")
+
+    # VK Публикация
+    try:
+        if post['image_url']:
+            image_bytes = await download_photo(callback.bot, post['image_url'])
+            if image_bytes:
+                await vk_publisher.post_with_photo(text, image_bytes)
+                results.append("✅ VK")
+        else:
+            await vk_publisher.post_text_only(text)
+            results.append("✅ VK")
+    except Exception as e:
+        logger.error(f"VK Pub error: {e}")
+        results.append("❌ VK")
+
+    await db.update_content_post(post_id, status="published")
+    await callback.message.edit_caption(caption=f"📢 Результат: {', '.join(results)}\n\n{text[:500]}...", reply_markup=None) if post['image_url'] else await callback.message.edit_text(text=f"📢 Результат: {', '.join(results)}\n\n{text[:500]}...", reply_markup=None)
+    await state.clear()
+
+@content_router.callback_query(F.data.startswith("edit:"))
+async def edit_post_start(callback: CallbackQuery, state: FSMContext):
+    post_id = int(callback.data.split(":")[1])
+    await state.update_data(edit_post_id=post_id)
+    await callback.message.answer("✏️ Введите новый текст поста:")
+    await state.set_state(ContentStates.edit_post)
+
+@content_router.message(ContentStates.edit_post)
+async def edit_post_finish(message: Message, state: FSMContext):
+    data = await state.get_data()
+    post_id = data.get("edit_post_id")
+    if post_id:
+        await db.update_content_post(post_id, body=message.text)
+        await message.answer("✅ Текст обновлен!", reply_markup=get_main_menu())
+        await show_preview(message, message.text, post_id=post_id)
+    await state.clear()
+
+@content_router.callback_query(F.data == "cancel")
+async def cancel_handler(callback: CallbackQuery, state: FSMContext):
+    await callback.answer("❌ Отменено")
+    await state.clear()
+    await callback.message.delete()
+
+@content_router.callback_query(F.data == "back_menu")
+async def back_to_menu(callback: CallbackQuery, state: FSMContext):
+    await state.clear()
+    await callback.message.answer("🎯 Главное меню", reply_markup=get_main_menu())
