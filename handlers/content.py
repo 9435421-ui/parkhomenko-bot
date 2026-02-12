@@ -160,7 +160,7 @@ class RouterAIClient:
     async def generate(
         self,
         prompt: str,
-        model: str = "quin",
+        model: str = "gpt-4o-mini",
         max_tokens: int = 2000
     ) -> Optional[str]:
         """Генерация текста"""
@@ -910,7 +910,7 @@ async def ai_plan_handler(message: Message, state: FSMContext):
         f"Тон: экспертный, практичный. Добавь эмодзи."
     )
     
-    plan = await router_ai.generate(prompt, model="quin", max_tokens=3000)
+    plan = await router_ai.generate(prompt, model="gpt-4o-mini", max_tokens=3000)
     
     if not plan:
         await message.answer("❌ Ошибка генерации", reply_markup=get_main_menu())
