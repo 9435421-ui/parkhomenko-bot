@@ -186,7 +186,7 @@ class RouterAIClient:
     async def analyze_image(self, image_b64: str, prompt: str) -> Optional[str]:
         """Анализ изображения через Gemini"""
         payload = {
-            "model": "gemini-2.5-flash-image",
+            "model": "gemini-1.5-flash",
             "messages": [{
                 "role": "user",
                 "content": [
@@ -213,11 +213,11 @@ class RouterAIClient:
     
     async def generate_image_gemini(self, prompt: str) -> Optional[str]:
         """
-        Генерация изображения через Gemini 2.5 Flash Image (Nano Banana)
+        Генерация изображения через Gemini 1.5 Flash
         Возвращает base64 или None
         """
         payload = {
-            "model": "gemini-2.5-flash-image",
+            "model": "gemini-1.5-flash",
             "messages": [
                 {
                     "role": "user",
