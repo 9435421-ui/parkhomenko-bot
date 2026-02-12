@@ -931,16 +931,17 @@ async def ai_plan_handler(message: Message, state: FSMContext):
         parse_mode="HTML"
     )
     
-    # Спрашиваем про изображения
+    # Спрашиваем про изображения с выбором модели
     await message.answer(
         f"✅ <b>План готов!</b>\n"
         f"📊 {days} дней\n"
         f"📁 Отправлен в топик 83\n\n"
-        f"<b>Сгенерировать изображения для плана?</b>",
+        f"<b>Сгенерировать изображения?</b>\n"
+        f"Выберите модель:",
         reply_markup=InlineKeyboardBuilder()
-        .button(text="🎨 Да, сгенерировать арты", callback_data=f"gen_plan_images:{post_id}:{days}:{topic}")
-        .button(text="❌ Нет, оставить текст", callback_data="skip_images")
-        .button(text="◀️ Меню", callback_data="back_menu")
+        .button(text="🟣 Яндекс АРТ (качество)", callback_data=f"gen_images_yandex:{post_id}:{days}:{topic}")
+        .button(text="🟡 Gemini Nano (скорость)", callback_data=f"gen_images_gemini:{post_id}:{days}:{topic}")
+        .button(text="❌ Нет", callback_data="back_menu")
         .as_markup(),
         parse_mode="HTML"
     )
