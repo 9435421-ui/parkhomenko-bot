@@ -44,8 +44,7 @@ from config import (
     YANDEX_ART_ENABLED,
     VK_TOKEN,
     VK_GROUP_ID,
-    VK_QUIZ_LINK,
-    MAX_API_KEY
+    VK_QUIZ_LINK
 )
 
 logger = logging.getLogger(__name__)
@@ -554,12 +553,12 @@ async def process_photo(message: Message, state: FSMContext):
     prompt = (
         f"Ты — эксперт по перепланировкам. Тема: «{topic}»\n\n"
         f"Проанализируй фото и напиши пост:\n"
-        f"1. <b>Заголовок</b> — конкретный, без фантастики типа 'за 3 дня'\n"
-        f"2. <b>Описание</b> — что на фото, особенности объекта\n"
-        f"3. <b>Экспертный комментарий</b> — нюансы перепланировки\n"
-        f"4. <b>Важно</b> — юридические/технические моменты\n"
+        f"1. <b>Заголовок</b> — конкретный, профессиональный, без клише 'уникальный дизайн' и 'за 3 дня'\n"
+        f"2. <b>Описание</b> — что на фото, особенности объекта, тип здания\n"
+        f"3. <b>Экспертный комментарий</b> — нюансы перепланировки, требования Жилищной инспекции, МНИИТЭП\n"
+        f"4. <b>Важно</b> — юридические/технические моменты, согласование, проектная документация\n"
         f"5. <b>Призыв</b> — консультация @terion_bot\n\n"
-        f"Требования: реальные сроки, без обещаний 'за 3 дня', 400-700 знаков, эмодзи."
+        f"Требования: стиль профессиональный, экспертный, московское бюро перепланировок. Избегай клише 'уникальный дизайн' и 'за 3 дня'. Используй юридические термины (Жилищная инспекция, проект, МНИИТЭП). Реальные сроки, 400-700 знаков, эмодзи."
     )
     
     description = await router_ai.analyze_image(image_b64, prompt)
@@ -577,7 +576,7 @@ async def process_photo(message: Message, state: FSMContext):
         )
     
     if VK_QUIZ_LINK not in description:
-        description += f"\n\n📍 <a href='{VK_QUIZ_LINK}'>Пройти квиз</a>"
+        description += f"\n\n📍 <a href='{VK_QUIZ_LINK}'>Пройти квиз</a> @terion_bot\n#TERION #перепланировка #москва"
     
     post_id = await db.add_content_post(
         title=f"Фото: {topic[:40]}",
@@ -733,7 +732,7 @@ async def ai_series_handler(message: Message, state: FSMContext):
         f"Создай {days} постов для прогрева по теме «{topic}». "
         f"Перепланировки, недвижимость, экспертный контент.\n\n"
         f"Формат: День N: Заголовок\nТекст 80-120 слов\nПризыв к действию\n\n"
-        f"Тон: экспертный, доверительный. Добавь эмодзи."
+        f"Тон: профессиональный, экспертный, московское бюро перепланировок. Избегай клише 'уникальный дизайн' и 'за 3 дня'. Используй юридические термины (Жилищная инспекция, проект, МНИИТЭП). Добавь эмодзи."
     )
     
     result = await router_ai.generate(prompt, max_tokens=4000)
@@ -846,7 +845,8 @@ async def ai_plan_handler(message: Message, state: FSMContext):
     prompt = (
         f"Контент-план на {days} дней. Тема: «{topic}»\n"
         f"Перепланировки, согласование, дизайн.\n\n"
-        f"Для каждого дня: заголовок, содержание (2-3 предл), формат (текст/фото/карусель)."
+        f"Для каждого дня: заголовок, содержание (2-3 предл), формат (текст/фото/карусель).\n\n"
+        f"Тон: профессиональный, экспертный, московское бюро перепланировок. Избегай клише 'уникальный дизайн' и 'за 3 дня'. Используй юридические термины (Жилищная инспекция, проект, МНИИТЭП)."
     )
     
     plan = await router_ai.generate(prompt, max_tokens=3000)
@@ -912,7 +912,7 @@ async def ai_news_handler(message: Message, state: FSMContext):
         return
     
     if VK_QUIZ_LINK not in news:
-        news += f"\n\n📍 <a href='{VK_QUIZ_LINK}'>Пройти квиз</a>"
+        news += f"\n\n📍 <a href='{VK_QUIZ_LINK}'>Пройти квиз</a> @terion_bot\n#TERION #перепланировка #москва"
     
     post_id = await show_preview(message, news)
     await state.set_state(ContentStates.preview_mode)
@@ -951,7 +951,7 @@ async def ai_text_handler(message: Message, state: FSMContext):
         return
     
     if VK_QUIZ_LINK not in text:
-        text += f"\n\n📍 <a href='{VK_QUIZ_LINK}'>Пройти квиз</a> @terion_bot"
+        text += f"\n\n📍 <a href='{VK_QUIZ_LINK}'>Пройти квиз</a> @terion_bot\n#TERION #перепланировка #москва"
     
     post_id = await show_preview(message, text)
     await state.set_state(ContentStates.preview_mode)
@@ -1139,63 +1139,3 @@ async def cmd_start(message: Message, state: FSMContext):
     await state.clear()
     await message.answer("🎯 <b>TERION Content Bot</b>\n\nСоздание и публикация контента:\n• Telegram (TERION + ДОМ ГРАНД)\n• ВКонтакте (с кнопками)\n\nВыберите действие:", reply_markup=get_main_menu(), parse_mode="HTML")
     await state.set_state(ContentStates.main_menu)
-# === ЛОГИКА ПУБЛИКАЦИИ ===
-    results = []
-    # TG Публикация
-    try:
-        if post['image_url']:
-            await callback.bot.send_photo(CHANNEL_ID_TERION, post['image_url'], caption=text, parse_mode="HTML")
-            await callback.bot.send_photo(CHANNEL_ID_DOM_GRAD, post['image_url'], caption=text, parse_mode="HTML")
-        else:
-            await callback.bot.send_message(CHANNEL_ID_TERION, text, parse_mode="HTML")
-            await callback.bot.send_message(CHANNEL_ID_DOM_GRAD, text, parse_mode="HTML")
-        results.append("✅ TG")
-    except Exception as e:
-        logger.error(f"TG Pub error: {e}")
-        results.append("❌ TG")
-
-    # VK Публикация
-    try:
-        if post['image_url']:
-            image_bytes = await download_photo(callback.bot, post['image_url'])
-            if image_bytes:
-                await vk_publisher.post_with_photo(text, image_bytes)
-                results.append("✅ VK")
-        else:
-            await vk_publisher.post_text_only(text)
-            results.append("✅ VK")
-    except Exception as e:
-        logger.error(f"VK Pub error: {e}")
-        results.append("❌ VK")
-
-    await db.update_content_post(post_id, status="published")
-    await callback.message.edit_caption(caption=f"📢 Результат: {', '.join(results)}\n\n{text[:500]}...", reply_markup=None) if post['image_url'] else await callback.message.edit_text(text=f"📢 Результат: {', '.join(results)}\n\n{text[:500]}...", reply_markup=None)
-    await state.clear()
-
-@content_router.callback_query(F.data.startswith("edit:"))
-async def edit_post_start(callback: CallbackQuery, state: FSMContext):
-    post_id = int(callback.data.split(":")[1])
-    await state.update_data(edit_post_id=post_id)
-    await callback.message.answer("✏️ Введите новый текст поста:")
-    await state.set_state(ContentStates.edit_post)
-
-@content_router.message(ContentStates.edit_post)
-async def edit_post_finish(message: Message, state: FSMContext):
-    data = await state.get_data()
-    post_id = data.get("edit_post_id")
-    if post_id:
-        await db.update_content_post(post_id, body=message.text)
-        await message.answer("✅ Текст обновлен!", reply_markup=get_main_menu())
-        await show_preview(message, message.text, post_id=post_id)
-    await state.clear()
-
-@content_router.callback_query(F.data == "cancel")
-async def cancel_handler(callback: CallbackQuery, state: FSMContext):
-    await callback.answer("❌ Отменено")
-    await state.clear()
-    await callback.message.delete()
-
-@content_router.callback_query(F.data == "back_menu")
-async def back_to_menu(callback: CallbackQuery, state: FSMContext):
-    await state.clear()
-    await callback.message.answer("🎯 Главное меню", reply_markup=get_main_menu())
