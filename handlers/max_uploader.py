@@ -1,6 +1,6 @@
 """
 MAX.ru Uploader Module — заглушка для будущей интеграции
-API Key: b5766865e14b364805c35984fd158b5e5fd5caa1b450728f252c0787aa129460
+API Key: из config.MAX_API_KEY
 """
 import logging
 from typing import Optional
@@ -15,7 +15,7 @@ class MaxUploader:
     
     def __init__(self, api_key: str):
         self.api_key = api_key
-        self.base_url = "https://partner.api.max.ru"  # Уточнить endpoint
+        self.enabled = False  # Включить после тестирования TG+VK
         logger.info("MAX uploader initialized (disabled)")
     
     async def publish_article(
@@ -25,26 +25,15 @@ class MaxUploader:
         image_url: Optional[str] = None,
         tags: Optional[list] = None
     ) -> Optional[str]:
-        """
-        Публикация статьи на MAX
+        """Публикация статьи на MAX"""
+        if not self.enabled:
+            logger.info(f"MAX publish skipped (disabled): {title}")
+            return None
         
-        Args:
-            title: Заголовок
-            content: HTML или Markdown контент
-            image_url: URL обложки
-            tags: Теги
-        
-        Returns:
-            article_id или None
-        """
-        # TODO: Реализовать после получения документации API
+        # TODO: Реализовать API интеграцию
         logger.info(f"MAX publish requested: {title}")
         return None
     
     async def get_status(self, article_id: str) -> dict:
         """Проверка статуса модерации"""
-        # TODO: Реализовать
         return {"status": "unknown"}
-
-# Глобальный инстанс (не используется сейчас)
-# max_uploader = MaxUploader("b5766865e14b364805c35984fd158b5e5fd5caa1b450728f252c0787aa129460")
