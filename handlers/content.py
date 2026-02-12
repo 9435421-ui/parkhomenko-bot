@@ -87,7 +87,7 @@ class ContentStates(StatesGroup):
     series_topic = State()
     visual_prompt = State()
     news_topic = State()
-    plan_days = State()
+    ai_plan = State()          # Интерактивный план (дни + тема)
     quick_text = State()
 
 
@@ -718,50 +718,45 @@ async def generate_news(message: Message, state: FSMContext):
 # === 📋 ИНТЕРАКТИВНЫЙ ПЛАН ===
 
 @content_router.message(F.text == "📋 Интерактивный План")
-async def plan_start(message: Message, state: FSMContext):
-    """📋 Интерактивный План — сразу запрашиваем дни и тему"""
+async def reply_menu_plan(message: Message, state: FSMContext):
+    """Интерактивный план — сразу дни + тема"""
+    await state.clear()
     await message.answer(
         "📋 <b>Интерактивный план</b>\n\n"
         "Введите через запятую:\n"
-        "<code>количество дней, тема</code>\n\n"
+        "<code>количество дней, тема плана</code>\n\n"
         "Примеры:\n"
-        "• <code>3, переустройство ванной</code>\n"
+        "• <code>3, переустройство ванной комнаты</code>\n"
         "• <code>5, объединение кухни и гостиной</code>\n"
-        "• <code>7, перепланировка в сталинке</code>",
+        "• <code>7, перепланировка в сталинском доме</code>\n\n"
+        "Бот создаст план с постами и предложит сгенерировать изображения.",
         reply_markup=get_back_btn(),
         parse_mode="HTML"
     )
-    await state.set_state(ContentStates.plan_days)
+    await state.set_state(ContentStates.ai_plan)
 
 
-@content_router.message(ContentStates.plan_days)
-async def generate_plan(message: Message, state: FSMContext):
-    """Генерация плана — парсим дни и тему"""
+@content_router.message(ContentStates.ai_plan)
+async def ai_plan_handler(message: Message, state: FSMContext):
+    """Обработка: дни + тема → генерация плана"""
     text = message.text.strip()
     
     # Парсим ввод
     try:
         if ',' in text:
-            parts = text.split(',', 1)
-            days = int(parts[0].strip())
-            topic = parts[1].strip()
+            parts = [p.strip() for p in text.split(',', 1)]
+            days = int(parts[0])
+            topic = parts[1]
         else:
-            # Если только число — спрашиваем тему
-            days = int(text)
-            await state.update_data(plan_days=days)
             await message.answer(
-                f"✅ <b>{days} дней</b>\n\nТеперь введите тему:",
+                "❌ Неверный формат. Введите:\n"
+                "<code>число, тема</code>\n\n"
+                "Пример: <code>3, переустройство ванной</code>",
                 parse_mode="HTML"
             )
-            await state.set_state(ContentStates.plan_topic)
             return
-    except ValueError:
-        await message.answer(
-            "❌ Неверный формат. Введите:\n"
-            "<code>число, тема</code>\n\n"
-            "Пример: <code>3, переустройство ванной</code>",
-            parse_mode="HTML"
-        )
+    except (ValueError, IndexError):
+        await message.answer("❌ Введите число и тему через запятую")
         return
     
     if days < 1 or days > 30:
@@ -770,86 +765,57 @@ async def generate_plan(message: Message, state: FSMContext):
     
     await message.answer(
         f"⏳ <b>Создаю план на {days} дней...</b>\n"
-        f"Тема: {topic}",
+        f"Тема: {topic}\n"
+        f"Генерация через Квин...",
         parse_mode="HTML"
     )
     
+    # Генерируем план
     prompt = (
         f"Создай контент-план на {days} дней для эксперта по перепланировкам.\n"
         f"Тема: «{topic}»\n\n"
         f"Для каждого дня укажи:\n"
-        f"• День N\n"
-        f"• Заголовок поста\n"
+        f"• День N: Заголовок поста\n"
         f"• Краткое содержание (2-3 предложения)\n"
-        f"• Формат (фото/текст/карусель)\n\n"
-        f"Тон: экспертный, практичный."
+        f"• Формат (текст/фото/карусель)\n"
+        f"• Идея для изображения (если нужно фото)\n\n"
+        f"Тон: экспертный, практичный. Добавь эмодзи."
     )
     
-    plan = await router_ai.generate(prompt, max_tokens=3000)
+    plan = await router_ai.generate(prompt, model="quin", max_tokens=3000)
+    
     if not plan:
         await message.answer("❌ Ошибка генерации", reply_markup=get_main_menu())
         await state.clear()
         return
     
+    # Сохраняем
+    post_id = await db.add_content_post(
+        title=f"План {days} дней: {topic[:40]}",
+        body=plan,
+        channel="content_plan",
+        status="draft"
+    )
+    
     # Отправляем в топик контент-плана
     await message.bot.send_message(
         chat_id=LEADS_GROUP_CHAT_ID,
         message_thread_id=THREAD_ID_CONTENT_PLAN,
-        text=f"📋 <b>План на {days} дней</b>\n\n<b>Тема:</b> {topic}\n\n{plan}",
+        text=f"📋 <b>План на {days} дней</b>\n\n<b>Тема:</b> {topic}\n\n{plan[:1500]}...",
         parse_mode="HTML"
     )
     
+    # Спрашиваем про изображения
     await message.answer(
         f"✅ <b>План готов!</b>\n"
         f"📊 {days} дней\n"
-        f"📁 Отправлен в топик «Контент-план» (83)",
-        reply_markup=get_main_menu(),
-        parse_mode="HTML"
-    )
-    await state.clear()
-
-
-@content_router.message(ContentStates.plan_topic)
-async def plan_topic_handler(message: Message, state: FSMContext):
-    """Если тема введена отдельно"""
-    data = await state.get_data()
-    days = data.get("plan_days", 7)
-    topic = message.text
-    
-    await message.answer(
-        f"⏳ <b>Создаю план на {days} дней...</b>\n"
-        f"Тема: {topic}",
-        parse_mode="HTML"
-    )
-    
-    prompt = (
-        f"Создай контент-план на {days} дней для эксперта по перепланировкам.\n"
-        f"Тема: «{topic}»\n\n"
-        f"Для каждого дня укажи:\n"
-        f"• Заголовок поста\n"
-        f"• Идея поста\n"
-        f"• Формат (фото/текст)\n\n"
-        f"Тон: экспертный."
-    )
-    
-    plan = await router_ai.generate(prompt, max_tokens=3000)
-    if not plan:
-        await message.answer("❌ Ошибка", reply_markup=get_main_menu())
-        await state.clear()
-        return
-    
-    await message.bot.send_message(
-        chat_id=LEADS_GROUP_CHAT_ID,
-        message_thread_id=THREAD_ID_CONTENT_PLAN,
-        text=f"📋 <b>План на {days} дней</b>\n\n<b>Тема:</b> {topic}\n\n{plan}",
-        parse_mode="HTML"
-    )
-    
-    await message.answer(
-        f"✅ <b>План готов!</b>\n"
-        f"📊 {days} дней\n"
-        f"📁 В топике 83",
-        reply_markup=get_main_menu(),
+        f"📁 Отправлен в топик 83\n\n"
+        f"<b>Сгенерировать изображения для плана?</b>",
+        reply_markup=InlineKeyboardBuilder()
+        .button(text="🎨 Да, сгенерировать арты", callback_data=f"gen_plan_images:{post_id}:{days}:{topic}")
+        .button(text="❌ Нет, оставить текст", callback_data="skip_images")
+        .button(text="◀️ Меню", callback_data="back_menu")
+        .as_markup(),
         parse_mode="HTML"
     )
     await state.clear()
