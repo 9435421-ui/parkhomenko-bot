@@ -1,0 +1,14 @@
+﻿{
+    "python.defaultInterpreterPath": "./venv/Scripts/python.exe",
+    "python.analysis.typeCheckingMode": "basic",
+    "editor.formatOnSave": true,
+    "python.formatting.provider": "autopep8",
+    "python.linting.enabled": true,
+    "python.linting.pylintEnabled": true,
+    "files.exclude": {
+        "**/__pycache__": true,
+        "**/*.pyc": true,
+        "**/.git": true,
+        "**/venv": true
+    }
+}
