@@ -69,7 +69,7 @@ async def global_menu_handler(message: Message, state: FSMContext):
     elif text == "📰 Новость":
         await news_start(message, state)
     elif text == "📋 Интерактивный План":
-        await plan_start(message, state)
+        await reply_menu_plan(message, state)
     elif text == "📝 Быстрый текст":
         await quick_start(message, state)
 
