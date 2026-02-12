@@ -85,7 +85,7 @@ class ContentStates(StatesGroup):
     preview_mode = State()          # Режим превью перед публикацией
     series_days = State()
     series_topic = State()
-    visual_prompt = State()
+    ai_visual_prompt = State()  # Ввод промпта после выбора модели
     news_topic = State()
     ai_plan = State()          # Интерактивный план (дни + тема)
     quick_text = State()
@@ -146,7 +146,7 @@ class YandexArtClient:
 
 
 class RouterAIClient:
-    """RouterAI для текстов"""
+    """RouterAI для текстов и изображений"""
     
     def __init__(self, api_key: str):
         self.api_key = api_key
@@ -210,6 +210,49 @@ class RouterAIClient:
         except Exception as e:
             logger.error(f"Vision error: {e}")
         return None
+    
+    async def generate_image_gemini(self, prompt: str) -> Optional[str]:
+        """
+        Генерация изображения через Gemini 2.5 Flash Image (Nano Banana)
+        Возвращает base64 или None
+        """
+        payload = {
+            "model": "gemini-2.5-flash-image",
+            "messages": [
+                {
+                    "role": "user",
+                    "content": [
+                        {"type": "text", "text": f"Generate image: {prompt}"}
+                    ]
+                }
+            ],
+            "max_tokens": 2000
+        }
+        
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.post(
+                    "https://routerai.ru/api/v1/chat/completions",
+                    headers=self.headers,
+                    json=payload
+                ) as resp:
+                    if resp.status == 200:
+                        data = await resp.json()
+                        content = data["choices"][0]["message"]["content"]
+                        # Проверяем markdown с base64
+                        if "data:image" in content:
+                            import re
+                            match = re.search(r'data:image/[^;]+;base64,([^"\']+)', content)
+                            if match:
+                                return match.group(1)
+                        return content
+                    else:
+                        error = await resp.text()
+                        logger.error(f"Gemini Image error: {error}")
+                        return None
+        except Exception as e:
+            logger.error(f"Gemini Image exception: {e}")
+            return None
 
 
 # Инициализация
@@ -488,78 +531,161 @@ async def process_photo(message: Message, state: FSMContext):
     await state.set_state(ContentStates.preview_mode)
 
 
-# === 🎨 ЯНДЕКС АРТ ===
+# === 🎨 ГЕНЕРАЦИЯ ИЗОБРАЖЕНИЙ ===
 
 @content_router.message(F.text == "🎨 ИИ-Визуал")
 async def art_start(message: Message, state: FSMContext):
-    """Генерация изображения (ИИ-Визуал)"""
+    """Выбор модели для генерации изображения"""
+    await state.clear()
     await message.answer(
-        "🎨 <b>ИИ-Визуал</b>\n\n"
-        "Введите описание для генерации.\n\n"
-        "<b>Примеры:</b>\n"
-        "• <code>Скандинавская гостиная с панорамными окнами, светлый интерьер</code>\n"
-        "• <code>До/после: ремонт ванной комнаты, минимализм</code>\n"
-        "• <code>Модная кухня-студия, современный дизайн, остров</code>\n"
-        "• <code>Особенности перепланировок в старом фонде</code>\n\n"
-        "⚠️ Генерация занимает 10-30 секунд",
-        reply_markup=get_back_btn(),
-        parse_mode="HTML"
-    )
-    await state.set_state(ContentStates.visual_prompt)
-
-
-@content_router.message(ContentStates.visual_prompt)
-async def generate_art(message: Message, state: FSMContext):
-    """Генерация картинки"""
-    prompt = message.text
-    
-    await message.answer("⏳ <b>Генерация (10-30 сек)...</b>", parse_mode="HTML")
-    
-    # Улучшаем промпт
-    enhanced = f"{prompt}, professional interior photography, high quality, detailed, no text, no watermarks"
-    
-    image_b64 = await yandex_art.generate(enhanced)
-    if not image_b64:
-        await message.answer("❌ Ошибка генерации", reply_markup=get_main_menu())
-        await state.clear()
-        return
-    
-    # Сохраняем временно
-    image_bytes = base64.b64decode(image_b64)
-    with tempfile.NamedTemporaryFile(suffix=".jpg", delete=False) as tmp:
-        tmp.write(image_bytes)
-        tmp_path = tmp.name
-    
-    # Отправляем
-    await message.answer_photo(
-        photo=FSInputFile(tmp_path),
-        caption=f"✅ <b>Готово!</b>\n\nПромпт: <code>{prompt}</code>",
+        "🎨 <b>Генерация изображения</b>\n\n"
+        "Выберите модель:\n\n"
+        "<b>🟣 Яндекс АРТ</b>\n"
+        "• Лучше для интерьеров\n"
+        "• Русский промпт\n"
+        "• 10-30 секунд\n\n"
+        "<b>🟡 Gemini 2.5 Flash Image</b>\n"
+        "• Быстрее (5-10 сек)\n"
+        "• Nano Banana оптимизация\n"
+        "• Через RouterAI\n\n"
+        "Выберите:",
         reply_markup=InlineKeyboardBuilder()
-        .button(text="💾 Использовать в посте", callback_data=f"use_art:{prompt}")
-        .button(text="🔄 Еще вариант", callback_data="regen_art")
+        .button(text="🟣 Яндекс АРТ", callback_data="visual_model:yandex")
+        .button(text="🟡 Gemini Nano", callback_data="visual_model:gemini")
         .button(text="◀️ Меню", callback_data="back_menu")
         .as_markup(),
         parse_mode="HTML"
     )
+
+
+@content_router.callback_query(F.data.startswith("visual_model:"))
+async def visual_model_selected(callback: CallbackQuery, state: FSMContext):
+    """Выбрана модель для генерации"""
+    model = callback.data.split(":")[1]
+    await state.update_data(visual_model=model)
     
-    os.unlink(tmp_path)
+    model_name = "Яндекс АРТ" if model == "yandex" else "Gemini 2.5 Flash Image"
+    
+    await callback.answer(f"Выбрано: {model_name}")
+    await callback.message.edit_text(
+        f"🎨 <b>{model_name}</b>\n\n"
+        f"Введите описание для генерации:\n\n"
+        f"Примеры:\n"
+        f"• Скандинавская гостиная с панорамными окнами\n"
+        f"• Современная кухня-студия, остров, минимализм\n"
+        f"• Перепланировка в старом фонде, до/после\n\n"
+        f"Опишите детально: стиль, цвета, освещение, материалы.",
+        parse_mode="HTML"
+    )
+    await state.set_state(ContentStates.ai_visual_prompt)
+
+
+@content_router.message(ContentStates.ai_visual_prompt)
+async def ai_visual_handler(message: Message, state: FSMContext):
+    """Генерация изображения — выбранная модель"""
+    data = await state.get_data()
+    model = data.get('visual_model', 'yandex')
+    user_prompt = message.text
+    
+    await message.answer(
+        f"⏳ <b>Генерация...</b>\n"
+        f"Модель: {'Яндекс АРТ' if model == 'yandex' else 'Gemini Nano'}\n"
+        f"Ожидание: {'10-30 сек' if model == 'yandex' else '5-10 сек'}",
+        parse_mode="HTML"
+    )
+    
+    # Улучшаем промпт
+    enhanced_prompt = (
+        f"{user_prompt}, professional architectural photography, "
+        f"interior design, high quality, detailed, no text, no watermarks"
+    )
+    
+    # Генерация по выбранной модели
+    image_b64 = None
+    model_used = ""
+    
+    if model == 'yandex':
+        image_b64 = await yandex_art.generate(enhanced_prompt)
+        model_used = "Яндекс АРТ"
+    else:  # gemini
+        image_b64 = await router_ai.generate_image_gemini(enhanced_prompt)
+        model_used = "Gemini 2.5 Flash Image"
+    
+    # Проверка результата
+    if not image_b64:
+        await message.answer(
+            f"❌ Ошибка генерации ({model_used})\n"
+            f"Попробуйте:\n"
+            f"• Другую модель\n"
+            f"• Более простое описание",
+            reply_markup=InlineKeyboardBuilder()
+            .button(text="🔄 Повторить", callback_data="visual_back")
+            .button(text="◀️ Меню", callback_data="back_menu")
+            .as_markup(),
+            parse_mode="HTML"
+        )
+        await state.clear()
+        return
+    
+    # Отправляем результат
+    try:
+        image_bytes = base64.b64decode(image_b64)
+        
+        with tempfile.NamedTemporaryFile(suffix=".jpg", delete=False) as tmp:
+            tmp.write(image_bytes)
+            tmp_path = tmp.name
+        
+        await message.answer_photo(
+            photo=FSInputFile(tmp_path),
+            caption=(
+                f"✅ <b>Готово!</b>\n\n"
+                f"🎨 <b>Модель:</b> {model_used}\n"
+                f"📝 <b>Промпт:</b> <code>{user_prompt[:60]}...</code>\n\n"
+                f"Что сделать с изображением?"
+            ),
+            reply_markup=InlineKeyboardBuilder()
+            .button(text="📝 Создать пост", callback_data=f"art_to_post:{user_prompt}:{model}")
+            .button(text="🔄 Другая модель", callback_data="visual_back")
+            .button(text="💾 Скачать", callback_data=f"download_art:{model}")
+            .button(text="◀️ Меню", callback_data="back_menu")
+            .adjust(2, 1, 1)
+            .as_markup(),
+            parse_mode="HTML"
+        )
+        
+        os.unlink(tmp_path)
+        
+    except Exception as e:
+        logger.error(f"Send image error: {e}")
+        await message.answer("❌ Ошибка отправки изображения", reply_markup=get_main_menu())
+    
     await state.clear()
 
 
-@content_router.callback_query(F.data.startswith("use_art:"))
-async def use_generated_art(callback: CallbackQuery, state: FSMContext):
-    """Использовать сгенерированную картинку"""
-    prompt = callback.data.split(":", 1)[1]
-    await callback.answer("Добавьте текст к посту")
+@content_router.callback_query(F.data == "visual_back")
+async def visual_back(callback: CallbackQuery, state: FSMContext):
+    """Вернуться к выбору модели"""
+    await callback.answer()
+    await art_start(callback.message, state)
+
+
+@content_router.callback_query(F.data.startswith("art_to_post:"))
+async def art_to_post(callback: CallbackQuery, state: FSMContext):
+    """Создать пост из арта"""
+    parts = callback.data.split(":", 2)
+    prompt = parts[1]
+    model = parts[2] if len(parts) > 2 else 'yandex'
+    
+    await callback.answer("Введите текст поста")
     await callback.message.answer(
         f"📝 <b>Создание поста с изображением</b>\n\n"
-        f"Введите текст поста:\n"
-        f"<i>Изображение: {prompt}</i>",
+        f"<b>Промпт:</b> <code>{prompt}</code>\n\n"
+        f"Введите текст поста:",
         reply_markup=get_back_btn(),
         parse_mode="HTML"
     )
     await state.set_state(ContentStates.quick_text)
-    await state.update_data(art_prompt=prompt, has_image=True)
+    await state.update_data(art_prompt=prompt, has_image=True, art_model=model)
 
 
 # === 📅 7 ДНЕЙ ПРОГРЕВА ===
