@@ -544,9 +544,9 @@ async def art_start(message: Message, state: FSMContext):
         "• Лучше для интерьеров\n"
         "• Русский промпт\n"
         "• 10-30 секунд\n\n"
-        "<b>🟡 Gemini 2.5 Flash Image</b>\n"
+        "<b>🟡 Gemini 1.5 Flash</b>\n"
         "• Быстрее (5-10 сек)\n"
-        "• Nano Banana оптимизация\n"
+        "• Оптимизация\n"
         "• Через RouterAI\n\n"
         "Выберите:",
         reply_markup=InlineKeyboardBuilder()
@@ -564,7 +564,7 @@ async def visual_model_selected(callback: CallbackQuery, state: FSMContext):
     model = callback.data.split(":")[1]
     await state.update_data(visual_model=model)
     
-    model_name = "Яндекс АРТ" if model == "yandex" else "Gemini 2.5 Flash Image"
+    model_name = "Яндекс АРТ" if model == "yandex" else "Gemini 1.5 Flash"
     
     await callback.answer(f"Выбрано: {model_name}")
     await callback.message.edit_text(
@@ -609,7 +609,7 @@ async def ai_visual_handler(message: Message, state: FSMContext):
         model_used = "Яндекс АРТ"
     else:  # gemini
         image_b64 = await router_ai.generate_image_gemini(enhanced_prompt)
-        model_used = "Gemini 2.5 Flash Image"
+        model_used = "Gemini 1.5 Flash"
     
     # Проверка результата
     if not image_b64:
