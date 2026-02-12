@@ -5,13 +5,13 @@ TG + VK публикация, AI-генерация контента, квиз-�
 from aiogram import Router, F, Bot
 from aiogram.types import (
     Message, CallbackQuery, InlineKeyboardMarkup, 
-    ReplyKeyboardMarkup, KeyboardButton, FSInputFile
+    ReplyKeyboardMarkup, KeyboardButton, FSInputFile,
+    InputMediaPhoto
 )
 from aiogram.filters import CommandStart
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
-from PIL import Image
 import logging
 import aiohttp
 import json
@@ -23,8 +23,11 @@ import asyncio
 import re
 from datetime import datetime, timedelta
 from typing import Optional
+from PIL import Image
+import io
 
 from database import db
+from handlers.vk_publisher import VKPublisher
 from config import (
     CONTENT_BOT_TOKEN,
     CHANNEL_ID_TERION,
@@ -37,6 +40,8 @@ from config import (
     ROUTER_AI_KEY,
     YANDEX_API_KEY,
     FOLDER_ID,
+    MAX_API_KEY,
+    YANDEX_ART_ENABLED,
     VK_TOKEN,
     VK_GROUP_ID,
     VK_QUIZ_LINK,
@@ -45,6 +50,52 @@ from config import (
 
 logger = logging.getLogger(__name__)
 content_router = Router()
+
+# ГЛОБАЛЬНЫЕ ОБРАБОТЧИКИ МЕНЮ (всегда активны)
+@content_router.message(F.text.in_([
+    "📸 Фото → Описание → Пост",
+    "🎨 ИИ-Визуал", 
+    "📅 7 дней прогрева",
+    "📰 Новость",
+    "📋 Интерактивный План",
+    "📝 Быстрый текст"
+]))
+async def global_menu_handler(message: Message, state: FSMContext):
+    """Глобальный обработчик меню — работает из любого состояния"""
+    await state.clear()  # Сбрасываем FSM
+    
+    text = message.text
+    
+    if text == "📸 Фото → Описание → Пост":
+        await photo_start(message, state)
+    elif text == "🎨 ИИ-Визуал":
+        await art_start(message, state)
+    elif text == "📅 7 дней прогрева":
+        await series_start(message, state)
+    elif text == "📰 Новость":
+        await news_start(message, state)
+    elif text == "📋 Интерактивный План":
+        await reply_menu_plan(message, state)
+    elif text == "📝 Быстрый текст":
+        await quick_start(message, state)
+
+# Инициализация VK
+vk_publisher = VKPublisher(VK_TOKEN, int(VK_GROUP_ID))
+
+
+# === FSM STATES ===
+class ContentStates(StatesGroup):
+    main_menu = State()
+    photo_topic = State()      # Тема перед загрузкой фото
+    photo_upload = State()     # Загрузка фото
+    preview_mode = State()          # Режим превью перед публикацией
+    series_days = State()
+    series_topic = State()
+    ai_visual_prompt = State()  # Ввод промпта после выбора модели
+    news_topic = State()
+    ai_plan = State()          # Интерактивный план (дни + тема)
+    quick_text = State()
+
 
 # === AI CLIENTS ===
 
@@ -102,7 +153,7 @@ class YandexArtClient:
 
 
 class RouterAIClient:
-    """RouterAI для текстов и Gemini Image"""
+    """RouterAI для текстов и изображений"""
     
     def __init__(self, api_key: str):
         self.api_key = api_key
@@ -191,12 +242,16 @@ class RouterAIClient:
                             if match:
                                 return match.group(1)
                         return content
+                    else:
+                        error = await resp.text()
+                        logger.error(f"Gemini Image error: {error}")
+                        return None
         except Exception as e:
-            logger.error(f"Gemini Image error: {e}")
-        return None
+            logger.error(f"Gemini Image exception: {e}")
+            return None
 
 
-# Инициализация клиентов
+# Инициализация
 yandex_art = YandexArtClient(YANDEX_API_KEY, FOLDER_ID)
 router_ai = RouterAIClient(ROUTER_AI_KEY)
 
@@ -320,8 +375,8 @@ class ContentStates(StatesGroup):
 def get_main_menu() -> ReplyKeyboardMarkup:
     kb = [
         [KeyboardButton(text="📸 Фото → Описание → Пост")],
-        [KeyboardButton(text="🎨 ИИ-Визуал"), KeyboardButton(text="📅 Серия постов")],
-        [KeyboardButton(text="📰 Новость"), KeyboardButton(text="📋 Контент-план")],
+        [KeyboardButton(text="🎨 ИИ-Визуал"), KeyboardButton(text="📅 7 дней прогрева")],
+        [KeyboardButton(text="📰 Новость"), KeyboardButton(text="📋 Интерактивный План")],
         [KeyboardButton(text="📝 Быстрый текст")]
     ]
     return ReplyKeyboardMarkup(keyboard=kb, resize_keyboard=True)
@@ -347,6 +402,19 @@ def get_back_btn() -> InlineKeyboardMarkup:
 
 # === HELPERS ===
 
+async def safe_edit_message(message, text, reply_markup=None, parse_mode="HTML"):
+    """Безопасное редактирование — работает и с текстом, и с фото"""
+    try:
+        if message.photo:
+            await message.edit_caption(caption=text, reply_markup=reply_markup, parse_mode=parse_mode)
+        else:
+            await message.edit_text(text=text, reply_markup=reply_markup, parse_mode=parse_mode)
+    except Exception as e:
+        logger.warning(f"Edit failed: {e}")
+        # Отправляем новое сообщение
+        await message.answer(text=text, reply_markup=reply_markup, parse_mode=parse_mode)
+
+
 async def download_photo(bot: Bot, file_id: str) -> Optional[bytes]:
     try:
         file = await bot.get_file(file_id)
@@ -370,7 +438,8 @@ async def compress_image(image_bytes: bytes, max_size: int = 1024, quality: int 
             ratio = max_size / max(img.size)
             new_size = (int(img.size[0] * ratio), int(img.size[1] * ratio))
             img = img.resize(new_size, Image.Resampling.LANCZOS)
-        
+            logger.info(f"Image resized: {img.size}")
+        # Сохраняем с указанным качеством
         output = io.BytesIO()
         img.save(output, format='JPEG', quality=quality, optimize=True)
         compressed = output.getvalue()
@@ -387,6 +456,7 @@ async def compress_image(image_bytes: bytes, max_size: int = 1024, quality: int 
 
 async def show_preview(message: Message, text: str, image_file_id: Optional[str] = None, post_id: Optional[int] = None):
     if not post_id:
+        # Сохраняем в БД
         post_id = await db.add_content_post(
             title="Preview",
             body=text,
