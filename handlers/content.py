@@ -68,7 +68,7 @@ async def global_menu_handler(message: Message, state: FSMContext):
     if text == "📸 Фото → Описание → Пост":
         await photo_start(message, state)
     elif text == "🎨 ИИ-Визуал":
-        await art_start(message, state)
+        await visual_select_model(message, state)
     elif text == "📅 7 дней прогрева":
         await series_start(message, state)
     elif text == "📰 Новость":
@@ -161,7 +161,7 @@ class RouterAIClient:
             "Content-Type": "application/json"
         }
     
-    async def generate(self, prompt: str, model: str = "gpt-4o", max_tokens: int = 2000) -> Optional[str]:
+    async def generate(self, prompt: str, model: str = "openai/gpt-4o", max_tokens: int = 2000) -> Optional[str]:
         """Генерация текста"""
         payload = {
             "model": model,
