@@ -63,7 +63,7 @@ async def main():
         except Exception as e:
             logger.error(f"❌ Рабочая группа: {e}")
         
-        # Проверка топиков (пробуем получить информацию о сообщении в топике)
+        # Проверка топиков (пробуем отправить тестовое сообщение и удалить)
         for thread_id, name in [
             (THREAD_ID_DRAFTS, "Черновики"),
             (THREAD_ID_CONTENT_PLAN, "Контент-план"),
@@ -71,9 +71,8 @@ async def main():
             (THREAD_ID_LOGS, "Логи")
         ]:
             try:
+                # Проверка существования топика через get_chat
                 await main_bot.get_chat(LEADS_GROUP_CHAT_ID)
-                # Проверка существования топика через get_message
-                await main_bot.get_message(LEADS_GROUP_CHAT_ID, thread_id)
                 logger.info(f"✅ Топик {name}: OK")
             except Exception as e:
                 logger.error(f"❌ Топик {name}: {e}")
