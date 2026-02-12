@@ -29,18 +29,73 @@ async def main():
     await db.connect()
     await kb.index_documents()
     
+    # 2. Проверка связей
+    logger.info("🔍 Проверка связей...")
+    try:
+        # Проверка каналов
+        from config import CHANNEL_ID_TERION, CHANNEL_ID_DOM_GRAD, LEADS_GROUP_CHAT_ID
+        from config import THREAD_ID_DRAFTS, THREAD_ID_CONTENT_PLAN, THREAD_ID_TRENDS_SEASON, THREAD_ID_LOGS
+        
+        # Проверка доступности каналов (пробуем получить информацию)
+        from aiogram import Bot
+        from config import BOT_TOKEN, CONTENT_BOT_TOKEN
+        
+        main_bot = Bot(token=BOT_TOKEN or "")
+        content_bot = Bot(token=CONTENT_BOT_TOKEN or "")
+        
+        # Проверка каналов
+        try:
+            await main_bot.get_chat(CHANNEL_ID_TERION)
+            logger.info("✅ Канал TG: OK")
+        except Exception as e:
+            logger.error(f"❌ Канал TG: {e}")
+        
+        try:
+            await content_bot.get_chat(CHANNEL_ID_DOM_GRAD)
+            logger.info("✅ Канал ДОМ ГРАНД: OK")
+        except Exception as e:
+            logger.error(f"❌ Канал ДОМ ГРАНД: {e}")
+        
+        # Проверка рабочей группы
+        try:
+            await main_bot.get_chat(LEADS_GROUP_CHAT_ID)
+            logger.info("✅ Рабочая группа: OK")
+        except Exception as e:
+            logger.error(f"❌ Рабочая группа: {e}")
+        
+        # Проверка топиков (пробуем получить информацию о сообщении в топике)
+        for thread_id, name in [
+            (THREAD_ID_DRAFTS, "Черновики"),
+            (THREAD_ID_CONTENT_PLAN, "Контент-план"),
+            (THREAD_ID_TRENDS_SEASON, "Тренды/Сезон"),
+            (THREAD_ID_LOGS, "Логи")
+        ]:
+            try:
+                await main_bot.get_chat(LEADS_GROUP_CHAT_ID)
+                # Проверка существования топика через get_message
+                await main_bot.get_message(LEADS_GROUP_CHAT_ID, thread_id)
+                logger.info(f"✅ Топик {name}: OK")
+            except Exception as e:
+                logger.error(f"❌ Топик {name}: {e}")
+        
+        await main_bot.session.close()
+        await content_bot.session.close()
+        
+    except Exception as e:
+        logger.error(f"Ошибка проверки связей: {e}")
+    
     scheduler = AsyncIOScheduler()
     scheduler.add_job(lambda: logger.info("⏰ Проверка постов"), 'cron', hour=12)
     scheduler.start()
     
     # 2. Настройка АНТОНА
-    main_bot = Bot(token=BOT_TOKEN, default=DefaultBotProperties(parse_mode="HTML"))
+    main_bot = Bot(token=BOT_TOKEN or "", default=DefaultBotProperties(parse_mode="HTML"))
     dp_main = Dispatcher(storage=MemoryStorage())
     dp_main.callback_query.middleware(UnhandledCallbackMiddleware())
     dp_main.include_routers(start_router, quiz_router, dialog_router)
     
     # 3. Настройка ДОМ ГРАНД
-    content_bot = Bot(token=CONTENT_BOT_TOKEN, default=DefaultBotProperties(parse_mode="HTML"))
+    content_bot = Bot(token=CONTENT_BOT_TOKEN or "", default=DefaultBotProperties(parse_mode="HTML"))
     dp_content = Dispatcher(storage=MemoryStorage())
     dp_content.callback_query.middleware(UnhandledCallbackMiddleware())
     dp_content.include_routers(content_router, admin_router)

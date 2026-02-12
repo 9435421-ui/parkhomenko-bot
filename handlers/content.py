@@ -456,13 +456,14 @@ async def compress_image(image_bytes: bytes, max_size: int = 1024, quality: int 
 async def show_preview(message: Message, text: str, image_file_id: Optional[str] = None, post_id: Optional[int] = None):
     if not post_id:
         # Сохраняем в БД
-        post_id = await db.add_content_post(
-            title="Preview",
-            body=text,
-            image_url=image_file_id,
-            channel="preview",
-            status="preview"
-        )
+    post_id = await db.add_content_post(
+        title="Preview",
+        body=text,
+        cta="",
+        image_url=image_file_id,
+        channel="preview",
+        status="preview"
+    )
     
     kb = get_preview_keyboard(post_id, bool(image_file_id))
     caption = f"👁 <b>Предпросмотр</b>\n\n{text[:700]}{'...' if len(text) > 700 else ''}"
@@ -581,6 +582,7 @@ async def process_photo(message: Message, state: FSMContext):
     post_id = await db.add_content_post(
         title=f"Фото: {topic[:40]}",
         body=description,
+        cta="",
         image_url=file_id,
         channel="photo_workflow",
         status="preview"
@@ -745,6 +747,7 @@ async def ai_series_handler(message: Message, state: FSMContext):
     post_id = await db.add_content_post(
         title=f"Серия {days} дней: {topic[:40]}",
         body=result,
+        cta="",
         channel="series",
         status="draft"
     )
