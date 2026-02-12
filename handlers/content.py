@@ -37,6 +37,8 @@ from config import (
     ROUTER_AI_KEY,
     YANDEX_API_KEY,
     FOLDER_ID,
+    MAX_API_KEY,
+    YANDEX_ART_ENABLED,
     VK_TOKEN,
     VK_GROUP_ID,
     VK_QUIZ_LINK
@@ -1293,3 +1295,36 @@ async def regen_art(callback: CallbackQuery, state: FSMContext):
 async def wrong_photo(message: Message, state: FSMContext):
     """Если прислали не фото"""
     await message.answer("❌ Пожалуйста, отправьте фото или нажмите «Назад»")
+
+
+# === ПРОВЕРКА AI ПРИ ЗАПУСКЕ ===
+async def test_ai_services():
+    """Проверка AI сервисов при запуске"""
+    results = {"gemini": False, "yandex_art": False}
+    
+    # Тест Gemini (через router_ai)
+    try:
+        test_prompt = "Test message"
+        response = await router_ai.generate(test_prompt, max_tokens=10)
+        if response:
+            results["gemini"] = True
+            logger.info("✅ Gemini OK")
+    except Exception as e:
+        logger.error(f"❌ Gemini error: {e}")
+    
+    # Тест Yandex Art
+    try:
+        if YANDEX_API_KEY and FOLDER_ID:
+            test_result = await yandex_art.generate("test room interior")
+            if test_result:
+                results["yandex_art"] = True
+                logger.info("✅ Yandex Art OK")
+            else:
+                logger.warning("⚠️ Yandex Art returned None")
+        else:
+            logger.warning("⚠️ Yandex Art: missing API key or folder ID")
+    except Exception as e:
+        logger.error(f"❌ Yandex Art error: {e}")
+    
+    logger.info(f"--- ПРОВЕРКА AI: Gemini {'OK' if results['gemini'] else 'FAILED'}, Yandex Art {'OK' if results['yandex_art'] else 'FAILED'} ---")
+    return results
