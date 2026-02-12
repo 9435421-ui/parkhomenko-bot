@@ -1115,7 +1115,7 @@ async def publish_all(callback: CallbackQuery, state: FSMContext):
     # Отправляем лог в рабочую группу
     log_text = (
         f"🚀 <b>Публикация #{post_id}</b>\n\n"
-        f"{'\n'.join(results)}\n\n"
+        + "\n".join(results) + "\n\n"
         f"<b>Текст:</b> {post['body'][:200]}..."
     )
     await callback.bot.send_message(
