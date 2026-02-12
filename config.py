@@ -39,7 +39,10 @@ THREAD_ID_LOGS = int(os.getenv("THREAD_ID_LOGS", "88"))           # Логи с�
 ROUTER_AI_KEY = os.getenv("ROUTER_AI_KEY")
 YANDEX_API_KEY = os.getenv("YANDEX_API_KEY")
 FOLDER_ID = os.getenv("FOLDER_ID")
-
+MAX_API_KEY = os.getenv("MAX_API_KEY")
+YANDEX_ART_ENABLED = os.getenv("YANDEX_ART_ENABLED", "true").lower() == "true"
+TERION_CHANNEL_ID = CHANNEL_ID_TERION
+DOM_GRAND_CHANNEL_ID = CHANNEL_ID_DOM_GRAD
 # === ADMIN ===
 ADMIN_ID = int(os.getenv("ADMIN_ID", "223465437"))
 QUIZ_THREAD_ID = int(os.getenv("QUIZ_THREAD_ID", "2"))
