@@ -112,13 +112,13 @@ async def main():
     main_bot = Bot(token=BOT_TOKEN or "", default=DefaultBotProperties(parse_mode="HTML"))
     dp_main = Dispatcher(storage=MemoryStorage())
     dp_main.callback_query.middleware(UnhandledCallbackMiddleware())
-    dp_main.include_routers(start_router, quiz_router, dialog_router)
+    dp_main.include_routers(admin_router, start_router, quiz_router, dialog_router)
     
     # 3. Настройка ДОМ ГРАНД
     content_bot = Bot(token=CONTENT_BOT_TOKEN or "", default=DefaultBotProperties(parse_mode="HTML"))
     dp_content = Dispatcher(storage=MemoryStorage())
     dp_content.callback_query.middleware(UnhandledCallbackMiddleware())
-    dp_content.include_routers(content_router, admin_router)
+    dp_content.include_routers(content_router)
     
     # 4. Параллельный запуск
     await asyncio.gather(
