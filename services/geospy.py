@@ -11,8 +11,8 @@ from config import (
     GEO_SPY_ENABLED,
     GEO_CHAT_ID,
     GEO_CHAT_1_ID,
-    LEADS_GROUP_CHAT_ID,
-    THREAD_ID_HOT_LEADS,
+    NOTIFICATIONS_CHANNEL_ID,
+    THREAD_ID_LOGS,
     SPY_KEYWORDS,
     BOT_TOKEN
 )
@@ -62,7 +62,7 @@ async def send_hot_lead_alert(
     message_id: int = 0
 ) -> bool:
     """
-    Отправляет уведомление о горячем лиде в топик THREAD_ID_HOT_LEADS.
+    Отправляет уведомление о горячем лиде в топик THREAD_ID_LOGS (88).
     """
     keyword = await check_message_for_keywords(message_text)
     if not keyword:
@@ -83,8 +83,8 @@ async def send_hot_lead_alert(
 👉 <a href="https://t.me/TERION_KvizBot?start=quiz">КВИЗ</a> | <a href="tg://user?id=unknown">Написать</a>"""
         
         await bot.send_message(
-            chat_id=LEADS_GROUP_CHAT_ID,
-            message_thread_id=THREAD_ID_HOT_LEADS,
+            chat_id=NOTIFICATIONS_CHANNEL_ID,
+            message_thread_id=THREAD_ID_LOGS,
             text=alert_text,
             parse_mode="HTML"
         )
