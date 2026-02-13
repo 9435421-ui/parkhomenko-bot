@@ -1,6 +1,9 @@
 # Telegram Bot Framework
 aiogram==3.13.1
 
+# Telethon for parsing chats
+telethon==1.35.0
+
 # Environment variables
 python-dotenv==1.0.0
 

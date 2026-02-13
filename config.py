@@ -10,6 +10,11 @@ load_dotenv()
 BOT_TOKEN = os.getenv("BOT_TOKEN")  # ТЕРИОН (Антон)
 CONTENT_BOT_TOKEN = os.getenv("CONTENT_BOT_TOKEN")  # ДОМ ГРАНД
 
+# === TELETHON CREDENTIALS (for Chat Parsing) ===
+API_ID = os.getenv("API_ID")
+API_HASH = os.getenv("API_HASH")
+PHONE = os.getenv("PHONE")
+
 # === VK ===
 VK_TOKEN = os.getenv("VK_TOKEN")
 VK_GROUP_ID = int(os.getenv("VK_GROUP_ID", "235569022"))
