@@ -14,7 +14,7 @@ from database import db
 from config import ADMIN_ID, NOTIFICATIONS_CHANNEL_ID, THREAD_ID_LOGS
 
 logger = logging.getLogger(__name__)
-admin_router = Router()
+router = Router()
 
 
 class AdminStates(StatesGroup):
@@ -65,7 +65,7 @@ def get_back_to_admin() -> InlineKeyboardMarkup:
 
 
 # === КОМАНДА /ADMIN ===
-@admin_router.message(Command("admin"))
+@router.message(Command("admin"))
 async def cmd_admin(message: Message, state: FSMContext):
     """Главное меню админ-панели"""
     if not check_admin(message.from_user.id):
@@ -82,7 +82,7 @@ async def cmd_admin(message: Message, state: FSMContext):
 
 
 # === ОБРАБОТЧИКИ КНОПОК ===
-@admin_router.callback_query(F.data == "admin_menu")
+@router.callback_query(F.data == "admin_menu")
 async def admin_menu(callback: CallbackQuery, state: FSMContext):
     """Возврат в главное меню"""
     if not check_admin(callback.from_user.id):
@@ -99,7 +99,7 @@ async def admin_menu(callback: CallbackQuery, state: FSMContext):
     await callback.answer()
 
 
-@admin_router.callback_query(F.data == "admin_add_resource")
+@router.callback_query(F.data == "admin_add_resource")
 async def admin_add_resource(callback: CallbackQuery):
     """Добавление ресурса - выбор типа"""
     if not check_admin(callback.from_user.id):
@@ -115,7 +115,7 @@ async def admin_add_resource(callback: CallbackQuery):
     await callback.answer()
 
 
-@admin_router.callback_query(F.data.startswith("admin_type:"))
+@router.callback_query(F.data.startswith("admin_type:"))
 async def admin_select_type(callback: CallbackQuery, state: FSMContext):
     """Выбор типа ресурса - запрашиваем ссылку"""
     if not check_admin(callback.from_user.id):
@@ -140,7 +140,7 @@ async def admin_select_type(callback: CallbackQuery, state: FSMContext):
     await callback.answer()
 
 
-@admin_router.message(AdminStates.wait_resource_link)
+@router.message(AdminStates.wait_resource_link)
 async def admin_save_resource(message: Message, state: FSMContext):
     """Сохранение ресурса"""
     data = await state.get_data()
@@ -174,7 +174,7 @@ async def admin_save_resource(message: Message, state: FSMContext):
     await state.clear()
 
 
-@admin_router.callback_query(F.data == "admin_list_resources")
+@router.callback_query(F.data == "admin_list_resources")
 async def admin_list_resources(callback: CallbackQuery):
     """Список ресурсов"""
     if not check_admin(callback.from_user.id):
@@ -208,7 +208,7 @@ async def admin_list_resources(callback: CallbackQuery):
     await callback.answer()
 
 
-@admin_router.callback_query(F.data == "admin_keywords")
+@router.callback_query(F.data == "admin_keywords")
 async def admin_keywords(callback: CallbackQuery):
     """Меню ключевых слов"""
     if not check_admin(callback.from_user.id):
@@ -224,7 +224,7 @@ async def admin_keywords(callback: CallbackQuery):
     await callback.answer()
 
 
-@admin_router.callback_query(F.data == "admin_add_keyword")
+@router.callback_query(F.data == "admin_add_keyword")
 async def admin_add_keyword(callback: CallbackQuery, state: FSMContext):
     """Добавить ключевое слово"""
     if not check_admin(callback.from_user.id):
@@ -241,7 +241,7 @@ async def admin_add_keyword(callback: CallbackQuery, state: FSMContext):
     await callback.answer()
 
 
-@admin_router.message(AdminStates.wait_keyword)
+@router.message(AdminStates.wait_keyword)
 async def admin_save_keyword(message: Message, state: FSMContext):
     """Сохранение ключевого слова"""
     keyword = message.text.strip()
@@ -267,7 +267,7 @@ async def admin_save_keyword(message: Message, state: FSMContext):
     await state.clear()
 
 
-@admin_router.callback_query(F.data == "admin_list_keywords")
+@router.callback_query(F.data == "admin_list_keywords")
 async def admin_list_keywords(callback: CallbackQuery):
     """Список ключевых слов"""
     if not check_admin(callback.from_user.id):
@@ -300,7 +300,7 @@ async def admin_list_keywords(callback: CallbackQuery):
     await callback.answer()
 
 
-@admin_router.callback_query(F.data == "admin_back")
+@router.callback_query(F.data == "admin_back")
 async def admin_back(callback: CallbackQuery, state: FSMContext):
     """Назад - сбрасываем состояние"""
     await state.clear()
