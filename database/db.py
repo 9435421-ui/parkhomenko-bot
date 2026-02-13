@@ -127,6 +127,30 @@ class Database:
                 )
             """)
             
+            # Таблица целевых ресурсов для мониторинга (TG чаты + VK группы)
+            await cursor.execute("""
+                CREATE TABLE IF NOT EXISTS target_resources (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    type TEXT NOT NULL CHECK(type IN ('telegram', 'vk')),
+                    link TEXT NOT NULL UNIQUE,
+                    title TEXT,
+                    is_active BOOLEAN DEFAULT 1,
+                    last_post_id INTEGER DEFAULT 0,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+            
+            # Таблица ключевых слов для мониторинга
+            await cursor.execute("""
+                CREATE TABLE IF NOT EXISTS spy_keywords (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    keyword TEXT NOT NULL UNIQUE,
+                    is_active BOOLEAN DEFAULT 1,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+            
             await self.conn.commit()
     
     async def get_or_create_user(self, user_id: int, username: Optional[str] = None,
@@ -349,6 +373,100 @@ class Database:
             await cursor.execute(
                 "UPDATE clients_birthdays SET greeting_sent = 1, updated_at = ? WHERE id = ?",
                 (datetime.now(), birthday_id)
+            )
+            await self.conn.commit()
+
+
+    # === ЦЕЛЕВЫЕ РЕСУРСЫ (TG чаты + VK группы) ===
+    async def add_target_resource(self, resource_type: str, link: str, title: str = None) -> int:
+        """Добавить ресурс для мониторинга"""
+        async with self.conn.cursor() as cursor:
+            await cursor.execute(
+                "INSERT INTO target_resources (type, link, title) VALUES (?, ?, ?)",
+                (resource_type, link, title or link)
+            )
+            await self.conn.commit()
+            return cursor.lastrowid
+    
+    async def get_target_resources(self, resource_type: str = None, active_only: bool = True) -> List[Dict]:
+        """Получить список ресурсов"""
+        async with self.conn.cursor() as cursor:
+            if active_only:
+                if resource_type:
+                    await cursor.execute(
+                        "SELECT * FROM target_resources WHERE type = ? AND is_active = 1",
+                        (resource_type,)
+                    )
+                else:
+                    await cursor.execute("SELECT * FROM target_resources WHERE is_active = 1")
+            else:
+                if resource_type:
+                    await cursor.execute(
+                        "SELECT * FROM target_resources WHERE type = ?",
+                        (resource_type,)
+                    )
+                else:
+                    await cursor.execute("SELECT * FROM target_resources")
+            return [dict(row) for row in await cursor.fetchall()]
+    
+    async def remove_target_resource(self, resource_id: int):
+        """Удалить ресурс"""
+        async with self.conn.cursor() as cursor:
+            await cursor.execute("DELETE FROM target_resources WHERE id = ?", (resource_id,))
+            await self.conn.commit()
+    
+    async def toggle_resource_active(self, resource_id: int, is_active: bool):
+        """Включить/выключить ресурс"""
+        async with self.conn.cursor() as cursor:
+            await cursor.execute(
+                "UPDATE target_resources SET is_active = ?, updated_at = ? WHERE id = ?",
+                (is_active, datetime.now(), resource_id)
+            )
+            await self.conn.commit()
+    
+    async def update_last_post_id(self, resource_id: int, last_post_id: int):
+        """Обновить ID последнего поста"""
+        async with self.conn.cursor() as cursor:
+            await cursor.execute(
+                "UPDATE target_resources SET last_post_id = ?, updated_at = ? WHERE id = ?",
+                (last_post_id, datetime.now(), resource_id)
+            )
+            await self.conn.commit()
+    
+    # === КЛЮЧЕВЫЕ СЛОВА ===
+    async def add_spy_keyword(self, keyword: str) -> int:
+        """Добавить ключевое слово"""
+        async with self.conn.cursor() as cursor:
+            await cursor.execute(
+                "INSERT OR IGNORE INTO spy_keywords (keyword) VALUES (?)",
+                (keyword.lower(),)
+            )
+            await self.conn.commit()
+            await cursor.execute("SELECT id FROM spy_keywords WHERE keyword = ?", (keyword.lower(),))
+            row = await cursor.fetchone()
+            return row['id'] if row else None
+    
+    async def remove_spy_keyword(self, keyword_id: int):
+        """Удалить ключевое слово"""
+        async with self.conn.cursor() as cursor:
+            await cursor.execute("DELETE FROM spy_keywords WHERE id = ?", (keyword_id,))
+            await self.conn.commit()
+    
+    async def get_spy_keywords(self, active_only: bool = True) -> List[Dict]:
+        """Получить список ключевых слов"""
+        async with self.conn.cursor() as cursor:
+            if active_only:
+                await cursor.execute("SELECT * FROM spy_keywords WHERE is_active = 1")
+            else:
+                await cursor.execute("SELECT * FROM spy_keywords")
+            return [dict(row) for row in await cursor.fetchall()]
+    
+    async def toggle_keyword_active(self, keyword_id: int, is_active: bool):
+        """Включить/выключить ключевое слово"""
+        async with self.conn.cursor() as cursor:
+            await cursor.execute(
+                "UPDATE spy_keywords SET is_active = ? WHERE id = ?",
+                (is_active, keyword_id)
             )
             await self.conn.commit()
 
