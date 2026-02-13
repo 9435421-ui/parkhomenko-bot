@@ -314,13 +314,18 @@ class VKPublisher:
             logger.error(f"VK upload error: {e}")
         return None
     
-    def create_buttons(self) -> str:
+    def create_buttons(self, quiz_link: str = None, consult_link: str = None) -> str:
         """Кнопки: Квиз и Консультация"""
+        if not quiz_link:
+            quiz_link = VK_QUIZ_LINK
+        if not consult_link:
+            consult_link = "https://t.me/terion_bot?start=consult"
+        
         buttons = {
             "inline": True,
             "buttons": [
-                [{"action": {"type": "open_link", "link": "https://t.me/terion_bot?start=quiz", "label": "📝 Пройти квиз"}}],
-                [{"action": {"type": "open_link", "link": "https://t.me/terion_bot?start=consult", "label": "💬 Бесплатная консультация"}}]
+                [{"action": {"type": "open_link", "link": quiz_link, "label": "📝 Пройти квиз"}}],
+                [{"action": {"type": "open_link", "link": consult_link, "label": "💬 Бесплатная консультация"}}]
             ]
         }
         return json.dumps(buttons, ensure_ascii=False)
@@ -556,7 +561,7 @@ async def process_photo(message: Message, state: FSMContext):
     
     image_bytes = await download_photo(message.bot, file_id)
     if not image_bytes:
-        await message.answer("❌ Ошибка загрузки", reply_markup=get_main_menu())
+        await message.answer("❌ Ошибка загрузки", reply_markup=get_back_btn())
         await state.clear()
         return
     
@@ -667,7 +672,7 @@ async def ai_visual_handler(message: Message, state: FSMContext):
     if not image_b64:
         await message.answer(
             "❌ Ошибка генерации. Попробуйте другую модель или описание.",
-            reply_markup=get_main_menu()
+            reply_markup=get_back_btn()
         )
         await state.clear()
         return
@@ -695,7 +700,7 @@ async def ai_visual_handler(message: Message, state: FSMContext):
         os.unlink(tmp_path)
     except Exception as e:
         logger.error(f"Send error: {e}")
-        await message.answer("❌ Ошибка отправки", reply_markup=get_main_menu())
+        await message.answer("❌ Ошибка отправки", reply_markup=get_back_btn())
     
     await state.clear()
 
@@ -752,7 +757,7 @@ async def ai_series_handler(message: Message, state: FSMContext):
     result = await router_ai.generate(prompt, max_tokens=4000)
     
     if not result:
-        await message.answer("❌ Ошибка генерации", reply_markup=get_main_menu())
+        await message.answer("❌ Ошибка генерации", reply_markup=get_back_btn())
         await state.clear()
         return
     
@@ -818,7 +823,7 @@ async def generate_series_images(callback: CallbackQuery, state: FSMContext):
             )
             os.unlink(tmp_path)
     
-    await callback.message.answer("✅ <b>Все обложки готовы!</b>", reply_markup=get_main_menu(), parse_mode="HTML")
+    await callback.message.answer("✅ <b>Все обложки готовы!</b>", reply_markup=get_back_btn(), parse_mode="HTML")
 
 
 # === 📋 КОНТЕНТ-ПЛАН ===
@@ -867,7 +872,7 @@ async def ai_plan_handler(message: Message, state: FSMContext):
     plan = await router_ai.generate(prompt, max_tokens=3000)
     
     if not plan:
-        await message.answer("❌ Ошибка", reply_markup=get_main_menu())
+        await message.answer("❌ Ошибка", reply_markup=get_back_btn())
         await state.clear()
         return
     
@@ -922,7 +927,7 @@ async def ai_news_handler(message: Message, state: FSMContext):
     news = await router_ai.generate(prompt)
     
     if not news:
-        await message.answer("❌ Ошибка", reply_markup=get_main_menu())
+        await message.answer("❌ Ошибка", reply_markup=get_back_btn())
         await state.clear()
         return
     
@@ -961,7 +966,7 @@ async def ai_text_handler(message: Message, state: FSMContext):
     text = await router_ai.generate(prompt)
     
     if not text:
-        await message.answer("❌ Ошибка", reply_markup=get_main_menu())
+        await message.answer("❌ Ошибка", reply_markup=get_back_btn())
         await state.clear()
         return
     
@@ -1036,13 +1041,13 @@ async def publish_terion(callback: CallbackQuery, state: FSMContext):
         await db.update_content_post(post_id, status="published")
         await callback.message.edit_text(
             f"✅ <b>Опубликовано в TERION</b>\n\n🔗 <a href='{result}'>Ссылка на пост</a>",
-            reply_markup=get_main_menu(),
+            reply_markup=get_back_btn(),
             parse_mode="HTML"
         )
     else:
         await callback.message.edit_text(
             f"❌ <b>Ошибка публикации в TERION</b>\n\n{result}",
-            reply_markup=get_main_menu(),
+            reply_markup=get_back_btn(),
             parse_mode="HTML"
         )
     
@@ -1067,13 +1072,13 @@ async def publish_dom_grnd(callback: CallbackQuery, state: FSMContext):
         await db.update_content_post(post_id, status="published")
         await callback.message.edit_text(
             f"✅ <b>Опубликовано в ДОМ ГРАНД</b>\n\n🔗 <a href='{result}'>Ссылка на пост</a>",
-            reply_markup=get_main_menu(),
+            reply_markup=get_back_btn(),
             parse_mode="HTML"
         )
     else:
         await callback.message.edit_text(
             f"❌ <b>Ошибка публикации в ДОМ ГРАНД</b>\n\n{result}",
-            reply_markup=get_main_menu(),
+            reply_markup=get_back_btn(),
             parse_mode="HTML"
         )
     
@@ -1137,7 +1142,7 @@ async def publish_all(callback: CallbackQuery, state: FSMContext):
     
     await callback.message.edit_text(
         f"✅ <b>Опубликовано!</b>\n\n" + "\n".join(results),
-        reply_markup=get_main_menu(),
+        reply_markup=get_back_btn(),
         parse_mode="HTML"
     )
     await state.clear()
@@ -1164,7 +1169,7 @@ async def publish_tg_only(callback: CallbackQuery, state: FSMContext):
         results = [f"❌ {e}"]
     
     await db.update_content_post(post_id, status="published")
-    await callback.message.edit_text(f"✅ <b>TG:</b>\n" + "\n".join(results), reply_markup=get_main_menu(), parse_mode="HTML")
+    await callback.message.edit_text(f"✅ <b>TG:</b>\n" + "\n".join(results), reply_markup=get_back_btn(), parse_mode="HTML")
     await state.clear()
 
 
@@ -1188,13 +1193,13 @@ async def publish_vk_only(callback: CallbackQuery, state: FSMContext):
         if vk_link:
             await callback.message.edit_text(
                 f"✅ <b>Опубликовано в VK</b>\n\n🔗 <a href='{vk_link}'>Ссылка на пост</a>",
-                reply_markup=get_main_menu(),
+                reply_markup=get_back_btn(),
                 parse_mode="HTML"
             )
         else:
-            await callback.message.edit_text("❌ Ошибка VK", reply_markup=get_main_menu(), parse_mode="HTML")
+            await callback.message.edit_text("❌ Ошибка VK", reply_markup=get_back_btn(), parse_mode="HTML")
     except Exception as e:
-        await callback.message.edit_text(f"❌ Ошибка: {e}", reply_markup=get_main_menu())
+        await callback.message.edit_text(f"❌ Ошибка: {e}", reply_markup=get_back_btn())
     
     await state.clear()
 
@@ -1211,9 +1216,9 @@ async def save_draft(callback: CallbackQuery, state: FSMContext):
             await callback.bot.send_message(LEADS_GROUP_CHAT_ID, f"📝 <b>Черновик #{post_id}</b>\n\n{post['body']}", message_thread_id=THREAD_ID_DRAFTS, parse_mode="HTML")
         
         await db.update_content_post(post_id, status="in_drafts")
-        await callback.message.edit_text("✅ В черновиках (топик 85)", reply_markup=get_main_menu())
+        await callback.message.edit_text("✅ В черновиках (топик 85)", reply_markup=get_back_btn())
     except Exception as e:
-        await callback.message.edit_text(f"❌ Ошибка: {e}", reply_markup=get_main_menu())
+        await callback.message.edit_text(f"❌ Ошибка: {e}", reply_markup=get_back_btn())
     
     await state.clear()
 
@@ -1240,7 +1245,7 @@ async def edit_post_handler(message: Message, state: FSMContext):
     
     if post_id:
         await db.update_content_post(post_id, body=message.text)
-        await message.answer("✅ Обновлено!", reply_markup=get_main_menu())
+        await message.answer("✅ Обновлено!", reply_markup=get_back_btn())
     
     await state.clear()
 
@@ -1249,7 +1254,7 @@ async def edit_post_handler(message: Message, state: FSMContext):
 async def cancel_handler(callback: CallbackQuery, state: FSMContext):
     await callback.answer("❌ Отменено")
     await state.clear()
-    await callback.message.edit_text("❌ Отменено", reply_markup=get_main_menu())
+    await callback.message.edit_text("❌ Отменено", reply_markup=get_back_btn())
 
 
 @content_router.callback_query(F.data == "back_menu")
