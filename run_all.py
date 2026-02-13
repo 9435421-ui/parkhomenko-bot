@@ -42,7 +42,7 @@ async def run_main_bot():
 
 async def run_chat_parser():
     """Запуск парсера чатов."""
-    logger.info("🚀 Запуск парсера чатов...")
+    logger.info("🚀 Запуск парсера TG чатов...")
     
     try:
         # Импорт внутри функции, чтобы избежать циклических импортов
@@ -52,16 +52,44 @@ async def run_chat_parser():
         logger.error(f"❌ Ошибка в chat parser: {e}")
 
 
+async def run_vk_parser():
+    """Запуск мониторинга VK групп."""
+    logger.info("🚀 Запуск мониторинга VK...")
+    
+    try:
+        from vk_parser import start_vk_monitoring
+        from database import db
+        
+        # Подключаем БД
+        await db.connect()
+        
+        # Получаем VK группы из БД
+        vk_resources = await db.get_target_resources(resource_type="vk")
+        
+        if vk_resources:
+            groups = [r['link'].replace('vk.com/', '') for r in vk_resources]
+            logger.info(f"📘 Мониторинг VK групп: {groups}")
+            await start_vk_monitoring(groups, interval=300)
+        else:
+            logger.info("📘 Нет VK групп для мониторинга")
+            # Делаем бесконечный цикл ожидания
+            while True:
+                await asyncio.sleep(60)
+    except Exception as e:
+        logger.error(f"❌ Ошибка в VK parser: {e}")
+
+
 async def main():
     """Запуск обоих процессов."""
     logger.info("=" * 50)
     logger.info("🎯 TERION Bot + Chat Parser")
     logger.info("=" * 50)
     
-    # Запускаем оба процесса параллельно
+    # Запускаем все процессы параллельно
     await asyncio.gather(
         run_main_bot(),
-        run_chat_parser()
+        run_chat_parser(),
+        run_vk_parser()
     )
 
 

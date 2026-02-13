@@ -1,513 +1,308 @@
 """
-Handler для ручной загрузки фото и управления постами.
+Admin Panel — управление ресурсами и ключевыми словами.
+Команда: /admin
 """
-import os
-import logging
-import uuid
-from datetime import datetime
-from aiogram import Router, F
-from aiogram.types import Message, CallbackQuery, InputMediaPhoto, FSInputFile
+from aiogram import Router, F, Bot
+from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton
+from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
-from aiogram.fsm.state import StatesGroup, State
-from config import ADMIN_ID
+from aiogram.fsm.state import State, StatesGroup
+from aiogram.utils.keyboard import InlineKeyboardBuilder
+import logging
+
 from database import db
-from utils import router_ai, image_compressor, yandex_vision
-from services.vk_service import vk_service
+from config import ADMIN_ID, NOTIFICATIONS_CHANNEL_ID, THREAD_ID_LOGS
 
+logger = logging.getLogger(__name__)
 admin_router = Router()
-
-# Настройки папок
-UPLOAD_DIR = os.getenv("UPLOAD_DIR", "uploads")
-os.makedirs(UPLOAD_DIR, exist_ok=True)
-
-
-class PhotoStates(StatesGroup):
-    """Состояния для загрузки фото"""
-    waiting_for_photo = State()
-    waiting_for_description = State()
-    waiting_for_channel = State()
 
 
 class AdminStates(StatesGroup):
-    """Состояния для админ-команд"""
-    waiting_for_edit_text = State()
-    waiting_for_new_caption = State()
+    wait_resource_link = State()
+    wait_keyword = State()
 
 
-def get_channel_keyboard():
-    """Клавиатура выбора канала"""
-    from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
-    
-    return InlineKeyboardMarkup(
-        inline_keyboard=[
-            [
-                InlineKeyboardButton(text="🏠 ТЕРИОН", callback_data="channel:terion"),
-                InlineKeyboardButton(text="🏡 ДОМ ГРАНД", callback_data="channel:dom_grand")
-            ],
-            [
-                InlineKeyboardButton(text="📤 ТГ + ВК", callback_data="channel:both")
-            ]
-        ]
-    )
+def check_admin(user_id: int) -> bool:
+    """Проверка прав администратора"""
+    return user_id == ADMIN_ID
 
 
-def get_post_keyboard(post_id: int):
-    """Клавиатура управления постом"""
-    from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
-    
-    return InlineKeyboardMarkup(
-        inline_keyboard=[
-            [
-                InlineKeyboardButton(text="✏️ Редактировать", callback_data=f"edit_post:{post_id}"),
-                InlineKeyboardButton(text="✅ Опубликовать", callback_data="publish_post:{post_id}")
-            ],
-            [
-                InlineKeyboardButton(text="❌ Удалить", callback_data=f"delete_post:{post_id}")
-            ]
-        ]
-    )
+def get_admin_keyboard() -> InlineKeyboardMarkup:
+    """Главное меню админ-панели"""
+    builder = InlineKeyboardBuilder()
+    builder.button(text="➕ Добавить ресурс", callback_data="admin_add_resource")
+    builder.button(text="📋 Список ресурсов", callback_data="admin_list_resources")
+    builder.button(text="🔑 Ключевые слова", callback_data="admin_keywords")
+    builder.button(text="◀️ Назад", callback_data="admin_back")
+    builder.adjust(1, 1, 1, 1)
+    return builder.as_markup()
 
 
-def get_admin_keyboard():
-    """Клавиатура админа"""
-    from aiogram.types import ReplyKeyboardMarkup, KeyboardButton
-    
-    return ReplyKeyboardMarkup(
-        keyboard=[
-            [KeyboardButton(text="📸 Загрузить фото")],
-            [KeyboardButton(text="📋 Мои черновики")],
-            [KeyboardButton(text="📊 Статистика")]
-        ],
-        resize_keyboard=True
-    )
+def get_resource_type_keyboard() -> InlineKeyboardMarkup:
+    """Выбор типа ресурса"""
+    builder = InlineKeyboardBuilder()
+    builder.button(text="💬 Telegram чат", callback_data="admin_type:telegram")
+    builder.button(text="📘 VK группа", callback_data="admin_type:vk")
+    builder.button(text="◀️ Назад", callback_data="admin_menu")
+    builder.adjust(1, 1, 1)
+    return builder.as_markup()
 
 
-@admin_router.message(F.text == "/admin")
-async def admin_menu(message: Message):
-    """Меню администратора"""
-    if message.from_user.id != ADMIN_ID:
-        await message.answer("❌ Доступ запрещён")
+def get_keywords_keyboard() -> InlineKeyboardMarkup:
+    """Меню ключевых слов"""
+    builder = InlineKeyboardBuilder()
+    builder.button(text="➕ Добавить слово", callback_data="admin_add_keyword")
+    builder.button(text="📋 Список слов", callback_data="admin_list_keywords")
+    builder.button(text="◀️ Назад", callback_data="admin_menu")
+    builder.adjust(1, 1, 1)
+    return builder.as_markup()
+
+
+def get_back_to_admin() -> InlineKeyboardMarkup:
+    builder = InlineKeyboardBuilder()
+    builder.button(text="◀️ Админ-панель", callback_data="admin_menu")
+    return builder.as_markup()
+
+
+# === КОМАНДА /ADMIN ===
+@admin_router.message(Command("admin"))
+async def cmd_admin(message: Message, state: FSMContext):
+    """Главное меню админ-панели"""
+    if not check_admin(message.from_user.id):
+        await message.answer("⛔ У вас нет доступа к админ-панели")
         return
-    
-    await message.answer(
-        "👨‍💼 Панель администратора\n\n"
-        "📸 /upload_photo — загрузить фото объекта\n"
-        "📋 /my_posts — мои черновики\n"
-        "📊 /stats — статистика",
-        reply_markup=get_admin_keyboard()
-    )
-
-
-@admin_router.message(F.text == "📸 Загрузить фото")
-async def start_upload_photo(message: Message, state: FSMContext):
-    """Начало загрузки фото"""
-    if message.from_user.id != ADMIN_ID:
-        return
-    
-    await state.set_state(PhotoStates.waiting_for_photo)
-    await message.answer(
-        "📸 Отправьте фото объекта\n\n"
-        "Можно отправить 1 фото или альбом (до 10 фото)"
-    )
-
-
-@admin_router.message(PhotoStates.waiting_for_photo, F.photo)
-async def process_photo(message: Message, state: FSMContext):
-    """Обработка загруженного фото"""
-    user_id = message.from_user.id
-    
-    # Создаем уникальную папку для фото
-    session_id = str(uuid.uuid4())[:8]
-    session_dir = os.path.join(UPLOAD_DIR, session_id)
-    os.makedirs(session_dir, exist_ok=True)
-    
-    # Скачиваем фото
-    photo_paths = []
-    
-    if message.photo:
-        # Одно фото или альбом
-        for idx, photo in enumerate(message.photo):
-            file = await message.bot.get_file(photo.file_id)
-            ext = ".jpg"
-            path = os.path.join(session_dir, f"photo_{idx}{ext}")
-            await message.bot.download_file(file.file_path, path)
-            
-            # Сжимаем для ТГ
-            compressed = image_compressor.prepare_for_telegram(path)
-            if compressed:
-                photo_paths.append(compressed)
-    
-    elif message.document and message.document.mime_type.startswith('image/'):
-        # Документ-изображение
-        file = await message.bot.get_file(message.document.file_id)
-        ext = image_compressor.get_file_extension(message.document.mime_type)
-        path = os.path.join(session_dir, f"document{ext}")
-        await message.bot.download_file(file.file_path, path)
-        
-        # Сжимаем
-        compressed = image_compressor.prepare_for_telegram(path)
-        if compressed:
-            photo_paths.append(compressed)
-    
-    if not photo_paths:
-        await message.answer("❌ Ошибка загрузки фото")
-        return
-    
-    # Сохраняем пути в состояние
-    await state.update_data(
-        photo_paths=photo_paths,
-        session_id=session_id
-    )
-    
-    await message.answer(
-        f"✅ Загружено {len(photo_paths)} фото\n\n"
-        "Теперь напишите описание (или /skip если пропустить)"
-    )
-    await state.set_state(PhotoStates.waiting_for_description)
-
-
-@admin_router.message(PhotoStates.waiting_for_description)
-async def process_description(message: Message, state: FSMContext):
-    """Обработка описания и анализ через ИИ"""
-    data = await state.get_data()
-    photo_paths = data.get('photo_paths', [])
-    session_id = data.get('session_id')
-    user_id = message.from_user.id
-    
-    # Если пропуск - генерируем описание через ИИ
-    if message.text and message.text.lower() == "/skip":
-        description = await analyze_photos_with_ai(photo_paths)
-    else:
-        description = message.text
-    
-    # Анализируем фото через ИИ для улучшения описания
-    ai_context = await analyze_photos_with_ai(photo_paths)
-    
-    await state.update_data(
-        description=description,
-        ai_context=ai_context,
-        user_id=user_id,
-        username=message.from_user.username or ""
-    )
-    
-    # Спрашиваем канал
-    await message.answer(
-        f"📝 Описание сохранено!\n\n"
-        f"🤖 ИИ-анализ фото:\n{ai_context}\n\n"
-        "Выберите канал для публикации:",
-        reply_markup=get_channel_keyboard()
-    )
-    await state.set_state(PhotoStates.waiting_for_channel)
-
-
-async def analyze_photos_with_ai(photo_paths: list) -> str:
-    """Анализирует фото через Яндекс Vision API"""
-    if not photo_paths:
-        return "📸 Фото объекта"
-    
-    try:
-        # Анализируем первое фото
-        first_photo = photo_paths[0]
-        
-        # Используем Яндекс Vision для анализа
-        description = await yandex_vision.analyze_image(first_photo)
-        
-        if description and description != "📸 Фото объекта":
-            return description
-        
-        return "📸 Фото объекта недвижимости"
-        
-    except Exception as e:
-        logging.error(f"Ошибка анализа фото: {e}")
-        return "📸 Фото объекта"
-
-
-@admin_router.callback_query(PhotoStates.waiting_for_channel)
-async def process_channel(callback: CallbackQuery, state: FSMContext):
-    """Выбор канала и сохранение поста"""
-    data = await state.get_data()
-    
-    channel = callback.data.replace("channel:", "")
-    channel_map = {
-        'terion': ('ТЕРИОН', 'terion'),
-        'dom_grand': ('ДОМ ГРАНД', 'dom_grand'),
-        'both': ('ТГ + ВК', 'both')
-    }
-    
-    channel_name, channel_key = channel_map.get(channel, ('ТЕРИОН', 'terion'))
-    
-    # Сохраняем пост в БД
-    post_id = await db.save_post(
-        post_type='photo',
-        title=data.get('description', '')[:100],
-        body=data.get('description', ''),
-        cta="📩 Записаться на консультацию: @Parkhovenko_i_kompaniya_bot",
-        publish_date=datetime.now(),
-        channel=channel_key,
-        theme="Фото объекта",
-        image_url=data.get('photo_paths', [None])[0],
-        admin_id=data.get('user_id'),
-        status='draft'
-    )
-    
-    # Формируем сообщение для рабочей группы
-    text = (
-        f"📸 <b>Новый фото-пост</b>\n\n"
-        f"📝 Описание: {data.get('description', 'Без описания')}\n\n"
-        f"🤖 ИИ-анализ: {data.get('ai_context', '')}\n\n"
-        f"📍 Канал: {channel_name}\n"
-        f"👤 Админ: @{data.get('username', 'неизвестно')}"
-    )
-    
-    # Отправляем в группу
-    from config import LEADS_GROUP_CHAT_ID
-    from dotenv import getenv
-    
-    thread_id = int(getenv("THREAD_ID_DRAFTS", "85"))
-    
-    # Отправляем с фото
-    if data.get('photo_paths'):
-        try:
-            if len(data['photo_paths']) == 1:
-                await callback.bot.send_photo(
-                    chat_id=LEADS_GROUP_CHAT_ID,
-                    photo=FSInputFile(data['photo_paths'][0]),
-                    caption=text,
-                    reply_markup=get_post_keyboard(post_id),
-                    message_thread_id=thread_id
-                )
-            else:
-                # Альбом
-                media = [InputMediaPhoto(media=FSInputFile(p)) for p in data['photo_paths']]
-                media[0].caption = text
-                await callback.bot.send_media_group(
-                    chat_id=LEADS_GROUP_CHAT_ID,
-                    media=media,
-                    message_thread_id=thread_id
-                )
-                # Отправляем кнопки отдельно
-                await callback.bot.send_message(
-                    chat_id=LEADS_GROUP_CHAT_ID,
-                    text="Управление постом:",
-                    reply_markup=get_post_keyboard(post_id),
-                    message_thread_id=thread_id
-                )
-        except Exception as e:
-            logging.error(f"Ошибка отправки фото в группу: {e}")
-            await callback.bot.send_message(
-                chat_id=LEADS_GROUP_CHAT_ID,
-                text=text,
-                reply_markup=get_post_keyboard(post_id),
-                message_thread_id=thread_id
-            )
-    
-    await callback.message.edit_text(
-        f"✅ Пост сохранён! ID: {post_id}\n"
-        f"📍 Канал: {channel_name}\n\n"
-        "📤 Отправлен в рабочую группу на утверждение."
-    )
-    await callback.answer()
     
     await state.clear()
-
-
-@admin_router.message(F.text == "📋 Мои черновики")
-async def my_posts(message: Message):
-    """Показать черновики админа"""
-    if message.from_user.id != ADMIN_ID:
-        return
-    
-    posts = await db.get_draft_posts()
-    
-    if not posts:
-        await message.answer("📭 У вас нет черновиков")
-        return
-    
-    response = "📋 <b>Ваши черновики:</b>\n\n"
-    for post in posts[:10]:  # Показываем последние 10
-        date = post.get('publish_date', '')[:10]
-        response += f"• ID {post['id']}: {post.get('type', 'photo')} — {date}\n"
-    
-    await message.answer(response)
-
-
-@admin_router.callback_query(F.data.startswith("edit_post:"))
-async def edit_post(callback: CallbackQuery, state: FSMContext):
-    """Начало редактирования поста"""
-    post_id = int(callback.data.replace("edit_post:", ""))
-    
-    # Получаем пост
-    posts = await db.get_draft_posts()
-    post = next((p for p in posts if p['id'] == post_id), None)
-    
-    if not post:
-        await callback.message.edit_text("❌ Пост не найден")
-        await callback.answer()
-        return
-    
-    await state.update_data(edit_post_id=post_id)
-    
-    await callback.message.edit_text(
-        f"✏️ <b>Редактирование поста #{post_id}</b>\n\n"
-        f"<b>Текущий текст:</b>\n{post.get('body', 'Пусто')}\n\n"
-        "Напишите новый текст:"
+    await message.answer(
+        "🔧 <b>Админ-панель TERION</b>\n\n"
+        "Выберите действие:",
+        reply_markup=get_admin_keyboard(),
+        parse_mode="HTML"
     )
+
+
+# === ОБРАБОТЧИКИ КНОПОК ===
+@admin_router.callback_query(F.data == "admin_menu")
+async def admin_menu(callback: CallbackQuery, state: FSMContext):
+    """Возврат в главное меню"""
+    if not check_admin(callback.from_user.id):
+        await callback.answer("⛔ Нет доступа")
+        return
     
-    await state.set_state(AdminStates.waiting_for_new_caption)
+    await state.clear()
+    await callback.message.edit_text(
+        "🔧 <b>Админ-панель TERION</b>\n\n"
+        "Выберите действие:",
+        reply_markup=get_admin_keyboard(),
+        parse_mode="HTML"
+    )
     await callback.answer()
 
 
-@admin_router.message(AdminStates.waiting_for_new_caption)
-async def save_edited_caption(message: Message, state: FSMContext):
-    """Сохранение отредактированного текста"""
-    data = await state.get_data()
-    post_id = data.get('edit_post_id')
+@admin_router.callback_query(F.data == "admin_add_resource")
+async def admin_add_resource(callback: CallbackQuery):
+    """Добавление ресурса - выбор типа"""
+    if not check_admin(callback.from_user.id):
+        await callback.answer("⛔ Нет доступа")
+        return
     
-    if message.text:
-        # Обновляем пост
-        await db.update_content_plan_entry(
-            post_id=post_id,
-            body=message.text
+    await callback.message.edit_text(
+        "➕ <b>Добавить ресурс</b>\n\n"
+        "Выберите тип ресурса:",
+        reply_markup=get_resource_type_keyboard(),
+        parse_mode="HTML"
+    )
+    await callback.answer()
+
+
+@admin_router.callback_query(F.data.startswith("admin_type:"))
+async def admin_select_type(callback: CallbackQuery, state: FSMContext):
+    """Выбор типа ресурса - запрашиваем ссылку"""
+    if not check_admin(callback.from_user.id):
+        await callback.answer("⛔ Нет доступа")
+        return
+    
+    resource_type = callback.data.split(":")[1]
+    await state.update_data(resource_type=resource_type)
+    
+    type_name = "Telegram чат" if resource_type == "telegram" else "VK группа"
+    
+    await callback.message.edit_text(
+        f"➕ <b>Добавить {type_name}</b>\n\n"
+        f"Отправьте ссылку на {type_name.lower()}:\n\n"
+        f"Примеры:\n"
+        f"• TG: t.me/c/1849161015/1\n"
+        f"• VK: vk.com/himki",
+        reply_markup=get_back_to_admin(),
+        parse_mode="HTML"
+    )
+    await state.set_state(AdminStates.wait_resource_link)
+    await callback.answer()
+
+
+@admin_router.message(AdminStates.wait_resource_link)
+async def admin_save_resource(message: Message, state: FSMContext):
+    """Сохранение ресурса"""
+    data = await state.get_data()
+    resource_type = data.get("resource_type")
+    link = message.text.strip()
+    
+    # Простая валидация
+    if resource_type == "telegram" and "t.me" not in link:
+        await message.answer("❌ Неверная ссылка Telegram", reply_markup=get_back_to_admin())
+        return
+    elif resource_type == "vk" and "vk.com" not in link:
+        await message.answer("❌ Неверная ссылка VK", reply_markup=get_back_to_admin())
+        return
+    
+    # Сохраняем в БД
+    try:
+        await db.connect()  # Убедимся что БД подключена
+        resource_id = await db.add_target_resource(resource_type, link)
+        
+        await message.answer(
+            f"✅ <b>Ресурс добавлен!</b>\n\n"
+            f"Тип: {resource_type}\n"
+            f"Ссылка: {link}",
+            reply_markup=get_admin_keyboard(),
+            parse_mode="HTML"
         )
-        
-        await message.answer(f"✅ Текст поста #{post_id} обновлён!")
+    except Exception as e:
+        logger.error(f"Error adding resource: {e}")
+        await message.answer(f"❌ Ошибка: {e}", reply_markup=get_back_to_admin())
     
     await state.clear()
 
 
-@admin_router.callback_query(F.data.startswith("delete_post:"))
-async def delete_post(callback: CallbackQuery):
-    """Удаление поста"""
-    post_id = int(callback.data.replace("delete_post:", ""))
-    
-    await db.delete_post(post_id)
-    
-    await callback.message.edit_text(
-        f"❌ Пост #{post_id} удалён"
-    )
-    await callback.answer()
-
-
-@admin_router.callback_query(F.data.startswith("publish_post:"))
-async def publish_post(callback: CallbackQuery, bot):
-    """Публикация поста в ТГ и ВК"""
-    post_id = int(callback.data.replace("publish_post:", ""))
-    
-    # Получаем пост
-    posts = await db.get_draft_posts()
-    post = next((p for p in posts if p['id'] == post_id), None)
-    
-    if not post:
-        await callback.message.edit_text("❌ Пост не найден")
-        await callback.answer()
+@admin_router.callback_query(F.data == "admin_list_resources")
+async def admin_list_resources(callback: CallbackQuery):
+    """Список ресурсов"""
+    if not check_admin(callback.from_user.id):
+        await callback.answer("⛔ Нет доступа")
         return
     
     try:
-        # Публикуем в ТГ
-        from config import TERION_CHANNEL_ID, DOM_GRAND_CHANNEL_ID
-        import os
+        await db.connect()
+        resources = await db.get_target_resources(active_only=False)
         
-        channel_key = post.get('channel', 'terion')
-        channel_map = {
-            'terion': ('ТЕРИОН', int(TERION_CHANNEL_ID)),
-            'dom_grand': ('ДОМ ГРАНД', int(DOM_GRAND_CHANNEL_ID)),
-            'both': ('ТГ + ВК', int(TERION_CHANNEL_ID))
-        }
-        channel_name, chat_id = channel_map.get(channel_key, ('ТЕРИОН', int(TERION_CHANNEL_ID)))
-        
-        # Форматируем текст
-        title = post.get('title', '') or ''
-        body = post.get('body', '') or ''
-        cta = post.get('cta', '') or ''
-        
-        tg_text = f"<b>{title}</b>\n\n{body}\n\n{cta}" if title else f"{body}\n\n{cta}"
-        
-        # Публикуем в ТГ
-        if post.get('image_url'):
-            await bot.send_photo(
-                chat_id=chat_id,
-                photo=post['image_url'],
-                caption=tg_text,
-                parse_mode='HTML'
-            )
+        if not resources:
+            text = "📋 <b>Список ресурсов</b>\n\nРесурсов пока нет."
         else:
-            await bot.send_message(
-                chat_id=chat_id,
-                text=tg_text,
-                parse_mode='HTML'
-            )
+            text = "📋 <b>Список ресурсов</b>\n\n"
+            for r in resources:
+                status = "✅" if r['is_active'] else "❌"
+                text += f"{status} #{r['id']} {r['type']}\n"
+                text += f"   {r['link']}\n\n"
         
-        # Публикуем в ВК если выбран "both"
-        vk_posted = False
-        if channel_key == 'both' and vk_service.vk_token:
-            vk_text = f"{title}\n\n{body}\n\n{cta}" if title else f"{body}\n\n{cta}"
-            
-            if post.get('image_url'):
-                image_path = post['image_url']
-                if image_path.startswith('http'):
-                    vk_post_id = await vk_service.post(vk_text)
-                else:
-                    vk_post_id = await vk_service.post_with_photos(vk_text, [image_path])
-            else:
-                vk_post_id = await vk_service.post(vk_text)
-            
-            vk_posted = vk_post_id is not None
+        builder = InlineKeyboardBuilder()
+        builder.button(text="◀️ Админ-панель", callback_data="admin_menu")
         
-        # Обновляем статус в БД
-        await db.mark_as_published(post_id)
-        
-        # Обновляем сообщение
-        vk_status = "✅ ВКонтакте" if vk_posted else "⏭️ ВК не выбран"
         await callback.message.edit_text(
-            f"✅ Пост #{post_id} опубликован!\n\n"
-            f"📍 Канал: {channel_name}\n"
-            f"✅ Telegram: OK\n"
-            f"{vk_status}"
+            text,
+            reply_markup=builder.as_markup(),
+            parse_mode="HTML"
         )
-        
-        logger.info(f"✅ Пост #{post_id} опубликован: {channel_name}")
-        
     except Exception as e:
-        logging.error(f"Ошибка публикации поста #{post_id}: {e}")
-        await callback.message.edit_text(
-            f"❌ Ошибка публикации: {e}"
-        )
+        await callback.message.answer(f"❌ Ошибка: {e}")
     
     await callback.answer()
 
 
-@admin_router.message(F.text == "📊 Статистика")
-async def stats(message: Message):
-    """Статистика постов"""
-    if message.from_user.id != ADMIN_ID:
+@admin_router.callback_query(F.data == "admin_keywords")
+async def admin_keywords(callback: CallbackQuery):
+    """Меню ключевых слов"""
+    if not check_admin(callback.from_user.id):
+        await callback.answer("⛔ Нет доступа")
         return
     
-    posts = await db.get_draft_posts()
-    published = [p for p in posts if p.get('status') == 'published']
-    
-    await message.answer(
-        f"📊 <b>Статистика</b>\n\n"
-        f"📝 Черновиков: {len(posts)}\n"
-        f"✅ Опубликовано: {len(published)}"
+    await callback.message.edit_text(
+        "🔑 <b>Ключевые слова</b>\n\n"
+        "Настройка слов для мониторинга:",
+        reply_markup=get_keywords_keyboard(),
+        parse_mode="HTML"
     )
+    await callback.answer()
 
 
-# Обработка команды /upload_photo
-@admin_router.message(F.text == "/upload_photo")
-async def cmd_upload_photo(message: Message, state: FSMContext):
-    """Команда загрузки фото"""
-    await start_upload_photo(message, state)
+@admin_router.callback_query(F.data == "admin_add_keyword")
+async def admin_add_keyword(callback: CallbackQuery, state: FSMContext):
+    """Добавить ключевое слово"""
+    if not check_admin(callback.from_user.id):
+        await callback.answer("⛔ Нет доступа")
+        return
+    
+    await callback.message.edit_text(
+        "🔑 <b>Добавить ключевое слово</b>\n\n"
+        "Введите слово или фразу:",
+        reply_markup=get_back_to_admin(),
+        parse_mode="HTML"
+    )
+    await state.set_state(AdminStates.wait_keyword)
+    await callback.answer()
 
 
-# Обработка команды /my_posts
-@admin_router.message(F.text == "/my_posts")
-async def cmd_my_posts(message: Message):
-    """Команда показа черновиков"""
-    await my_posts(message)
+@admin_router.message(AdminStates.wait_keyword)
+async def admin_save_keyword(message: Message, state: FSMContext):
+    """Сохранение ключевого слова"""
+    keyword = message.text.strip()
+    
+    if len(keyword) < 2:
+        await message.answer("❌ Слово слишком короткое", reply_markup=get_back_to_admin())
+        return
+    
+    try:
+        await db.connect()
+        await db.add_spy_keyword(keyword)
+        
+        await message.answer(
+            f"✅ <b>Ключевое слово добавлено!</b>\n\n"
+            f"Слово: {keyword}",
+            reply_markup=get_keywords_keyboard(),
+            parse_mode="HTML"
+        )
+    except Exception as e:
+        logger.error(f"Error adding keyword: {e}")
+        await message.answer(f"❌ Ошибка: {e}", reply_markup=get_back_to_admin())
+    
+    await state.clear()
 
 
-# Обработка команды /stats
-@admin_router.message(F.text == "/stats")
-async def cmd_stats(message: Message):
-    """Команда статистики"""
-    await stats(message)
+@admin_router.callback_query(F.data == "admin_list_keywords")
+async def admin_list_keywords(callback: CallbackQuery):
+    """Список ключевых слов"""
+    if not check_admin(callback.from_user.id):
+        await callback.answer("⛔ Нет доступа")
+        return
+    
+    try:
+        await db.connect()
+        keywords = await db.get_spy_keywords(active_only=False)
+        
+        if not keywords:
+            text = "🔑 <b>Ключевые слова</b>\n\nСлов пока нет."
+        else:
+            text = "🔑 <b>Ключевые слова</b>\n\n"
+            for kw in keywords:
+                status = "✅" if kw['is_active'] else "❌"
+                text += f"{status} #{kw['id']} {kw['keyword']}\n"
+        
+        builder = InlineKeyboardBuilder()
+        builder.button(text="◀️ Назад", callback_data="admin_keywords")
+        
+        await callback.message.edit_text(
+            text,
+            reply_markup=builder.as_markup(),
+            parse_mode="HTML"
+        )
+    except Exception as e:
+        await callback.message.answer(f"❌ Ошибка: {e}")
+    
+    await callback.answer()
+
+
+@admin_router.callback_query(F.data == "admin_back")
+async def admin_back(callback: CallbackQuery, state: FSMContext):
+    """Назад - сбрасываем состояние"""
+    await state.clear()
+    await cmd_admin(callback.message, state)
+    await callback.answer()
