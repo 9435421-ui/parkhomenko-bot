@@ -8,7 +8,7 @@ load_dotenv()
 
 # === TELEGRAM BOT TOKENS ===
 BOT_TOKEN = os.getenv("BOT_TOKEN")  # ТЕРИОН (Антон)
-CONTENT_BOT_TOKEN = os.getenv("CONTENT_BOT_TOKEN")  # ДОМ ГРАНД (Контент)
+CONTENT_BOT_TOKEN = os.getenv("CONTENT_BOT_TOKEN")  # ДОМ ГРАНД
 
 # === VK ===
 VK_TOKEN = os.getenv("VK_TOKEN")
@@ -18,6 +18,12 @@ VK_GROUP_ID = int(os.getenv("VK_GROUP_ID", "235569022"))
 CHANNEL_ID_TERION = int(os.getenv("CHANNEL_ID_TERION", "-1003612599428"))
 CHANNEL_ID_DOM_GRAD = int(os.getenv("CHANNEL_ID_DOM_GRAD", "-1002628548032"))
 NOTIFICATIONS_CHANNEL_ID = int(os.getenv("NOTIFICATIONS_CHANNEL_ID", "-1003471218598"))
+
+# === CHANNEL NAMES ===
+CHANNEL_NAMES = {
+    "terion": "TERION",
+    "dom_grand": "ДОМ ГРАНД"
+}
 
 # === WORKING GROUP (ОБСУЖДЕНИЕ) ===
 LEADS_GROUP_CHAT_ID = int(os.getenv("LEADS_GROUP_CHAT_ID", "-1003370698977"))
