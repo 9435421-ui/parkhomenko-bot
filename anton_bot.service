@@ -6,7 +6,7 @@ After=network.target
 Type=simple
 User=root
 WorkingDirectory=/root/PARKHOMENKO_BOT
-ExecStart=/root/PARKHOMENKO_BOT/venv/bin/python main.py
+ExecStart=/root/PARKHOMENKO_BOT/venv/bin/python run_all.py
 Restart=always
 RestartSec=10
 
