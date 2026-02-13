@@ -63,6 +63,27 @@ async def main():
         except Exception as e:
             logger.error(f"❌ Рабочая группа: {e}")
         
+        # Проверка VK
+        from config import VK_TOKEN, VK_GROUP_ID
+        if VK_TOKEN and VK_GROUP_ID:
+            try:
+                import aiohttp
+                async with aiohttp.ClientSession() as session:
+                    async with session.get(
+                        "https://api.vk.com/method/groups.getById",
+                        params={"access_token": VK_TOKEN, "v": "5.199", "group_ids": VK_GROUP_ID}
+                    ) as resp:
+                        data = await resp.json()
+                        if "response" in data and data["response"]:
+                            group_name = data["response"][0].get("name", "VK")
+                            logger.info(f"✅ Интеграция VK ({group_name}): OK")
+                        else:
+                            logger.warning("⚠️ Интеграция VK: группа не найдена")
+            except Exception as e:
+                logger.warning(f"⚠️ Интеграция VK: {e}")
+        else:
+            logger.warning("⚠️ Интеграция VK: токен или group_id не настроены")
+        
         # Проверка топиков (пробуем отправить тестовое сообщение и удалить)
         for thread_id, name in [
             (THREAD_ID_DRAFTS, "Черновики"),

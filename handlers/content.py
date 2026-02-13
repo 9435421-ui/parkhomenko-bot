@@ -44,7 +44,8 @@ from config import (
     YANDEX_ART_ENABLED,
     VK_TOKEN,
     VK_GROUP_ID,
-    VK_QUIZ_LINK
+    VK_QUIZ_LINK,
+    CHANNEL_NAMES
 )
 
 logger = logging.getLogger(__name__)
@@ -74,7 +75,7 @@ async def global_menu_handler(message: Message, state: FSMContext):
     elif text == "📰 Новость":
         await news_start(message, state)
     elif text == "📋 Интерактивный План":
-        await reply_menu_plan(message, state)
+        await plan_start(message, state)
     elif text == "📝 Быстрый текст":
         await quick_start(message, state)
 
@@ -383,13 +384,24 @@ def get_main_menu() -> ReplyKeyboardMarkup:
 
 def get_preview_keyboard(post_id: int, has_image: bool = False) -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
-    builder.button(text="🚀 Опубликовать везде", callback_data=f"pub_all:{post_id}")
-    builder.button(text="📱 Только TG", callback_data=f"pub_tg:{post_id}")
+    builder.button(text="🚀 Опубликовать: TERION", callback_data=f"pub_terion:{post_id}")
+    builder.button(text="🏘 Опубликовать: ДОМ ГРАНД", callback_data=f"pub_dom_grnd:{post_id}")
     builder.button(text="🌐 Только VK", callback_data=f"pub_vk:{post_id}")
     builder.button(text="🗑 В черновики", callback_data=f"draft:{post_id}")
     builder.button(text="✏️ Редактировать", callback_data=f"edit:{post_id}")
     builder.button(text="❌ Отмена", callback_data="cancel")
-    builder.adjust(1, 2, 2, 1)
+    builder.adjust(1, 1, 1, 1, 1)
+    return builder.as_markup()
+
+
+def get_queue_keyboard(post_id: int) -> InlineKeyboardMarkup:
+    """Кнопки для меню Очередь постов"""
+    builder = InlineKeyboardBuilder()
+    builder.button(text="🚀 Опубликовать: TERION", callback_data=f"pub_terion:{post_id}")
+    builder.button(text="🏘 Опубликовать: ДОМ ГРАНД", callback_data=f"pub_dom_grnd:{post_id}")
+    builder.button(text="🗑 В черновики", callback_data=f"draft:{post_id}")
+    builder.button(text="❌ Отмена", callback_data="cancel")
+    builder.adjust(1, 1, 1, 1)
     return builder.as_markup()
 
 
@@ -963,6 +975,111 @@ async def ai_text_handler(message: Message, state: FSMContext):
 
 # === ПУБЛИКАЦИЯ ===
 
+import re
+
+
+def clean_html_for_vk(text: str) -> str:
+    """Очистка HTML-разметки для ВК"""
+    # Удаляем теги <b>, </b>, <i>, </i>, <u>, </u>
+    text = re.sub(r'</?b>', '', text)
+    text = re.sub(r'</?i>', '', text)
+    text = re.sub(r'</?u>', '', text)
+    text = re.sub(r'</?strong>', '', text)
+    text = re.sub(r'</?em>', '', text)
+    # Удаляем <a href="...">...</a> - оставляем только текст ссылки
+    text = re.sub(r'<a href="[^"]*">([^<]*)</a>', r'\1', text)
+    # Удаляем остальные теги
+    text = re.sub(r'</?[^>]+>', '', text)
+    # Удаляем лишние переносы строк
+    text = re.sub(r'\n{3,}', '\n\n', text)
+    return text.strip()
+
+
+async def send_post(bot: Bot, channel_id: int, post: dict, channel_name: str) -> tuple[bool, str]:
+    """Отправка поста в канал и возврат результата"""
+    text = post['body']
+    if VK_QUIZ_LINK not in text:
+        text += f"\n\n📍 <a href='{VK_QUIZ_LINK}'>Пройти квиз</a>"
+    
+    try:
+        if post.get("image_url"):
+            msg = await bot.send_photo(channel_id, post["image_url"], text, parse_mode="HTML")
+        else:
+            msg = await bot.send_message(channel_id, text, parse_mode="HTML")
+        
+        # Формируем ссылку на пост
+        if msg.chat.username:
+            link = f"https://t.me/{msg.chat.username}/{msg.message_id}"
+        else:
+            link = f"https://t.me/c/{str(channel_id).replace('-100', '')}/{msg.message_id}"
+        
+        return True, link
+    except Exception as e:
+        return False, str(e)
+
+
+@content_router.callback_query(F.data.startswith("pub_terion:"))
+async def publish_terion(callback: CallbackQuery, state: FSMContext):
+    """Публикация только в TERION"""
+    post_id = int(callback.data.split(":")[1])
+    post = await db.get_content_post(post_id)
+    
+    if not post:
+        await callback.answer("❌ Пост не найден")
+        return
+    
+    await callback.answer("🚀 Публикую в TERION...")
+    
+    success, result = await send_post(callback.bot, CHANNEL_ID_TERION, post, "TERION")
+    
+    if success:
+        await db.update_content_post(post_id, status="published")
+        await callback.message.edit_text(
+            f"✅ <b>Опубликовано в TERION</b>\n\n🔗 <a href='{result}'>Ссылка на пост</a>",
+            reply_markup=get_main_menu(),
+            parse_mode="HTML"
+        )
+    else:
+        await callback.message.edit_text(
+            f"❌ <b>Ошибка публикации в TERION</b>\n\n{result}",
+            reply_markup=get_main_menu(),
+            parse_mode="HTML"
+        )
+    
+    await state.clear()
+
+
+@content_router.callback_query(F.data.startswith("pub_dom_grnd:"))
+async def publish_dom_grnd(callback: CallbackQuery, state: FSMContext):
+    """Публикация только в ДОМ ГРАНД"""
+    post_id = int(callback.data.split(":")[1])
+    post = await db.get_content_post(post_id)
+    
+    if not post:
+        await callback.answer("❌ Пост не найден")
+        return
+    
+    await callback.answer("🚀 Публикую в ДОМ ГРАНД...")
+    
+    success, result = await send_post(callback.bot, CHANNEL_ID_DOM_GRAD, post, "ДОМ ГРАНД")
+    
+    if success:
+        await db.update_content_post(post_id, status="published")
+        await callback.message.edit_text(
+            f"✅ <b>Опубликовано в ДОМ ГРАНД</b>\n\n🔗 <a href='{result}'>Ссылка на пост</a>",
+            reply_markup=get_main_menu(),
+            parse_mode="HTML"
+        )
+    else:
+        await callback.message.edit_text(
+            f"❌ <b>Ошибка публикации в ДОМ ГРАНД</b>\n\n{result}",
+            reply_markup=get_main_menu(),
+            parse_mode="HTML"
+        )
+    
+    await state.clear()
+
+
 @content_router.callback_query(F.data.startswith("pub_all:"))
 async def publish_all(callback: CallbackQuery, state: FSMContext):
     post_id = int(callback.data.split(":")[1])
@@ -1056,16 +1173,26 @@ async def publish_vk_only(callback: CallbackQuery, state: FSMContext):
     post_id = int(callback.data.split(":")[1])
     post = await db.get_content_post(post_id)
     
-    text = post['body']
+    # Очищаем HTML для ВК
+    text = clean_html_for_vk(post['body'])
     if VK_QUIZ_LINK not in text:
-        text += f"\n\n📍 <a href='{VK_QUIZ_LINK}'>Пройти квиз</a>"
+        text += f"\n\n📍 Пройти квиз: {VK_QUIZ_LINK}"
     
     try:
         image_bytes = await download_photo(callback.bot, post["image_url"]) if post.get("image_url") else None
         vk_id = await vk_publisher.post_with_photo(text, image_bytes) if image_bytes else await vk_publisher.post_text_only(text)
         
         await db.update_content_post(post_id, status="published")
-        await callback.message.edit_text(f"✅ <b>VK:</b> post{vk_id}" if vk_id else "❌ Ошибка VK", reply_markup=get_main_menu(), parse_mode="HTML")
+        
+        vk_link = f"https://vk.com/wall-{VK_GROUP_ID}_{vk_id}" if vk_id else None
+        if vk_link:
+            await callback.message.edit_text(
+                f"✅ <b>Опубликовано в VK</b>\n\n🔗 <a href='{vk_link}'>Ссылка на пост</a>",
+                reply_markup=get_main_menu(),
+                parse_mode="HTML"
+            )
+        else:
+            await callback.message.edit_text("❌ Ошибка VK", reply_markup=get_main_menu(), parse_mode="HTML")
     except Exception as e:
         await callback.message.edit_text(f"❌ Ошибка: {e}", reply_markup=get_main_menu())
     
