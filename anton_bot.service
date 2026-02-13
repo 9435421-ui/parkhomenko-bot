@@ -1,0 +1,22 @@
+[Unit]
+Description=TERION Bot - Telegram Bot for Renovations
+After=network.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/root/PARKHOMENKO_BOT
+ExecStart=/root/PARKHOMENKO_BOT/venv/bin/python main.py
+Restart=always
+RestartSec=10
+
+# Environment variables
+Environment=PYTHONUNBUFFERED=1
+
+# Logging
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=anton_bot
+
+[Install]
+WantedBy=multi-user.target
