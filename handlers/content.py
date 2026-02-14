@@ -1263,6 +1263,44 @@ async def back_to_menu(callback: CallbackQuery, state: FSMContext):
     await state.clear()
     await callback.message.edit_text("🎯 <b>TERION Content Bot</b>", reply_markup=get_back_btn(), parse_mode="HTML")
 
+@content_router.callback_query(F.data.startswith("queue_img_"))
+async def queue_img_handler(callback: CallbackQuery):
+    post_id = int(callback.data.split("_")[-1])
+    await callback.answer("🎨 Генерирую обложку для поста...")
+    # Логика генерации и отправки превью
+    from services.image_generator import image_generator
+    from database import db
+    
+    post = await db.get_post_by_id(post_id)
+    if post:
+        image_bytes = await image_generator.generate_cover(post.get('title', 'Перепланировка'))
+        if image_bytes:
+            from aiogram.types import BufferedInputFile
+            photo = BufferedInputFile(image_bytes, filename="cover.jpg")
+            await callback.message.answer_photo(photo=photo, caption=f"🖼 Обложка для поста #{post_id}")
+        else:
+            await callback.message.answer("❌ Ошибка генерации")
+
+@content_router.callback_query(F.data.startswith("queue_pub_"))
+async def queue_pub_handler(callback: CallbackQuery):
+    post_id = int(callback.data.split("_")[-1])
+    await callback.answer("📢 Публикую пост...")
+    from services.publisher import publisher
+    from database import db
+    
+    post = await db.get_post_by_id(post_id)
+    if post:
+        results = await publisher.publish_all(post.get('text', ''))
+        await callback.message.answer(f"✅ Опубликовано! Результаты: {results}")
+
+@content_router.callback_query(F.data.startswith("queue_del_"))
+async def queue_del_handler(callback: CallbackQuery):
+    post_id = int(callback.data.split("_")[-1])
+    from database import db
+    # await db.delete_post(post_id) # Предполагаем наличие метода
+    await callback.answer("🗑 Пост удален (имитация)")
+    await callback.message.delete()
+
 
 @content_router.message(ContentStates.photo_upload)
 async def wrong_photo(message: Message):

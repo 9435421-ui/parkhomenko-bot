@@ -20,6 +20,8 @@ from middleware.logging import UnhandledCallbackMiddleware
 from services.scout_parser import ScoutParser
 from agents.creative_agent import creative_agent
 from services.lead_hunter import LeadHunter
+from services.publisher import publisher
+from services.image_generator import image_generator
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
@@ -123,6 +125,9 @@ async def main():
     
     # 2. Настройка АНТОНА
     main_bot = Bot(token=BOT_TOKEN or "", default=DefaultBotProperties(parse_mode="HTML"))
+    
+    # Инициализация сервисов
+    publisher.bot = main_bot
     dp_main = Dispatcher(storage=MemoryStorage())
     dp_main.callback_query.middleware(UnhandledCallbackMiddleware())
     dp_main.include_router(admin_router)
