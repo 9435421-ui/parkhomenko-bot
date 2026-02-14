@@ -184,65 +184,37 @@ class ScoutParser:
     # === TELEGRAM PARSING ===
 
     async def parse_telegram(self) -> List[ScoutPost]:
-        """
-        Парсинг Telegram каналов.
-        
-        Требует настройки Telethon client.
-        """
-        if not self.enabled:
-            logger.info("🔍 Scout Telegram: выключен")
-            return []
-        
-        logger.info(f"🔍 Сканирование {len(self.tg_channels)} TG каналов...")
-        
-        # TODO: Реализовать с помощью Telethon
-        # Для этого нужно:
-        # 1. Подключить Telethon client
-        # 2. Авторизоваться по номеру телефона
-        # 3. Получить последние посты из каналов
-        # 4. Проверить на ключевые слова
-        # 5. Оставить комментарий с предложением помощи
+        from telethon import TelegramClient
+        from config import API_ID, API_HASH
         
         posts = []
+        # Используем существующую сессию антона
+        client = TelegramClient('anton_parser', API_ID, API_HASH)
         
-        # Пример реализации (закомментировано, требует настройки):
-        """
-        from telethon import TelegramClient
-        
-        client = TelegramClient(
-            'scout_session',
-            self.telegram_api_id,
-            self.telegram_api_hash
-        )
-        
-        await client.start(phone=self.telegram_phone)
-        
+        await client.connect()
+        if not await client.is_user_authorized():
+            logger.error("❌ Антон не авторизован в Telegram!")
+            return []
+
         for channel in self.tg_channels:
             try:
-                async for message in client.iter_messages(channel['id'], limit=20):
-                    if self.detect_lead(message.text or ""):
+                # Берем последние 15 сообщений
+                async for message in client.iter_messages(channel['id'], limit=15):
+                    if message.text and self.detect_lead(message.text):
                         post = ScoutPost(
                             source_type="telegram",
                             source_name=channel['name'],
-                            source_id=channel['id'],
+                            source_id=str(channel['id']),
                             post_id=str(message.id),
-                            text=message.text or "",
-                            url=f"https://t.me/{channel['name']}/{message.id}",
-                            published_at=message.date,
+                            text=message.text,
+                            url=f"https://t.me/c/{str(channel['id'])[4:]}/{message.id}"
                         )
                         posts.append(post)
-                        
-                        # Оставляем комментарий
-                        await self._send_telegram_comment(
-                            channel['id'],
-                            message.id,
-                            self.generate_outreach_message("telegram", channel['geo'])
-                        )
+                        # Здесь можно добавить авто-комментарий, если есть доступ
             except Exception as e:
-                logger.error(f"❌ Ошибка канала {channel['name']}: {e}")
-        """
+                logger.error(f"❌ Ошибка парсинга ТГ {channel['name']}: {e}")
         
-        logger.info(f"🔍 TG: найдено {len(posts)} постов с лидами")
+        await client.disconnect()
         return posts
 
     async def _send_telegram_comment(self, channel_id: str, message_id: int, text: str):
