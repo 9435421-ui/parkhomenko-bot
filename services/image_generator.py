@@ -196,3 +196,67 @@ class ImageGenerator:
 
 # Singleton
 image_generator = ImageGenerator()
+
+
+# === Функция с Retry логикой и финансовым расчетом ===
+
+async def generate_creative(payload: str, attempt: int = 1) -> tuple:
+    """
+    Генерация с retry логикой и финансовым расчетом.
+    
+    Returns:
+        tuple: (image_url, cost, service_name)
+    """
+    from utils import router_ai
+    
+    # Пытаемся через Router API (Nano Banana)
+    try:
+        logger.info(f"🎨 Генерация через Router AI (попытка {attempt})...")
+        # Используем router_ai для генерации
+        response = await router_ai.generate_response(
+            user_prompt=f"Generate image: {payload}",
+            max_tokens=2000
+        )
+        
+        # Если получили URL изображения
+        if response and "http" in response:
+            cost = 2.50  # Рублей за генерацию
+            return response, cost, "Router (Banana)"
+        
+        raise Exception("Router AI не вернул изображение")
+    
+    except Exception as e:
+        logger.error(f"❌ Router AI ошибка: {e}")
+        
+        if attempt == 1:
+            # Сбой — ждем 5 сек и переключаем на Яндекс
+            logger.warning("⚠️ Сбой Router. Перехожу на Яндекс АРТ...")
+            await asyncio.sleep(5)
+            return await generate_yandex_creative(payload)
+
+    # Если не удалось — возвращаем None
+    return None, 0, "Failed"
+
+
+async def generate_yandex_creative(payload: str) -> tuple:
+    """
+    Резервный канал (Яндекс АРТ)
+    """
+    try:
+        logger.info("🎨 Генерация через Яндекс АРТ...")
+        
+        # Используем image_generator
+        image_data = await image_generator.generate_cover(payload, style="modern")
+        
+        if image_data:
+            cost = 1.80  # Рублей за генерацию
+            # Возвращаем base64 как URL (для совместимости)
+            import base64
+            b64 = base64.b64encode(image_data).decode()
+            return f"data:image/jpeg;base64,{b64}", cost, "Yandex ART"
+        
+        raise Exception("Yandex Art не сгенерировал изображение")
+        
+    except Exception as e:
+        logger.error(f"❌ Yandex ART ошибка: {e}")
+        return None, 0, "Yandex ART Failed"
