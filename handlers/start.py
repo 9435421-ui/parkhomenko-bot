@@ -2,7 +2,7 @@
 Главное меню - старт квиза
 """
 from aiogram import Router, F
-from aiogram.types import Message, CallbackQuery
+from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton, BufferedInputFile
 from aiogram.filters import CommandStart
 from aiogram.fsm.context import FSMContext
 import logging
@@ -12,6 +12,8 @@ from handlers.quiz import QuizStates
 from config import ADMIN_ID
 from database import db
 from agents.creative_agent import creative_agent
+from services.publisher import publisher
+from services.image_generator import image_generator
 
 logger = logging.getLogger(__name__)
 router = Router()
@@ -68,16 +70,87 @@ async def spy_topics_handler(message: Message, state: FSMContext):
     await message.answer("🔍 <b>Шпион ищет трендовые темы...</b>", parse_mode="HTML")
     
     try:
-        topics = await creative_agent.scout_topics(count=5)
+        topics = await creative_agent.scout_topics(count=3)
+        # Сохраняем темы в состояние для последующего использования
+        await state.update_data(scout_topics=topics)
         
         text = "🕵️‍♂️ <b>Темы от Шпиона</b>\n\n"
+        buttons = []
         for i, topic in enumerate(topics, 1):
             text += f"{i}. <b>{topic['title']}</b>\n"
             text += f"   💡 {topic['insight']}\n\n"
+            
+            buttons.append([
+                InlineKeyboardButton(text=f"🖼 Обложка #{i}", callback_data=f"gen_img_{i}"),
+                InlineKeyboardButton(text=f"📢 Опубликовать #{i}", callback_data=f"pub_topic_{i}")
+            ])
         
-        await message.answer(text, parse_mode="HTML")
+        buttons.append([InlineKeyboardButton(text="🔄 Новые темы", callback_data="refresh_spy")])
+        keyboard = InlineKeyboardMarkup(inline_keyboard=buttons)
+        
+        await message.answer(text, reply_markup=keyboard, parse_mode="HTML")
     except Exception as e:
+        logger.error(f"Error in spy_topics_handler: {e}")
         await message.answer(f"❌ Ошибка: {e}")
+
+@router.callback_query(F.data == "refresh_spy")
+async def refresh_spy_handler(callback: CallbackQuery, state: FSMContext):
+    await callback.answer("🔄 Обновляю темы...")
+    await spy_topics_handler(callback.message, state)
+
+@router.callback_query(F.data.startswith("gen_img_"))
+async def generate_image_handler(callback: CallbackQuery, state: FSMContext):
+    topic_idx = int(callback.data.split("_")[-1]) - 1
+    data = await state.get_data()
+    topics = data.get("scout_topics", [])
+    
+    if topic_idx >= len(topics):
+        await callback.answer("❌ Тема не найдена")
+        return
+        
+    topic = topics[topic_idx]
+    await callback.answer("🎨 Генерирую обложку...")
+    
+    image_bytes = await image_generator.generate_from_topic(topic)
+    if image_bytes:
+        photo = BufferedInputFile(image_bytes, filename="cover.jpg")
+        await callback.message.answer_photo(
+            photo=photo,
+            caption=f"🖼 Обложка для темы:\n<b>{topic['title']}</b>",
+            parse_mode="HTML"
+        )
+    else:
+        await callback.message.answer("❌ Не удалось сгенерировать обложку")
+
+@router.callback_query(F.data.startswith("pub_topic_"))
+async def publish_topic_handler(callback: CallbackQuery, state: FSMContext):
+    topic_idx = int(callback.data.split("_")[-1]) - 1
+    data = await state.get_data()
+    topics = data.get("scout_topics", [])
+    
+    if topic_idx >= len(topics):
+        await callback.answer("❌ Тема не найдена")
+        return
+        
+    topic = topics[topic_idx]
+    await callback.answer("📢 Публикую...")
+    
+    # Генерируем обложку перед публикацией
+    image_bytes = await image_generator.generate_from_topic(topic)
+    
+    post_text = f"📌 <b>{topic['title']}</b>\n\n{topic['insight']}\n\n#перепланировка #согласование #терион"
+    
+    results = await publisher.publish_all(post_text, image_bytes)
+    
+    success_count = sum(1 for r in results.values() if r)
+    total_count = len(results)
+    
+    await callback.message.answer(
+        f"✅ <b>Публикация завершена!</b>\n"
+        f"Успешно: {success_count}/{total_count}\n"
+        f"Каналы: {', '.join(results.keys())}",
+        parse_mode="HTML"
+    )
 
 
 @router.message(F.text == "📅 Очередь постов")
