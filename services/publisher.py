@@ -37,13 +37,20 @@ class Publisher:
             logger.error(f"❌ Ошибка публикации в TG: {e}")
             return False
     
-    async def publish_to_vk(self, text: str, image: bytes = None) -> bool:
+    # Подпись эксперта для VK
+    VK_SIGNATURE = "\n\n---\n🏡 Эксперт: Юлия Пархоменко\n#TERION #ИИ_Ассистент"
+    
+    async def publish_to_vk(self, text: str, image: bytes = None, add_signature: bool = True) -> bool:
         """Публикация в VK группу через API"""
         if not self.vk_token or not self.vk_group:
             logger.warning("⚠️ VK_TOKEN или VK_GROUP_ID не настроены")
             return False
             
         try:
+            # Добавляем подпись эксперта
+            if add_signature:
+                text = text + self.VK_SIGNATURE
+            
             # Базовая публикация текста
             url = "https://api.vk.com/method/wall.post"
             params = {
