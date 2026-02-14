@@ -43,12 +43,11 @@ def get_admin_menu() -> ReplyKeyboardMarkup:
 
 def get_content_menu() -> InlineKeyboardMarkup:
     """Меню создания контента"""
-    markup = InlineKeyboardMarkup()
-    markup.add(InlineKeyboardButton("📸 С фото", callback_data="menu:photo"))
-    markup.add(InlineKeyboardButton("📝 Только текст", callback_data="menu:editor"))
-    markup.add(InlineKeyboardButton("🎨 Сгенерировать картинку", callback_data="menu:create"))
-    markup.add(InlineKeyboardButton("◀️ Назад", callback_data="content_back"))
-    return markup
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="📝 Текст", callback_data="content_text")],
+        [InlineKeyboardButton(text="🖼 Фото", callback_data="content_photo")],
+        [InlineKeyboardButton(text="⬅️ Назад", callback_data="back_to_menu")]
+    ])
 
 
 def get_back_btn() -> InlineKeyboardMarkup:
