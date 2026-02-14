@@ -151,6 +151,22 @@ class Database:
                 )
             """)
             
+            # Таблица истории контента (финансовый трекинг)
+            await cursor.execute("""
+                CREATE TABLE IF NOT EXISTS content_history (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    post_text TEXT,
+                    image_url TEXT,
+                    model_used VARCHAR(50),
+                    cost_rub DECIMAL(10, 2),
+                    platform VARCHAR(20),
+                    channel VARCHAR(50),
+                    post_id INTEGER,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    is_archived BOOLEAN DEFAULT FALSE
+                )
+            """)
+            
             await self.conn.commit()
     
     async def get_or_create_user(self, user_id: int, username: Optional[str] = None,
@@ -467,6 +483,74 @@ class Database:
             await cursor.execute(
                 "UPDATE spy_keywords SET is_active = ? WHERE id = ?",
                 (is_active, keyword_id)
+            )
+            await self.conn.commit()
+
+
+# === CONTENT HISTORY (Финансовый трекинг) ===
+    async def add_content_history(
+        self,
+        post_text: str = None,
+        image_url: str = None,
+        model_used: str = None,
+        cost_rub: float = None,
+        platform: str = None,
+        channel: str = None,
+        post_id: int = None
+    ) -> int:
+        """Добавить запись в историю контента"""
+        async with self.conn.cursor() as cursor:
+            await cursor.execute(
+                """INSERT INTO content_history 
+                   (post_text, image_url, model_used, cost_rub, platform, channel, post_id)
+                   VALUES (?, ?, ?, ?, ?, ?, ?)""",
+                (post_text, image_url, model_used, cost_rub, platform, channel, post_id)
+            )
+            await self.conn.commit()
+            return cursor.lastrowid
+    
+    async def get_content_history(self, limit: int = 100) -> List[Dict]:
+        """Получить историю контента"""
+        async with self.conn.cursor() as cursor:
+            await cursor.execute(
+                "SELECT * FROM content_history ORDER BY created_at DESC LIMIT ?",
+                (limit,)
+            )
+            return [dict(row) for row in await cursor.fetchall()]
+    
+    async def get_financial_report(self, months: int = 6) -> Dict:
+        """Получить финансовый отчет за N месяцев"""
+        async with self.conn.cursor() as cursor:
+            await cursor.execute(
+                """SELECT 
+                    model_used,
+                    COUNT(*) as count,
+                    SUM(cost_rub) as total_cost
+                   FROM content_history 
+                   WHERE created_at >= datetime('now', '-' || ? || ' months')
+                   GROUP BY model_used""",
+                (months,)
+            )
+            rows = await cursor.fetchall()
+            return {row['model_used']: {'count': row['count'], 'total': row['total_cost']} for row in rows}
+    
+    async def cleanup_old_texts(self):
+        """Удалить тексты старше 3 месяцев"""
+        async with self.conn.cursor() as cursor:
+            await cursor.execute(
+                """UPDATE content_history 
+                   SET post_text = NULL 
+                   WHERE created_at < datetime('now', '-3 months') 
+                   AND post_text IS NOT NULL"""
+            )
+            await self.conn.commit()
+    
+    async def cleanup_old_history(self):
+        """Полная очистка записей старше 12 месяцев"""
+        async with self.conn.cursor() as cursor:
+            await cursor.execute(
+                """DELETE FROM content_history 
+                   WHERE created_at < datetime('now', '-12 months')"""
             )
             await self.conn.commit()
 
