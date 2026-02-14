@@ -17,6 +17,7 @@ from handlers import content_router
 from database import db
 from utils import kb
 from middleware.logging import UnhandledCallbackMiddleware
+from services.scout_parser import ScoutParser
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
