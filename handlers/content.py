@@ -1148,14 +1148,25 @@ async def publish_all(callback: CallbackQuery, state: FSMContext):
     await state.clear()
 
 
+# Подпись эксперта для постов
+EXPERT_SIGNATURE = "\n\n---\n🏡 Эксперт: Юлия Пархоменко\nКомпания: TERION"
+
+
 @content_router.callback_query(F.data.startswith("pub_tg:"))
 async def publish_tg_only(callback: CallbackQuery, state: FSMContext):
+    """Публикация в Telegram с подписью эксперта"""
     post_id = int(callback.data.split(":")[1])
     post = await db.get_content_post(post_id)
     
+    if not post:
+        await callback.answer("❌ Пост не найден")
+        return
+    
+    # Добавляем подпись эксперта
     text = post['body']
     if VK_QUIZ_LINK not in text:
         text += f"\n\n📍 <a href='{VK_QUIZ_LINK}'>Пройти квиз</a>"
+    text += EXPERT_SIGNATURE
     
     try:
         if post.get("image_url"):
@@ -1170,6 +1181,14 @@ async def publish_tg_only(callback: CallbackQuery, state: FSMContext):
     
     await db.update_content_post(post_id, status="published")
     await callback.message.edit_text(f"✅ <b>TG:</b>\n" + "\n".join(results), reply_markup=get_back_btn(), parse_mode="HTML")
+    
+    # Отправляем финансовый лог админу
+    cost = 2.50  # Примерная стоимость
+    await callback.bot.send_message(
+        chat_id=LEADS_GROUP_CHAT_ID,
+        text=f"💰 Пост #{post_id} опубликован в Telegram. Списано: {cost}₽"
+    )
+    
     await state.clear()
 
 
