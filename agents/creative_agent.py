@@ -11,6 +11,13 @@ from utils import router_ai, yandex_gpt
 
 logger = logging.getLogger(__name__)
 
+# Стиль для генерации изображений
+STYLE_PRESET = (
+    "Architectural minimalism: clean lines, professional floor plans, "
+    "combined with hyper-realistic interior photography. High-end real estate aesthetic. "
+    "No prices in text. Focal point on spatial solutions."
+)
+
 
 class CreativeAgent:
     """Агент для поиска трендовых тем и трендсеттинга"""

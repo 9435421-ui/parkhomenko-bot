@@ -16,16 +16,11 @@ def get_contact_keyboard():
     )
 
 
-def get_main_menu(user_id: int = None) -> ReplyKeyboardMarkup:
-    """Главное меню для пользователей"""
-    markup = ReplyKeyboardMarkup(
-        keyboard=[
-            [KeyboardButton(text="📝 Записаться на консультацию")],
-            [KeyboardButton(text="💬 Задать вопрос")],
-        ],
-        resize_keyboard=True
-    )
-    return markup
+def get_main_menu(user_id: int | None = None) -> ReplyKeyboardMarkup:
+    """Очищенное меню для ТЕРИОН — только самое важное"""
+    # Оставляем пустую или минимальную клавиатуру, 
+    # так как вход в квиз и консультации будет через прямые ссылки
+    return ReplyKeyboardMarkup(keyboard=[], resize_keyboard=True)
 
 
 def get_admin_menu() -> ReplyKeyboardMarkup:
@@ -52,33 +47,33 @@ def get_content_menu() -> InlineKeyboardMarkup:
 
 def get_back_btn() -> InlineKeyboardMarkup:
     """Кнопка назад"""
-    return InlineKeyboardMarkup().add(
-        InlineKeyboardButton("◀️ Назад", callback_data="content_back")
-    )
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton("◀️ Назад", callback_data="content_back")]
+    ])
 
 
 def get_approve_post_btn(post_id: int) -> InlineKeyboardMarkup:
     """Кнопки аппрува поста"""
-    markup = InlineKeyboardMarkup()
-    markup.add(
-        InlineKeyboardButton("✅ Одобрить", callback_data=f"approve_{post_id}"),
-        InlineKeyboardButton("❌ Отклонить", callback_data=f"reject_{post_id}")
-    )
-    markup.add(InlineKeyboardButton("✏️ Редактировать", callback_data=f"edit_{post_id}"))
-    return markup
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [
+            InlineKeyboardButton("✅ Одобрить", callback_data=f"approve_{post_id}"),
+            InlineKeyboardButton("❌ Отклонить", callback_data=f"reject_{post_id}")
+        ],
+        [InlineKeyboardButton("✏️ Редактировать", callback_data=f"edit_{post_id}")]
+    ])
 
 
 def get_urgent_btn() -> InlineKeyboardMarkup:
     """Кнопки срочной публикации"""
-    markup = InlineKeyboardMarkup()
-    markup.add(
-        InlineKeyboardButton("🚀 Опубликовать сейчас", callback_data="urgent_publish"),
-        InlineKeyboardButton("📝 Доработать", callback_data="urgent_edit")
-    )
-    return markup
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [
+            InlineKeyboardButton("🚀 Опубликовать сейчас", callback_data="urgent_publish"),
+            InlineKeyboardButton("📝 Доработать", callback_data="urgent_edit")
+        ]
+    ])
 
 
-async def send_main_menu(bot: Bot, chat_id: int, user_id: int = None):
+async def send_main_menu(bot: Bot, chat_id: int, user_id: int | None = None):
     """Отправка главного меню"""
     text = (
         "🏢 <b>Вас приветствует компания ТЕРИОН!</b>\n\n"
@@ -88,7 +83,8 @@ async def send_main_menu(bot: Bot, chat_id: int, user_id: int = None):
         "Выберите действие:"
     )
     
-    if str(user_id) == str(ADMIN_ID) or user_id == ADMIN_ID:
+    admin_id = int(os.getenv("ADMIN_ID", ADMIN_ID))
+    if user_id and user_id == admin_id:
         markup = get_admin_menu()
         text = (
             "🎯 <b>Главное меню</b>\n\n"
@@ -105,5 +101,5 @@ async def send_main_menu(bot: Bot, chat_id: int, user_id: int = None):
 
 def is_admin(user_id: int) -> bool:
     """Проверка админа"""
-    admin_id = os.getenv("ADMIN_ID", ADMIN_ID)
-    return str(user_id) == str(admin_id)
+    admin_id = int(os.getenv("ADMIN_ID", ADMIN_ID))
+    return user_id == admin_id
