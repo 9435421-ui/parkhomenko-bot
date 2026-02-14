@@ -18,6 +18,8 @@ from database import db
 from utils import kb
 from middleware.logging import UnhandledCallbackMiddleware
 from services.scout_parser import ScoutParser
+from agents.creative_agent import creative_agent
+from services.lead_hunter import LeadHunter
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
@@ -108,12 +110,14 @@ async def main():
     scheduler = AsyncIOScheduler()
     scheduler.add_job(lambda: logger.info("⏰ Проверка постов"), 'cron', hour=12)
     
-    # Scout Parser Integration
-    scout = ScoutParser()
-    # Telegram раз в 2 часа
-    scheduler.add_job(scout.parse_telegram, 'interval', hours=2)
-    # VK раз в 3 часа (чтобы не забанили)
-    scheduler.add_job(scout.parse_vk, 'interval', hours=3)
+    # Lead Hunter & Creative Agent Integration
+    hunter = LeadHunter()
+    
+    # Поиск клиентов раз в 2 часа
+    scheduler.add_job(hunter.hunt, 'interval', hours=2)
+    
+    # Поиск идей для контента раз в 6 часов
+    scheduler.add_job(creative_agent.scout_topics, 'interval', hours=6)
     
     scheduler.start()
     

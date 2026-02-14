@@ -1,5 +1,5 @@
 """
-Scout Agent — поиск трендовых тем для контента.
+Creative Agent — генерация идей контента и анализ трендов.
 Специализация: Согласование перепланировок и переустройства помещений.
 """
 import os
@@ -12,7 +12,7 @@ from utils import router_ai, yandex_gpt
 logger = logging.getLogger(__name__)
 
 
-class ScoutAgent:
+class CreativeAgent:
     """Агент для поиска трендовых тем и трендсеттинга"""
     
     def __init__(self):
@@ -27,7 +27,7 @@ class ScoutAgent:
         Returns:
             List[Dict] - список тем с описанием
         """
-        logger.info("🔍 ScoutAgent: поиск трендовых тем...")
+        logger.info("🔍 CreativeAgent: поиск трендовых тем...")
         
         topics = []
         
@@ -111,7 +111,7 @@ class ScoutAgent:
                     logger.warning(f"Router AI error: {e}")
                 
         except Exception as e:
-            logger.error(f"Scout AI error: {e}")
+            logger.error(f"Creative AI error: {e}")
         
         # Fallback — возвращаем шаблонную тему
         return {
@@ -145,33 +145,17 @@ class ScoutAgent:
         ]
         return ideas
 
+    async def analyze_trends(self):
+        """Анализ трендов в перепланировках"""
+        logger.info("📊 CreativeAgent: анализ трендов...")
+        # В будущем здесь будет AI-анализ новостей
+        return ["Цифровизация согласований", "Ужесточение требований к мокрым зонам", "Легализация через суд"]
+
 
 # Singleton
-scout_agent = ScoutAgent()
+creative_agent = CreativeAgent()
 
 
 async def scout_content_ideas(count: int = 3) -> List[Dict]:
     """Удобная функция для поиска тем"""
-    return await scout_agent.scout_topics(count)
-
-
-if __name__ == "__main__":
-    import asyncio
-    
-    async def test():
-        print("🧪 Тест Scout Agent\n")
-        
-        topics = await scout_content_ideas(3)
-        
-        for i, topic in enumerate(topics, 1):
-            print(f"📌 Тема {i}: {topic['title']}")
-            print(f"   Почему: {topic['why']}")
-            print(f"   Инсайт: {topic['insight']}")
-            print(f"   Источник: {topic['source']}\n")
-        
-        print("\n💡 Идеи для контента:")
-        ideas = await scout_agent.generate_content_ideas()
-        for i, idea in enumerate(ideas, 1):
-            print(f"  {i}. {idea}")
-    
-    asyncio.run(test())
+    return await creative_agent.scout_topics(count)
