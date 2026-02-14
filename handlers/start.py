@@ -11,7 +11,7 @@ from keyboards.main_menu import get_main_menu, get_admin_menu, get_urgent_btn, g
 from handlers.quiz import QuizStates
 from config import ADMIN_ID
 from database import db
-from agents.scout_agent import scout_agent
+from agents.creative_agent import creative_agent
 
 logger = logging.getLogger(__name__)
 router = Router()
@@ -40,7 +40,7 @@ async def handle_start(message: Message, state: FSMContext):
         await message.answer(
             "🎯 <b>Главное меню</b>\n\n"
             "🛠 <b>Создать пост</b> — Текст → Фото → Публикация\n"
-            "🕵️‍♂️ <b>Темы от Шпиона</b> — ScoutAgent ищет идеи\n"
+            "🕵️‍♂️ <b>Темы от Шпиона</b> — CreativeAgent ищет идеи\n"
             "📅 <b>Очередь постов</b> — что запланировано на 12:00\n\n"
             "Выберите:",
             reply_markup=get_admin_menu()
@@ -64,11 +64,11 @@ async def create_post_handler(message: Message, state: FSMContext):
 
 @router.message(F.text == "🕵️‍♂️ Темы от Шпиона")
 async def spy_topics_handler(message: Message, state: FSMContext):
-    """Темы от Шпиона - ScoutAgent"""
+    """Темы от Шпиона - CreativeAgent"""
     await message.answer("🔍 <b>Шпион ищет трендовые темы...</b>", parse_mode="HTML")
     
     try:
-        topics = await scout_agent.scout_topics(count=5)
+        topics = await creative_agent.scout_topics(count=5)
         
         text = "🕵️‍♂️ <b>Темы от Шпиона</b>\n\n"
         for i, topic in enumerate(topics, 1):
