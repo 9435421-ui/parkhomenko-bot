@@ -1261,7 +1261,7 @@ async def cancel_handler(callback: CallbackQuery, state: FSMContext):
 async def back_to_menu(callback: CallbackQuery, state: FSMContext):
     await callback.answer()
     await state.clear()
-    await callback.message.answer("🎯 <b>TERION Content Bot</b>", reply_markup=get_main_menu(), parse_mode="HTML")
+    await callback.message.edit_text("🎯 <b>TERION Content Bot</b>", reply_markup=get_back_btn(), parse_mode="HTML")
 
 
 @content_router.message(ContentStates.photo_upload)

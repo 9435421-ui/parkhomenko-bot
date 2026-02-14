@@ -12,8 +12,8 @@ from aiogram.client.default import DefaultBotProperties
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
 from config import BOT_TOKEN, CONTENT_BOT_TOKEN
-from handlers.main_bot import start_router, quiz_router, dialog_router
-from handlers import content_router, admin_router
+from handlers import admin_router, start_router, quiz_router, dialog_router
+from handlers import content_router
 from database import db
 from utils import kb
 from middleware.logging import UnhandledCallbackMiddleware
@@ -106,13 +106,24 @@ async def main():
     
     scheduler = AsyncIOScheduler()
     scheduler.add_job(lambda: logger.info("⏰ Проверка постов"), 'cron', hour=12)
+    
+    # Scout Parser Integration
+    scout = ScoutParser()
+    # Telegram раз в 2 часа
+    scheduler.add_job(scout.parse_telegram, 'interval', hours=2)
+    # VK раз в 3 часа (чтобы не забанили)
+    scheduler.add_job(scout.parse_vk, 'interval', hours=3)
+    
     scheduler.start()
     
     # 2. Настройка АНТОНА
     main_bot = Bot(token=BOT_TOKEN or "", default=DefaultBotProperties(parse_mode="HTML"))
     dp_main = Dispatcher(storage=MemoryStorage())
     dp_main.callback_query.middleware(UnhandledCallbackMiddleware())
-    dp_main.include_routers(admin_router, start_router, quiz_router, dialog_router)
+    dp_main.include_router(admin_router)
+    dp_main.include_router(start_router)
+    dp_main.include_router(quiz_router)
+    dp_main.include_router(dialog_router)
     
     # 3. Настройка ДОМ ГРАНД
     content_bot = Bot(token=CONTENT_BOT_TOKEN or "", default=DefaultBotProperties(parse_mode="HTML"))

@@ -91,3 +91,19 @@ SPY_KEYWORDS = [
     "Пархоменко",
     "Терион",
 ]
+
+# === SCOUT PARSER ===
+SCOUT_ENABLED = os.getenv("SCOUT_ENABLED", "true") == "true"
+
+# Telegram
+SCOUT_TG_CHANNELS = os.getenv("SCOUT_TG_CHANNELS", "").split(",")
+SCOUT_TG_KEYWORDS = ["перепланировка", "согласование", "узаконить"]
+
+# VK
+SCOUT_VK_GROUPS = os.getenv("SCOUT_VK_GROUPS", "").split(",")  # ID групп
+SCOUT_VK_KEYWORDS = ["перепланировка", "согласование", "перепланировка квартиры", "узаконить перепланировку"]
+SCOUT_VK_REGIONS = ["Химки", "Красногорск", "Север Москвы", "Северо-Запад Москвы", "Новые Химки"]
+
+# Лимиты (чтобы не забанили)
+SCOUT_VK_COMMENTS_PER_HOUR = 5  # Макс комментариев в час
+SCOUT_VK_MESSAGES_PER_HOUR = 3  # Макс
