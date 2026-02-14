@@ -1,42 +1,60 @@
 import os
 import logging
 import aiohttp
-import asyncio
 import base64
+import asyncio
 from typing import Optional
 
 logger = logging.getLogger(__name__)
 
 class ImageGenerator:
-    """Генерация обложек для постов"""
+    """Генерация обложек через Yandex Art или Router AI (fallback)"""
     
     def __init__(self):
         self.yandex_key = os.getenv('YANDEX_API_KEY')
         self.folder_id = os.getenv('FOLDER_ID')
         self.router_key = os.getenv('ROUTER_AI_KEY')
+        
+        # Проверяем доступность сервисов
         self.use_yandex = bool(self.yandex_key and self.folder_id)
+        self.use_router = bool(self.router_key)
+        
+        if not self.use_yandex and not self.use_router:
+            logger.warning("⚠️ Нет API ключей для генерации изображений!")
         
     async def generate_cover(self, title: str, style: str = "modern") -> Optional[bytes]:
         """
-        Генерация обложки на основе заголовка
+        Генерация обложки с fallback на Router AI
         """
         prompt = self._create_prompt(title, style)
-        logger.info(f"🎨 Генерирую обложку для: {title} (стиль: {style})")
         
+        # Пробуем Yandex Art первым
         if self.use_yandex:
-            return await self._generate_yandex(prompt)
-        else:
-            # Fallback на Router AI (Gemini/OpenAI)
-            return await self._generate_router(prompt)
+            try:
+                result = await self._generate_yandex(prompt)
+                if result:
+                    return result
+                logger.warning("Yandex Art не сработал, пробуем Router AI...")
+            except Exception as e:
+                logger.error(f"Yandex Art ошибка: {e}")
+        
+        # Fallback на Router AI
+        if self.use_router:
+            try:
+                return await self._generate_router(prompt)
+            except Exception as e:
+                logger.error(f"Router AI ошибка: {e}")
+        
+        return None
     
     def _create_prompt(self, title: str, style: str) -> str:
-        """Создание промпта для генерации"""
-        base = f"Professional real estate cover image for a blog post. No text on image. {title}. "
+        """Создание промпта"""
+        base = f"Professional real estate cover image for article: '{title}'. "
         
         styles = {
-            'modern': 'Modern Moscow architecture, clean lines, blue and white colors, professional architectural photography, high resolution, 4k',
-            'classic': 'Classic Russian architecture, warm colors, elegant design, professional photography',
-            'minimal': 'Minimalist design, white background, geometric shapes, clean composition'
+            'modern': 'Modern Moscow architecture, clean minimalist design, blue and white colors, professional photography style, high quality',
+            'classic': 'Classic Russian architecture, warm golden colors, elegant traditional design, professional photo',
+            'minimal': 'Minimalist white background, geometric shapes, modern typography space, clean design'
         }
         
         return base + styles.get(style, styles['modern'])
@@ -53,69 +71,127 @@ class ImageGenerator:
             
             payload = {
                 "modelUri": f"art://{self.folder_id}/yandex-art/latest",
-                "messages": [{"text": prompt, "weight": 1}],
+                "messages": [
+                    {
+                        "text": prompt,
+                        "weight": 1.0
+                    }
+                ],
                 "generationOptions": {
-                    "seed": os.urandom(4).hex(),
+                    "seed": 42,
                     "aspectRatio": {
-                        "widthRatio": 1,
-                        "heightRatio": 1
+                        "widthRatio": 16,
+                        "heightRatio": 9
                     }
                 }
             }
             
             async with aiohttp.ClientSession() as session:
+                # Отправляем запрос
                 async with session.post(url, headers=headers, json=payload) as resp:
+                    if resp.status != 200:
+                        text = await resp.text()
+                        logger.error(f"Yandex Art HTTP {resp.status}: {text[:200]}")
+                        return None
+                    
                     result = await resp.json()
                     operation_id = result.get('id')
                     
-                if not operation_id:
-                    logger.error(f"❌ Yandex Art: No operation ID in response: {result}")
-                    return None
-                
-                # Ожидание результата
-                for _ in range(30): # 60 секунд максимум
-                    await asyncio.sleep(2)
-                    op_url = f"https://llm.api.cloud.yandex.net/operations/{operation_id}"
-                    async with session.get(op_url, headers=headers) as resp:
-                        op_result = await resp.json()
-                        if op_result.get('done'):
-                            image_base64 = op_result.get('response', {}).get('image')
-                            if image_base64:
-                                return base64.b64decode(image_base64)
-                            break
-            
-            return None
+                    if not operation_id:
+                        logger.error(f"Yandex Art: нет operation_id в ответе: {result}")
+                        return None
+                    
+                    # Ждем результат
+                    return await self._get_yandex_result(session, operation_id, headers)
+                    
         except Exception as e:
-            logger.error(f"❌ Yandex generation error: {e}")
+            logger.error(f"Yandex Art exception: {e}")
             return None
     
+    async def _get_yandex_result(self, session, operation_id: str, headers: dict, max_attempts: int = 30) -> Optional[bytes]:
+        """Получение результата генерации"""
+        url = f"https://llm.api.cloud.yandex.net/operations/{operation_id}"
+        
+        for attempt in range(max_attempts):
+            try:
+                async with session.get(url, headers=headers) as resp:
+                    result = await resp.json()
+                    
+                    if result.get('done'):
+                        if 'response' in result and 'image' in result['response']:
+                            # Декодируем base64
+                            image_data = base64.b64decode(result['response']['image'])
+                            logger.info(f"✅ Yandex Art: изображение сгенерировано ({len(image_data)} bytes)")
+                            return image_data
+                        elif 'error' in result:
+                            logger.error(f"Yandex Art operation error: {result['error']}")
+                            return None
+                    
+                    # Ждем перед следующей попыткой
+                    await asyncio.sleep(2)
+                    
+            except Exception as e:
+                logger.error(f"Yandex Art polling error: {e}")
+                await asyncio.sleep(2)
+        
+        logger.error("Yandex Art: timeout waiting for result")
+        return None
+    
     async def _generate_router(self, prompt: str) -> Optional[bytes]:
-        """Генерация через Router AI (fallback)"""
-        if not self.router_key:
-            return None
-            
+        """
+        Fallback генерация через Router AI (NaNa Banana / ChatGPT Mini)
+        Используем модель для генерации изображений
+        """
         try:
-            # Пример для Gemini 1.5 Pro через Router AI
-            url = "https://openrouter.ai/api/v1/chat/completions"
+            # OpenRouter / Router AI images endpoint
+            url = "https://openrouter.ai/api/v1/images/generations"
+            
             headers = {
                 "Authorization": f"Bearer {self.router_key}",
                 "Content-Type": "application/json"
             }
             
-            # OpenRouter не генерирует изображения напрямую, 
-            # но мы можем использовать модели типа DALL-E или Stable Diffusion если они доступны
-            # Для примера оставим заглушку или используем конкретный эндпоинт если он есть
-            logger.warning("⚠️ Router AI image generation not fully implemented")
-            return None
+            payload = {
+                "model": "openai/dall-e-3",
+                "prompt": prompt,
+                "n": 1,
+                "size": "1024x1024"
+            }
+            
+            async with aiohttp.ClientSession() as session:
+                async with session.post(url, headers=headers, json=payload) as resp:
+                    if resp.status != 200:
+                        text = await resp.text()
+                        logger.error(f"Router AI HTTP {resp.status}: {text[:200]}")
+                        return None
+                    
+                    result = await resp.json()
+                    
+                    # Получаем URL изображения
+                    if 'data' in result and len(result['data']) > 0:
+                        image_url = result['data'][0].get('url')
+                        if image_url:
+                            # Скачиваем изображение
+                            async with session.get(image_url) as img_resp:
+                                if img_resp.status == 200:
+                                    image_data = await img_resp.read()
+                                    logger.info(f"✅ Router AI: изображение сгенерировано ({len(image_data)} bytes)")
+                                    return image_data
+                    
+                    logger.error(f"Router AI: нет изображения в ответе: {result}")
+                    return None
+                    
         except Exception as e:
-            logger.error(f"❌ Router AI generation error: {e}")
+            logger.error(f"Router AI exception: {e}")
             return None
     
     async def generate_from_topic(self, topic: dict, style: str = "modern") -> Optional[bytes]:
         """Генерация на основе темы от CreativeAgent"""
         title = topic.get('title', '')
         if not title:
-            title = topic.get('topic', 'Перепланировка квартиры')
+            title = topic.get('topic', 'Перепланировка')
+        
+        logger.info(f"🎨 Генерирую обложку для: {title} (стиль: {style})")
         return await self.generate_cover(title, style)
 
 # Singleton
