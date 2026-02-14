@@ -142,6 +142,12 @@ async def main():
     dp_content.include_routers(content_router)
     
     # 4. Параллельный запуск
+    logger.info("🚀 Очистка соединений и запуск polling...")
+    
+    # Сбрасываем все зависшие обновления, чтобы не было Conflict
+    await main_bot.delete_webhook(drop_pending_updates=True)
+    await content_bot.delete_webhook(drop_pending_updates=True)
+    
     await asyncio.gather(
         dp_main.start_polling(main_bot),
         dp_content.start_polling(content_bot)
