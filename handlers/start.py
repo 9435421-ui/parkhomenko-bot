@@ -28,16 +28,38 @@ GREETING_TEXT = (
 )
 
 
+def _get_start_arg(text: str) -> str | None:
+    """Параметр из /start (например: /start quiz → quiz)."""
+    if not text or not text.strip().startswith("/start"):
+        return None
+    parts = text.strip().split(maxsplit=1)
+    return parts[1].strip().lower() if len(parts) > 1 else None
+
+
 @router.message(CommandStart())
 async def handle_start(message: Message, state: FSMContext):
-    """Старт - показываем приветствие"""
+    """Старт: по ссылке с ?start=quiz сразу запускаем квиз, иначе — приветствие/меню."""
     user_id = message.from_user.id
-    logger.info(f"📨 Сообщение от: {user_id} (@{message.from_user.username})")
+    start_arg = _get_start_arg(message.text or "")
+    logger.info(f"📨 /start от: {user_id}, arg={start_arg!r}")
     
-    # Очищаем старые состояния
     await state.clear()
     
-    # Проверяем админ
+    # Ссылка из канала/поста: t.me/Bot?start=quiz → сначала согласие с ПД
+    if start_arg == "quiz":
+        await state.set_state(QuizStates.consent_pdp)
+        from handlers.quiz import get_consent_keyboard
+        await message.answer(
+            "📋 <b>Перед началом необходимо ваше согласие</b>\n\n"
+            "Нажимая кнопку ниже, вы даёте согласие на:\n"
+            "• обработку персональных данных;\n"
+            "• получение уведомлений и информационную переписку.\n\n"
+            "После этого мы запросим контакт для связи.",
+            reply_markup=get_consent_keyboard(),
+            parse_mode="HTML"
+        )
+        return
+    
     if str(user_id) == str(ADMIN_ID):
         await message.answer(
             "🎯 <b>Главное меню</b>\n\n"
@@ -198,15 +220,19 @@ async def urgent_handler(message: Message, state: FSMContext):
 
 @router.message(F.text == "📝 Записаться на консультацию")
 async def quiz_start(message: Message, state: FSMContext):
-    """Запуск квиза"""
-    from keyboards.main_menu import get_contact_keyboard
-    
+    """Запуск квиза: сначала согласие с ПД, затем контакт"""
     await state.clear()
+    from handlers.quiz import get_consent_keyboard
+    await state.set_state(QuizStates.consent_pdp)
     await message.answer(
-        GREETING_TEXT,
-        reply_markup=get_contact_keyboard()
+        "📋 <b>Перед началом необходимо ваше согласие</b>\n\n"
+        "Нажимая кнопку ниже, вы даёте согласие на:\n"
+        "• обработку персональных данных;\n"
+        "• получение уведомлений и информационную переписку.\n\n"
+        "После этого мы запросим контакт для связи.",
+        reply_markup=get_consent_keyboard(),
+        parse_mode="HTML"
     )
-    await state.set_state(QuizStates.greeting)
 
 
 @router.message(F.text == "💬 Задать вопрос")

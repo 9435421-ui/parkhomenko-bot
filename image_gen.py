@@ -25,7 +25,7 @@ async def generate(prompt: str) -> Optional[str]:
         URL изображения или None в случае ошибки
     """
     ENABLE_IMAGE_GEN = os.getenv("ENABLE_IMAGE_GENERATION", "false").lower() == "true"
-    ROUTER_AI_IMAGE_KEY = os.getenv("ROUTER_AI_IMAGE_KEY", "").strip()
+    ROUTER_AI_IMAGE_KEY = (os.getenv("ROUTER_AI_IMAGE_KEY") or os.getenv("ROUTER_AI_KEY") or "").strip()
     FLUX_MODEL = os.getenv("FLUX_MODEL", "flux-1-dev")
 
     if not ENABLE_IMAGE_GEN:
@@ -33,7 +33,7 @@ async def generate(prompt: str) -> Optional[str]:
         return None
 
     if not ROUTER_AI_IMAGE_KEY:
-        logger.error("ROUTER_AI_IMAGE_KEY не настроен в переменных окружения")
+        logger.error("ROUTER_AI_IMAGE_KEY / ROUTER_AI_KEY не настроен в переменных окружения")
         return None
 
     # API Router AI для генерации изображений

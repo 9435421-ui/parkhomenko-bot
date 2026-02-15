@@ -21,13 +21,19 @@ import tempfile
 import io
 import asyncio
 import re
+import time
 from datetime import datetime, timedelta
 from typing import Optional
+
+# Кэш шаблонов: 5 минут, чтобы не читать диск при каждом сообщении
+_TEMPLATE_CACHE_TTL = 300  # секунд
+_template_cache: dict = {}
 from PIL import Image
 import io
 
 from database import db
 from handlers.vk_publisher import VKPublisher
+from content_agent import ContentAgent
 from config import (
     CONTENT_BOT_TOKEN,
     CHANNEL_ID_TERION,
@@ -45,20 +51,66 @@ from config import (
     VK_TOKEN,
     VK_GROUP_ID,
     VK_QUIZ_LINK,
-    CHANNEL_NAMES
+    CHANNEL_NAMES,
+    CONTENT_HASHTAGS,
 )
 
 logger = logging.getLogger(__name__)
 content_router = Router()
 
+# Папка шаблонов контента (редактируемые Юлией без правки кода)
+_TEMPLATES_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "templates", "content")
+
+
+def _load_content_template(filename: str, default: str) -> str:
+    """Читает шаблон из templates/content/ с кэшем 5 мин; при ошибке возвращает default."""
+    now = time.time()
+    if filename in _template_cache:
+        content, expiry = _template_cache[filename]
+        if now < expiry:
+            return content
+    path = os.path.join(_TEMPLATES_DIR, filename)
+    try:
+        if os.path.exists(path):
+            with open(path, "r", encoding="utf-8") as f:
+                content = f.read()
+            _template_cache[filename] = (content, now + _TEMPLATE_CACHE_TTL)
+            return content
+        logger.warning(f"⚠️ Template {filename} not found, using default")
+    except Exception as e:
+        logger.warning(f"⚠️ Template {filename} not found, using default — {e}")
+    return default
+
+
+def _get_expert_signature() -> str:
+    """Подпись эксперта для постов (из signature.txt или дефолт)."""
+    default = "\n\n---\n🏡 Эксперт: Юлия Пархоменко\nКомпания: TERION"
+    return _load_content_template("signature.txt", default).rstrip("\n") or default
+
+
+def ensure_quiz_and_hashtags(text: str) -> str:
+    """Добавляет в пост ссылку на квиз и обязательные хэштеги, если их ещё нет."""
+    if not text or not text.strip():
+        return text
+    out = text.rstrip()
+    if VK_QUIZ_LINK not in out:
+        out += f"\n\n📍 <a href='{VK_QUIZ_LINK}'>Пройти квиз</a>"
+    if CONTENT_HASHTAGS and CONTENT_HASHTAGS.strip():
+        hashtag_line = CONTENT_HASHTAGS.strip()
+        if hashtag_line not in out:
+            out += f"\n\n{hashtag_line}"
+    return out
+
 # ГЛОБАЛЬНЫЕ ОБРАБОТЧИКИ МЕНЮ (всегда активны)
 @content_router.message(F.text.in_([
     "📸 Фото → Описание → Пост",
-    "🎨 ИИ-Визуал", 
+    "🎨 ИИ-Визуал",
     "📅 7 дней прогрева",
     "📰 Новость",
     "📋 Интерактивный План",
-    "📝 Быстрый текст"
+    "📝 Быстрый текст",
+    "💡 Интересный факт",
+    "🎉 Праздник РФ"
 ]))
 async def global_menu_handler(message: Message, state: FSMContext):
     """Глобальный обработчик меню — работает из любого состояния"""
@@ -78,6 +130,16 @@ async def global_menu_handler(message: Message, state: FSMContext):
         await plan_start(message, state)
     elif text == "📝 Быстрый текст":
         await quick_start(message, state)
+    elif text == "💡 Интересный факт":
+        await message.answer(
+            "💡 <b>Интересный факт</b>\n\nВведите тему (например: перепланировка в сталинках, МНИИТЭП, Жилищная инспекция):",
+            reply_markup=get_back_btn(),
+            parse_mode="HTML"
+        )
+        await state.set_state(ContentStates.ai_text)
+        await state.update_data(quick_prompt_prefix="fact")
+    elif text == "🎉 Праздник РФ":
+        await holiday_rf_start(message, state)
 
 # Инициализация VK
 vk_publisher = VKPublisher(VK_TOKEN, int(VK_GROUP_ID))
@@ -95,6 +157,7 @@ class ContentStates(StatesGroup):
     news_topic = State()
     ai_plan = State()          # Интерактивный план (дни + тема)
     quick_text = State()
+    holiday_rf = State()       # Поздравление с официальным праздником РФ
 
 
 # === AI CLIENTS ===
@@ -120,33 +183,46 @@ class YandexArtClient:
                 "aspectRatio": {"widthRatio": 16, "heightRatio": 9}
             }
         }
-        
+        op_base = "https://llm.api.cloud.yandex.net"
         try:
             async with aiohttp.ClientSession() as session:
                 async with session.post(
-                    "https://llm.api.cloud.yandex.net/foundationModels/v1/imageGeneration",
+                    f"{op_base}/foundationModels/v1/imageGenerationAsync",
                     headers=self.headers,
                     json=payload
                 ) as resp:
+                    body = await resp.text()
                     if resp.status != 200:
-                        logger.error(f"YandexART HTTP {resp.status}")
+                        logger.error(f"YandexART HTTP {resp.status}: {body[:300]}")
                         return None
-                    data = await resp.json()
+                    try:
+                        data = json.loads(body)
+                    except Exception:
+                        logger.error(f"YandexART invalid JSON: {body[:200]}")
+                        return None
                     op_id = data.get("id")
                     if not op_id:
+                        logger.warning(f"YandexART no operation id in response: {list(data.keys())}")
                         return None
-                    
-                    # Polling
-                    for i in range(30):
+                    # Polling результата (документация Yandex: operations на llm.api)
+                    for _ in range(30):
                         await asyncio.sleep(2)
-                        async with session.get(
-                            f"https://operation.api.cloud.yandex.net/operations/{op_id}",
-                            headers=self.headers
-                        ) as check:
-                            if check.status == 200:
-                                result = await check.json()
-                                if result.get("done"):
-                                    return result.get("response", {}).get("image")
+                        async with session.get(f"{op_base}/operations/{op_id}", headers=self.headers) as check:
+                            if check.status != 200:
+                                continue
+                            result = await check.json()
+                            if not result.get("done"):
+                                continue
+                            resp_obj = result.get("response") or {}
+                            img_b64 = resp_obj.get("image")
+                            if img_b64:
+                                return img_b64
+                            if result.get("error"):
+                                logger.error(f"YandexART operation error: {result.get('error')}")
+                                return None
+                            logger.warning(f"YandexART done but no image in response: {list(resp_obj.keys())}")
+                            return None
+            logger.error("YandexART timeout waiting for image")
         except Exception as e:
             logger.error(f"YandexART error: {e}")
         return None
@@ -221,7 +297,7 @@ class RouterAIClient:
             "model": "gemini-1.5-flash",
             "messages": [{
                 "role": "user",
-                "content": f"Generate image: {prompt}. Professional architectural photography, interior design, high quality, no text."
+                "content": f"Generate image: {prompt}. Professional architectural photography, interior design, high quality. No text, no words, no letters, no captions — image only."
             }],
             "max_tokens": 2000
         }
@@ -382,7 +458,8 @@ def get_main_menu() -> ReplyKeyboardMarkup:
         [KeyboardButton(text="📸 Фото → Описание → Пост")],
         [KeyboardButton(text="🎨 ИИ-Визуал"), KeyboardButton(text="📅 7 дней прогрева")],
         [KeyboardButton(text="📰 Новость"), KeyboardButton(text="📋 Интерактивный План")],
-        [KeyboardButton(text="📝 Быстрый текст")]
+        [KeyboardButton(text="📝 Быстрый текст"), KeyboardButton(text="💡 Интересный факт")],
+        [KeyboardButton(text="🎉 Праздник РФ")]
     ]
     return ReplyKeyboardMarkup(keyboard=kb, resize_keyboard=True)
 
@@ -391,6 +468,7 @@ def get_preview_keyboard(post_id: int, has_image: bool = False) -> InlineKeyboar
     builder = InlineKeyboardBuilder()
     builder.button(text="🚀 Опубликовать: TERION", callback_data=f"pub_terion:{post_id}")
     builder.button(text="🏘 Опубликовать: ДОМ ГРАНД", callback_data=f"pub_dom_grnd:{post_id}")
+    builder.button(text="📱 Опубликовать: MAX", callback_data=f"pub_max:{post_id}")
     builder.button(text="🌐 Только VK", callback_data=f"pub_vk:{post_id}")
     builder.button(text="🗑 В черновики", callback_data=f"draft:{post_id}")
     builder.button(text="✏️ Редактировать", callback_data=f"edit:{post_id}")
@@ -404,6 +482,7 @@ def get_queue_keyboard(post_id: int) -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
     builder.button(text="🚀 Опубликовать: TERION", callback_data=f"pub_terion:{post_id}")
     builder.button(text="🏘 Опубликовать: ДОМ ГРАНД", callback_data=f"pub_dom_grnd:{post_id}")
+    builder.button(text="📱 Опубликовать: MAX", callback_data=f"pub_max:{post_id}")
     builder.button(text="🗑 В черновики", callback_data=f"draft:{post_id}")
     builder.button(text="❌ Отмена", callback_data="cancel")
     builder.adjust(1, 1, 1, 1)
@@ -506,34 +585,6 @@ async def show_preview(message: Message, text: str, image_file_id: Optional[str]
     else:
         await message.answer(caption, reply_markup=kb, parse_mode="HTML")
     return post_id
-
-
-# === GLOBAL MENU ===
-
-@content_router.message(F.text.in_([
-    "📸 Фото → Описание → Пост",
-    "🎨 ИИ-Визуал",
-    "📅 Серия постов",
-    "📰 Новость",
-    "📋 Контент-план",
-    "📝 Быстрый текст"
-]))
-async def global_menu_handler(message: Message, state: FSMContext):
-    await state.clear()
-    text = message.text
-    
-    if text == "📸 Фото → Описание → Пост":
-        await photo_start(message, state)
-    elif text == "🎨 ИИ-Визуал":
-        await visual_select_model(message, state)
-    elif text == "📅 Серия постов":
-        await series_start(message, state)
-    elif text == "📰 Новость":
-        await news_start(message, state)
-    elif text == "📋 Контент-план":
-        await plan_start(message, state)
-    elif text == "📝 Быстрый текст":
-        await quick_start(message, state)
 
 
 # === 📸 ФОТО WORKFLOW ===
@@ -681,10 +732,18 @@ async def ai_visual_handler(message: Message, state: FSMContext):
         parse_mode="HTML"
     )
     
-    enhanced = f"{user_prompt}, professional architectural photography, interior design, high quality, detailed, no text, no watermarks"
+    enhanced = f"{user_prompt}, professional architectural photography, interior design, high quality, detailed. No text, no words, no letters, no captions, no watermarks — image only."
     
     image_b64 = await yandex_art.generate(enhanced) if model == 'yandex' else await router_ai.generate_image_gemini(enhanced)
-    
+    # Fallback: общий генератор (Yandex Async + OpenRouter DALL-E), если основная модель не сработала
+    if not image_b64:
+        try:
+            from services.image_generator import image_generator
+            image_bytes = await image_generator.generate_cover(enhanced)
+            if image_bytes:
+                image_b64 = base64.b64encode(image_bytes).decode()
+        except Exception as e:
+            logger.warning(f"Image generator fallback: {e}")
     if not image_b64:
         await message.answer(
             "❌ Ошибка генерации. Попробуйте другую модель или описание.",
@@ -769,14 +828,21 @@ async def ai_series_handler(message: Message, state: FSMContext):
         return
     
     await message.answer(f"⏳ <b>Генерирую {days} постов...</b>", parse_mode="HTML")
-    
-    prompt = (
-        f"Создай {days} постов для прогрева по теме «{topic}». "
-        f"Перепланировки, недвижимость, экспертный контент.\n\n"
-        f"Формат: День N: Заголовок\nТекст 80-120 слов\nПризыв к действию\n\n"
-        f"Тон: профессиональный, экспертный, московское бюро перепланировок. Избегай клише 'уникальный дизайн' и 'за 3 дня'. Используй юридические термины (Жилищная инспекция, проект, МНИИТЭП). Добавь эмодзи."
+
+    prompt_default = (
+        "Создай {days} постов для прогрева по теме «{topic}». "
+        "Перепланировки, недвижимость, экспертный контент.\n\n"
+        "Реальные кейсы для опоры (используй по возможности, не выдумывай):\n{cases}\n\n"
+        "Формат: День N: Заголовок\nТекст 80-120 слов\nПризыв к действию\n\n"
+        "Тон: профессиональный, экспертный, московское бюро перепланировок. Избегай клише 'уникальный дизайн' и 'за 3 дня'. Используй юридические термины (Жилищная инспекция, проект, МНИИТЭП). Добавь эмодзи."
     )
-    
+    prompt_tpl = _load_content_template("series_warmup_prompt.txt", prompt_default)
+    cases_content = _load_content_template("expert_cases.txt", "Здесь будут реальные кейсы Юлии.")
+    try:
+        prompt = prompt_tpl.format(days=days, topic=topic, cases=cases_content)
+    except KeyError:
+        prompt = prompt_default.format(days=days, topic=topic, cases=cases_content)
+
     result = await router_ai.generate(prompt, max_tokens=4000)
     
     if not result:
@@ -796,7 +862,8 @@ async def ai_series_handler(message: Message, state: FSMContext):
         chat_id=LEADS_GROUP_CHAT_ID,
         message_thread_id=THREAD_ID_DRAFTS,
         text=f"📅 <b>Серия {days} дней</b>\n\n<b>Тема:</b> {topic}\n\n{result[:1500]}...",
-        parse_mode="HTML"
+        parse_mode="HTML",
+        reply_markup=get_queue_keyboard(post_id)
     )
     
     await message.answer(
@@ -827,11 +894,19 @@ async def generate_series_images(callback: CallbackQuery, state: FSMContext):
     )
     
     for i in range(1, days + 1):
-        art_prompt = f"{topic}, день {i}, перепланировка, professional interior, modern design, no text"
+        art_prompt = f"{topic}, день {i}, перепланировка, professional interior, modern design. No text, no words, no letters, no captions — image only."
         
         await callback.message.answer(f"🎨 <b>День {i}...</b>", parse_mode="HTML")
         
         image_b64 = await yandex_art.generate(art_prompt) if model == 'yandex' else await router_ai.generate_image_gemini(art_prompt)
+        if not image_b64:
+            try:
+                from services.image_generator import image_generator
+                image_bytes_fb = await image_generator.generate_cover(art_prompt)
+                if image_bytes_fb:
+                    image_b64 = base64.b64encode(image_bytes_fb).decode()
+            except Exception as e:
+                logger.warning(f"Series image fallback day {i}: {e}")
         
         tmp_path = None
         if image_b64:
@@ -972,9 +1047,67 @@ async def ai_news_handler(message: Message, state: FSMContext):
     await state.update_data(post_id=post_id, text=news)
 
 
+# === 🎉 ПРАЗДНИК РФ ===
+
+# Официальные праздники РФ для поста в канал
+HOLIDAYS_RF = [
+    ("Новый год", "Новый год"),
+    ("23 февраля", "23 февраля, День защитника Отечества"),
+    ("8 Марта", "8 Марта, Международный женский день"),
+    ("1 Мая", "1 Мая, Праздник весны и труда"),
+    ("9 Мая", "9 Мая, День Победы"),
+    ("12 июня", "12 июня, День России"),
+    ("День строителя", "День строителя (второе воскресенье августа)"),
+    ("День народного единства", "4 ноября, День народного единства"),
+]
+
+async def holiday_rf_start(message: Message, state: FSMContext):
+    builder = InlineKeyboardBuilder()
+    for label, _ in HOLIDAYS_RF:
+        builder.button(text=label, callback_data=f"holiday_rf:{label}")
+    builder.adjust(2)
+    await message.answer(
+        "🎉 <b>Поздравление с официальным праздником РФ</b>\n\nВыберите праздник:",
+        reply_markup=builder.as_markup(),
+        parse_mode="HTML"
+    )
+    await state.set_state(ContentStates.holiday_rf)
+
+
+@content_router.callback_query(F.data.startswith("holiday_rf:"), ContentStates.holiday_rf)
+async def holiday_rf_selected(callback: CallbackQuery, state: FSMContext):
+    label = callback.data.split(":", 1)[1]
+    occasion = next((occ for btn_label, occ in HOLIDAYS_RF if btn_label == label), label)
+    await callback.answer(f"Пишу поздравление: {label}...")
+    await callback.message.edit_text(f"⏳ <b>Пишу поздравление с {label}...</b>", parse_mode="HTML")
+    try:
+        agent = ContentAgent()
+        post = await agent.generate_greeting_post(person_name=None, occasion=occasion)
+        body = (post.get("title") or "") + "\n\n" + (post.get("body") or "")
+        if not body.strip():
+            body = f"🎉 С праздником — {label}! Желаем мира, добра и уюта в вашем доме."
+        if VK_QUIZ_LINK not in body:
+            body += f"\n\n📍 @terion_bot — консультации по перепланировкам"
+        post_id = await db.add_content_post(
+            title=f"Праздник: {label}",
+            body=body,
+            cta="",
+            channel="holiday",
+            status="preview"
+        )
+        await show_preview(callback.message, body, post_id=post_id)
+        await state.set_state(ContentStates.preview_mode)
+        await state.update_data(post_id=post_id, text=body)
+    except Exception as e:
+        logger.exception("holiday_rf")
+        await callback.message.edit_text(f"❌ Ошибка: {e}", reply_markup=get_back_btn())
+        await state.clear()
+
+
 # === 📝 БЫСТРЫЙ ТЕКСТ ===
 
 async def quick_start(message: Message, state: FSMContext):
+    await state.update_data(quick_prompt_prefix=None)
     await message.answer(
         "📝 <b>Быстрый текст</b>\n\n"
         "Введите тему:",
@@ -987,14 +1120,21 @@ async def quick_start(message: Message, state: FSMContext):
 @content_router.message(ContentStates.ai_text)
 async def ai_text_handler(message: Message, state: FSMContext):
     topic = message.text
-    
-    await message.answer("⏳ <b>Пишу...</b>", parse_mode="HTML")
-    
-    prompt = (
-        f"Пост для TG на тему «{topic}». "
-        f"Экспертный, живой стиль. 100-150 слов. "
-        f"Эмодзи + призыв к консультации @terion_bot"
-    )
+    data = await state.get_data()
+    is_fact = data.get("quick_prompt_prefix") == "fact"
+    await message.answer("⏳ <b>Пишу...</b>" if not is_fact else "⏳ <b>Пишу интересный факт...</b>", parse_mode="HTML")
+
+    if is_fact:
+        prompt = (
+            f"Интересный факт для поста в TG на тему «{topic}». "
+            f"Короткая познавательная заметка, экспертный тон, 80-120 слов. Эмодзи. Без продаж, мягкий призыв к @terion_bot."
+        )
+    else:
+        prompt = (
+            f"Пост для TG на тему «{topic}». "
+            f"Экспертный, живой стиль. 100-150 слов. "
+            f"Эмодзи + призыв к консультации @terion_bot"
+        )
     
     text = await router_ai.generate(prompt)
     
@@ -1034,11 +1174,8 @@ def clean_html_for_vk(text: str) -> str:
 
 
 async def send_post(bot: Bot, channel_id: int, post: dict, channel_name: str) -> tuple[bool, str]:
-    """Отправка поста в канал и возврат результата"""
-    text = post['body']
-    if VK_QUIZ_LINK not in text:
-        text += f"\n\n📍 <a href='{VK_QUIZ_LINK}'>Пройти квиз</a>"
-    
+    """Отправка поста в канал: всегда ссылка на квиз + обязательные хэштеги."""
+    text = ensure_quiz_and_hashtags(post['body'])
     try:
         if post.get("image_url"):
             msg = await bot.send_photo(channel_id, post["image_url"], text, parse_mode="HTML")
@@ -1118,6 +1255,45 @@ async def publish_dom_grnd(callback: CallbackQuery, state: FSMContext):
     await state.clear()
 
 
+@content_router.callback_query(F.data.startswith("pub_max:"))
+async def publish_max(callback: CallbackQuery, state: FSMContext):
+    """Публикация в канал MAX.ru"""
+    post_id = int(callback.data.split(":")[1])
+    post = await db.get_content_post(post_id)
+
+    if not post:
+        await callback.answer("❌ Пост не найден")
+        return
+
+    await callback.answer("📱 Публикую в MAX...")
+
+    try:
+        agent = ContentAgent()
+        ok = await agent.post_to_max(post_id)
+        if ok:
+            await db.update_content_post(post_id, status="published")
+            await callback.message.edit_text(
+                "✅ <b>Опубликовано в MAX</b>\n\nПост отправлен в ваш канал на MAX.ru.",
+                reply_markup=get_back_btn(),
+                parse_mode="HTML"
+            )
+        else:
+            await callback.message.edit_text(
+                "❌ <b>Ошибка публикации в MAX</b>\n\nПроверьте MAX_DEVICE_TOKEN в .env и что канал создан в приложении MAX.",
+                reply_markup=get_back_btn(),
+                parse_mode="HTML"
+            )
+    except Exception as e:
+        logger.exception("pub_max error")
+        await callback.message.edit_text(
+            f"❌ <b>Ошибка публикации в MAX</b>\n\n{str(e)}",
+            reply_markup=get_back_btn(),
+            parse_mode="HTML"
+        )
+
+    await state.clear()
+
+
 @content_router.callback_query(F.data.startswith("pub_all:"))
 async def publish_all(callback: CallbackQuery, state: FSMContext):
     post_id = int(callback.data.split(":")[1])
@@ -1129,10 +1305,7 @@ async def publish_all(callback: CallbackQuery, state: FSMContext):
     
     await callback.answer("🚀 Публикую...")
     
-    text = post['body']
-    if VK_QUIZ_LINK not in text:
-        text += f"\n\n📍 <a href='{VK_QUIZ_LINK}'>Пройти квиз</a>"
-    
+    text = ensure_quiz_and_hashtags(post['body'])
     results = []
     
     # TG TERION
@@ -1181,26 +1354,17 @@ async def publish_all(callback: CallbackQuery, state: FSMContext):
     await state.clear()
 
 
-# Подпись эксперта для постов
-EXPERT_SIGNATURE = "\n\n---\n🏡 Эксперт: Юлия Пархоменко\nКомпания: TERION"
-
-
 @content_router.callback_query(F.data.startswith("pub_tg:"))
 async def publish_tg_only(callback: CallbackQuery, state: FSMContext):
     """Публикация в Telegram с подписью эксперта"""
     post_id = int(callback.data.split(":")[1])
     post = await db.get_content_post(post_id)
-    
+
     if not post:
         await callback.answer("❌ Пост не найден")
         return
-    
-    # Добавляем подпись эксперта
-    text = post['body']
-    if VK_QUIZ_LINK not in text:
-        text += f"\n\n📍 <a href='{VK_QUIZ_LINK}'>Пройти квиз</a>"
-    text += EXPERT_SIGNATURE
-    
+
+    text = ensure_quiz_and_hashtags(post['body']) + _get_expert_signature()
     try:
         if post.get("image_url"):
             await callback.bot.send_photo(CHANNEL_ID_TERION, post["image_url"], text, parse_mode="HTML")
@@ -1230,11 +1394,12 @@ async def publish_vk_only(callback: CallbackQuery, state: FSMContext):
     post_id = int(callback.data.split(":")[1])
     post = await db.get_content_post(post_id)
     
-    # Очищаем HTML для ВК
+    # Очищаем HTML для ВК; добавляем квиз и хэштеги (обязательно)
     text = clean_html_for_vk(post['body'])
     if VK_QUIZ_LINK not in text:
         text += f"\n\n📍 Пройти квиз: {VK_QUIZ_LINK}"
-    
+    if CONTENT_HASHTAGS and CONTENT_HASHTAGS.strip() and CONTENT_HASHTAGS.strip() not in text:
+        text += f"\n\n{CONTENT_HASHTAGS.strip()}"
     try:
         image_bytes = await download_photo(callback.bot, post["image_url"]) if post.get("image_url") else None
         vk_id = await vk_publisher.post_with_photo(text, image_bytes) if image_bytes else await vk_publisher.post_text_only(text)
@@ -1262,10 +1427,18 @@ async def save_draft(callback: CallbackQuery, state: FSMContext):
     post = await db.get_content_post(post_id)
     
     try:
+        kb = get_queue_keyboard(post_id)
         if post.get("image_url"):
-            await callback.bot.send_photo(LEADS_GROUP_CHAT_ID, post["image_url"], f"📝 <b>Черновик #{post_id}</b>\n\n{post['body']}", message_thread_id=THREAD_ID_DRAFTS, parse_mode="HTML")
+            await callback.bot.send_photo(
+                LEADS_GROUP_CHAT_ID, post["image_url"],
+                f"📝 <b>Черновик #{post_id}</b>\n\n{post['body']}",
+                message_thread_id=THREAD_ID_DRAFTS, parse_mode="HTML", reply_markup=kb
+            )
         else:
-            await callback.bot.send_message(LEADS_GROUP_CHAT_ID, f"📝 <b>Черновик #{post_id}</b>\n\n{post['body']}", message_thread_id=THREAD_ID_DRAFTS, parse_mode="HTML")
+            await callback.bot.send_message(
+                LEADS_GROUP_CHAT_ID, f"📝 <b>Черновик #{post_id}</b>\n\n{post['body']}",
+                message_thread_id=THREAD_ID_DRAFTS, parse_mode="HTML", reply_markup=kb
+            )
         
         await db.update_content_post(post_id, status="in_drafts")
         await callback.message.edit_text("✅ В черновиках (топик 85)", reply_markup=get_back_btn())
@@ -1319,11 +1492,10 @@ async def back_to_menu(callback: CallbackQuery, state: FSMContext):
 async def queue_img_handler(callback: CallbackQuery):
     post_id = int(callback.data.split("_")[-1])
     await callback.answer("🎨 Генерирую обложку для поста...")
-    # Логика генерации и отправки превью
     from services.image_generator import image_generator
     from database import db
-    
-    post = await db.get_post_by_id(post_id)
+
+    post = await db.get_content_post(post_id)
     if post:
         image_bytes = await image_generator.generate_cover(post.get('title', 'Перепланировка'))
         if image_bytes:
@@ -1332,6 +1504,8 @@ async def queue_img_handler(callback: CallbackQuery):
             await callback.message.answer_photo(photo=photo, caption=f"🖼 Обложка для поста #{post_id}")
         else:
             await callback.message.answer("❌ Ошибка генерации")
+    else:
+        await callback.answer("❌ Пост не найден")
 
 @content_router.callback_query(F.data.startswith("queue_pub_"))
 async def queue_pub_handler(callback: CallbackQuery):
@@ -1339,11 +1513,15 @@ async def queue_pub_handler(callback: CallbackQuery):
     await callback.answer("📢 Публикую пост...")
     from services.publisher import publisher
     from database import db
-    
-    post = await db.get_post_by_id(post_id)
+
+    post = await db.get_content_post(post_id)
     if post:
-        results = await publisher.publish_all(post.get('text', ''))
+        text = ensure_quiz_and_hashtags(post.get('body', ''))
+        image_bytes = await download_photo(callback.bot, post['image_url']) if post.get('image_url') else None
+        results = await publisher.publish_all(text, image_bytes)
         await callback.message.answer(f"✅ Опубликовано! Результаты: {results}")
+    else:
+        await callback.answer("❌ Пост не найден")
 
 @content_router.callback_query(F.data.startswith("queue_del_"))
 async def queue_del_handler(callback: CallbackQuery):

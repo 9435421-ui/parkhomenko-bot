@@ -36,12 +36,12 @@ class VKService:
         if self.vk_token and self.vk_group_id:
             logger.info("✅ VK Service: подключен")
         else:
-            logger.warning("⚠️ VK Service: не настроен (VK_API_TOKEN или VK_GROUP_ID)")
+            logger.warning("⚠️ VK Service: не настроен (VK_TOKEN или VK_GROUP_ID)")
 
     async def _make_request(self, method: str, params: dict) -> Optional[dict]:
         """Вызов VK API"""
         if not self.vk_token:
-            logger.error("VK_API_TOKEN не установлен")
+            logger.error("VK_TOKEN не установлен")
             return None
         
         url = f"{self.base_url}{method}"

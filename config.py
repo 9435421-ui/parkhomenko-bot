@@ -33,8 +33,10 @@ CHANNEL_NAMES = {
 # === WORKING GROUP (ОБСУЖДЕНИЕ) ===
 LEADS_GROUP_CHAT_ID = int(os.getenv("LEADS_GROUP_CHAT_ID", "-1003370698977"))
 
-# === QUIZ LINK ===
+# === QUIZ LINK И ХЭШТЕГИ ДЛЯ ПОСТОВ ===
 VK_QUIZ_LINK = os.getenv("VK_QUIZ_LINK", "https://t.me/TERION_KvizBot?start=quiz")
+# Обязательные хэштеги в каждом посте (можно переопределить в .env)
+CONTENT_HASHTAGS = os.getenv("CONTENT_HASHTAGS", "#TERION #перепланировка #недвижимость #москва")
 
 # === THREADS IN WORKING GROUP ===
 THREAD_ID_KVARTIRY = int(os.getenv("THREAD_ID_KVARTIRY", "2"))
@@ -46,11 +48,20 @@ THREAD_ID_DRAFTS = int(os.getenv("THREAD_ID_DRAFTS", "85"))       # Чернов
 THREAD_ID_TRENDS_SEASON = int(os.getenv("THREAD_ID_TRENDS_SEASON", "87"))  # Тренды/Сезонное
 THREAD_ID_LOGS = int(os.getenv("THREAD_ID_LOGS", "88"))           # Логи системы
 
-# === AI ===
+# === AI (разделение по назначению) ===
+# Яндекс: персональные данные, хранение, законодательство РФ, акты. Опционально Яндекс АРТ для картинок.
+# Router AI: одного ключа достаточно — логика ответов в чате и генерация изображений (Nano Banana / DALL-E).
 ROUTER_AI_KEY = os.getenv("ROUTER_AI_KEY")
+ROUTER_AI_ENDPOINT = os.getenv("ROUTER_AI_ENDPOINT", "https://router.huge.ai/api/chat/completions")
+ROUTER_AI_CHAT_MODEL = os.getenv("ROUTER_AI_CHAT_MODEL", "gpt-4o-mini")  # логика чата: gpt-4o-mini / nano / kimi
+ROUTER_AI_CHAT_FALLBACK = os.getenv("ROUTER_AI_CHAT_FALLBACK", "qwen")
+ROUTER_AI_IMAGE_KEY = os.getenv("ROUTER_AI_IMAGE_KEY") or ROUTER_AI_KEY  # опционально отдельный ключ для генерации изображений
 YANDEX_API_KEY = os.getenv("YANDEX_API_KEY")
 FOLDER_ID = os.getenv("FOLDER_ID")
 MAX_API_KEY = os.getenv("MAX_API_KEY")
+# MAX.ru канал: Device Token из приложения MAX (для API публикации)
+MAX_DEVICE_TOKEN = os.getenv("MAX_DEVICE_TOKEN")
+MAX_SUBSITE_ID = os.getenv("MAX_SUBSITE_ID")  # опционально: id канала, если не брать из API /subsite/me
 YANDEX_ART_ENABLED = os.getenv("YANDEX_ART_ENABLED", "true").lower() == "true"
 TERION_CHANNEL_ID = CHANNEL_ID_TERION
 DOM_GRAND_CHANNEL_ID = CHANNEL_ID_DOM_GRAD

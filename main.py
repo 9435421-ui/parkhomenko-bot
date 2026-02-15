@@ -119,14 +119,16 @@ async def main():
     # Поиск клиентов раз в 2 часа
     scheduler.add_job(hunter.hunt, 'interval', hours=2)
     
-    # Поиск идей для контента раз в 6 часов
+    # Поиск идей для контента раз в 6 часов (темы ещё отправляются в группу после создания content_bot)
     scheduler.add_job(creative_agent.scout_topics, 'interval', hours=6)
     
     scheduler.start()
     
     # 2. Настройка АНТОНА
     main_bot = Bot(token=BOT_TOKEN or "", default=DefaultBotProperties(parse_mode="HTML"))
-    
+    from services.birthday_greetings import send_birthday_greetings
+    scheduler.add_job(send_birthday_greetings, 'cron', hour=9, minute=0, args=[main_bot])
+
     # Инициализация сервисов
     publisher.bot = main_bot
     dp_main = Dispatcher(storage=MemoryStorage())
@@ -138,6 +140,18 @@ async def main():
     
     # 3. Настройка ДОМ ГРАНД
     content_bot = Bot(token=CONTENT_BOT_TOKEN or "", default=DefaultBotProperties(parse_mode="HTML"))
+    # Темы от креативщика в рабочую группу (топик Тренды/Сезон) раз в 6 ч
+    async def post_creative_topics_to_group(bot):
+        from config import LEADS_GROUP_CHAT_ID, THREAD_ID_TRENDS_SEASON
+        try:
+            topics = await creative_agent.scout_topics(3)
+            text = "🕵️‍♂️ <b>Темы от креативщика</b> (актуальные)\n\n"
+            for i, t in enumerate(topics, 1):
+                text += f"{i}. <b>{t.get('title', '')}</b>\n   💡 {t.get('insight', '')}\n\n"
+            await bot.send_message(LEADS_GROUP_CHAT_ID, text, message_thread_id=THREAD_ID_TRENDS_SEASON, parse_mode="HTML")
+        except Exception as e:
+            logger.warning(f"Ошибка отправки тем в группу: {e}")
+    scheduler.add_job(post_creative_topics_to_group, 'interval', hours=6, args=[content_bot])
     dp_content = Dispatcher(storage=MemoryStorage())
     dp_content.callback_query.middleware(UnhandledCallbackMiddleware())
     dp_content.include_routers(content_router)

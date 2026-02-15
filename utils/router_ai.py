@@ -1,5 +1,7 @@
 """
-Интеграция с Router AI для Kimi/Qwen (основной LLM для ответов)
+Router AI — логика ответов в чате (GPT-4 nano / Kimi).
+Генерация изображений — отдельно (Nano Banana / OpenRouter), см. services/image_generator.
+Яндекс используется для персональных данных и РФ законодательства (fallback в диалоге).
 """
 import os
 import aiohttp
@@ -7,13 +9,13 @@ from typing import Optional, List, Dict
 
 
 class RouterAIClient:
-    """Клиент для работы с Router AI (Kimi, Qwen, DeepSeek и др.)"""
+    """Клиент Router AI: логика ответов (GPT-4 nano / Kimi / Qwen)."""
     
     def __init__(self):
         self.api_key = os.getenv("ROUTER_AI_KEY")
-        self.endpoint = "https://router.huge.ai/api/chat/completions"
-        self.default_model = "kimi"
-        self.fallback_model = "qwen"
+        self.endpoint = os.getenv("ROUTER_AI_ENDPOINT", "https://router.huge.ai/api/chat/completions")
+        self.default_model = os.getenv("ROUTER_AI_CHAT_MODEL", "gpt-4o-mini")
+        self.fallback_model = os.getenv("ROUTER_AI_CHAT_FALLBACK", "qwen")
         self.max_prompt_length = 8000
         
         if not self.api_key:

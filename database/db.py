@@ -85,14 +85,22 @@ class Database:
                     city TEXT,
                     floor TEXT,
                     total_floors TEXT,
+                    area TEXT,
                     remodeling_status TEXT,
                     change_plan TEXT,
                     bti_status TEXT,
+                    extra_questions TEXT,
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                     sent_to_group BOOLEAN DEFAULT 0,
+                    thread_id INTEGER,
                     FOREIGN KEY (user_id) REFERENCES users(user_id)
                 )
             """)
+            for col, ctype in [("area", "TEXT"), ("extra_questions", "TEXT"), ("thread_id", "INTEGER")]:
+                try:
+                    await cursor.execute(f"ALTER TABLE leads ADD COLUMN {col} {ctype}")
+                except Exception:
+                    pass
 
             await cursor.execute("""
                 CREATE TABLE IF NOT EXISTS content_plan (
@@ -294,6 +302,24 @@ class Database:
             await cursor.execute("UPDATE leads SET sent_to_group = 1 WHERE id = ?", (lead_id,))
             await self.conn.commit()
 
+    async def update_lead_extra(self, lead_id: int, extra_text: str, append: bool = True):
+        """Дополнение к заявке (одна заявка): дополнительные вопросы/документы."""
+        async with self.conn.cursor() as cursor:
+            if append:
+                await cursor.execute("SELECT extra_questions FROM leads WHERE id = ?", (lead_id,))
+                row = await cursor.fetchone()
+                old = (row["extra_questions"] or "") if row else ""
+                new_val = (old + "\n---\n" + extra_text) if old else extra_text
+            else:
+                new_val = extra_text
+            await cursor.execute("UPDATE leads SET extra_questions = ? WHERE id = ?", (new_val, lead_id))
+            await self.conn.commit()
+
+    async def set_lead_thread(self, lead_id: int, thread_id: int):
+        async with self.conn.cursor() as cursor:
+            await cursor.execute("UPDATE leads SET thread_id = ? WHERE id = ?", (thread_id, lead_id))
+            await self.conn.commit()
+
     async def save_post(self, post_type: str, title: str, body: str, cta: str, publish_date: datetime,
                        channel: str = 'terion', theme: Optional[str] = None, 
                        image_url: Optional[str] = None, admin_id: Optional[int] = None,
@@ -365,7 +391,7 @@ class Database:
             theme=kwargs.get("theme"),
             image_url=kwargs.get("image_url"),
             admin_id=kwargs.get("admin_id"),
-            status="draft"
+            status=kwargs.get("status", "draft")
         )
 
     async def update_content_post(self, post_id: int, **kwargs):

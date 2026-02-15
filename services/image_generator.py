@@ -13,7 +13,8 @@ class ImageGenerator:
     def __init__(self):
         self.yandex_key = os.getenv('YANDEX_API_KEY')
         self.folder_id = os.getenv('FOLDER_ID')
-        self.router_key = os.getenv('ROUTER_AI_KEY')
+        # Router AI: генерация изображений (Nano Banana / OpenRouter), отдельный ключ опционален
+        self.router_key = os.getenv('ROUTER_AI_IMAGE_KEY') or os.getenv('ROUTER_AI_KEY')
         
         # Проверяем доступность сервисов
         self.use_yandex = bool(self.yandex_key and self.folder_id)
@@ -48,16 +49,15 @@ class ImageGenerator:
         return None
     
     def _create_prompt(self, title: str, style: str) -> str:
-        """Создание промпта"""
+        """Создание промпта. Генерация только без текста (ИИ часто ошибается на русском)."""
         base = f"Professional real estate cover image for article: '{title}'. "
-        
         styles = {
             'modern': 'Modern Moscow architecture, clean minimalist design, blue and white colors, professional photography style, high quality',
             'classic': 'Classic Russian architecture, warm golden colors, elegant traditional design, professional photo',
             'minimal': 'Minimalist white background, geometric shapes, modern typography space, clean design'
         }
-        
-        return base + styles.get(style, styles['modern'])
+        no_text = " No text, no words, no letters, no captions, no watermarks — image only."
+        return base + styles.get(style, styles['modern']) + no_text
     
     async def _generate_yandex(self, prompt: str) -> Optional[bytes]:
         """Генерация через Yandex Art"""
@@ -214,7 +214,7 @@ async def generate_creative(payload: str, attempt: int = 1) -> tuple:
         logger.info(f"🎨 Генерация через Router AI (попытка {attempt})...")
         # Используем router_ai для генерации
         response = await router_ai.generate_response(
-            user_prompt=f"Generate image: {payload}",
+            user_prompt=f"Generate image: {payload}. No text, no words, no letters, no captions — image only.",
             max_tokens=2000
         )
         

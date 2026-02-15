@@ -289,6 +289,7 @@ class ContentAgent:
         post_type = post.get('type')
         channel = post.get('channel', 'terion')
 
+        no_text_suffix = " No text, no words, no letters, no captions — image only."
         terion_prompts = {
             'экспертиза': "architectural visualization, blueprints, professional office, legal papers, corporate style, clean minimalist design, 4k resolution, no people",
             'живой': "modern apartment renovation Moscow, interior design, realistic lighting, open space kitchen living room, minimalist corporate style, 4k resolution",
@@ -296,7 +297,6 @@ class ContentAgent:
             'поздравление': "elegant celebration background, warm golden lighting, festive decoration soft colors, cozy atmosphere, professional style, 4k resolution",
             'приветствие': "professional consultation office, modern workspace, clean minimalist design, welcoming business atmosphere, 4k resolution"
         }
-
         dom_grand_prompts = {
             'экспертиза': "construction site, building process, house renovation, technical details, blueprints on site, professional builder aesthetic, construction materials, 4k resolution",
             'живой': "country house construction, rural property, building site progress, realistic working environment, construction team, modern rural architecture, 4k resolution",
@@ -304,14 +304,12 @@ class ContentAgent:
             'поздравление': "warm country house celebration, rural home atmosphere, festive construction site decoration, cozy home feeling, professional style, 4k resolution",
             'приветствие': "construction company office, technical supervision workspace, building plans, professional builder setting, welcoming atmosphere, 4k resolution"
         }
-
         prompts = dom_grand_prompts if channel == 'dom_grand' else terion_prompts
         base_prompt = prompts.get(post_type, prompts.get('экспертиза', ''))
 
         if post.get('theme'):
             base_prompt += f", theme: {post['theme']}"
-
-        return base_prompt
+        return base_prompt + no_text_suffix
 
     async def generate_post_with_image(self, post_type: str, theme: str = None, channel: str = 'terion') -> dict:
         """Асинхронно генерирует пост и изображение"""

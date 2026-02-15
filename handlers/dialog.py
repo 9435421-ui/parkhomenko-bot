@@ -1,6 +1,7 @@
 """
-Обработчик диалогового режима с RAG (консультант Антон)
-Router AI (Kimi/Qwen) для ответов, YandexGPT как fallback
+Диалог с консультантом Антоном (RAG).
+Логика ответов: Router AI (GPT-4 nano / Kimi). Контекст из базы знаний (законодательство РФ).
+Fallback: YandexGPT (персональные данные, РФ акты — см. общую схему AI в config).
 """
 from aiogram import Router, F
 from aiogram.types import Message, CallbackQuery
