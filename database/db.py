@@ -159,6 +159,18 @@ class Database:
                 )
             """)
             
+            # Настройки бота (key-value для переключателей и т.п.)
+            await cursor.execute("""
+                CREATE TABLE IF NOT EXISTS bot_settings (
+                    key TEXT PRIMARY KEY,
+                    value TEXT NOT NULL,
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+            await cursor.execute(
+                "INSERT OR IGNORE INTO bot_settings (key, value) VALUES ('spy_notify_enabled', '1')"
+            )
+
             # Таблица лидов от шпиона (TG/VK: автор, ссылка на профиль, текст)
             await cursor.execute("""
                 CREATE TABLE IF NOT EXISTS spy_leads (
@@ -364,6 +376,22 @@ class Database:
             )
             row = await cursor.fetchone()
             return row[0] if row else 0
+
+    async def get_setting(self, key: str, default: str = "") -> str:
+        """Получить значение настройки (bot_settings)."""
+        async with self.conn.cursor() as cursor:
+            await cursor.execute("SELECT value FROM bot_settings WHERE key = ?", (key,))
+            row = await cursor.fetchone()
+            return row[0] if row else default
+
+    async def set_setting(self, key: str, value: str) -> None:
+        """Установить значение настройки (bot_settings)."""
+        async with self.conn.cursor() as cursor:
+            await cursor.execute(
+                "INSERT OR REPLACE INTO bot_settings (key, value, updated_at) VALUES (?, ?, ?)",
+                (key, value, datetime.now()),
+            )
+            await self.conn.commit()
 
     async def save_post(self, post_type: str, title: str, body: str, cta: str, publish_date: datetime,
                        channel: str = 'terion', theme: Optional[str] = None, 

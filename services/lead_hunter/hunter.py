@@ -233,8 +233,14 @@ class LeadHunter:
                         )
                     except Exception as e:
                         logger.warning("Не удалось сохранить spy_lead: %s", e)
-                    # Уведомление в личку админу (Юлия) при каждом лиде
-                    await self._send_lead_notify_to_admin(lead, source_name, profile_url or lead.get("url", ""))
+                    # Уведомление в личку админу (Юлия) при каждом лиде (если включено в пульте)
+                    try:
+                        from database import db as main_db
+                        notify_enabled = await main_db.get_setting("spy_notify_enabled", "1")
+                        if notify_enabled == "1":
+                            await self._send_lead_notify_to_admin(lead, source_name, profile_url or lead.get("url", ""))
+                    except Exception:
+                        pass
                     # Карточка лида в рабочую группу (топик «Горячие лиды»)
                     if cards_sent < MAX_CARDS_PER_RUN:
                         if await self._send_lead_card_to_group(lead):

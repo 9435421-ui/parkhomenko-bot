@@ -34,8 +34,9 @@ def get_admin_keyboard() -> InlineKeyboardMarkup:
     builder.button(text="➕ Добавить ресурс", callback_data="admin_add_resource")
     builder.button(text="📋 Список ресурсов", callback_data="admin_list_resources")
     builder.button(text="🔑 Ключевые слова", callback_data="admin_keywords")
+    builder.button(text="🕵️ Управление Шпионом", callback_data="admin_spy_panel")
     builder.button(text="◀️ Назад", callback_data="admin_back")
-    builder.adjust(1, 1, 1, 1)
+    builder.adjust(1, 1, 1, 1, 1)
     return builder.as_markup()
 
 
@@ -63,6 +64,153 @@ def get_back_to_admin() -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
     builder.button(text="◀️ Админ-панель", callback_data="admin_menu")
     return builder.as_markup()
+
+
+async def get_spy_panel_keyboard() -> InlineKeyboardMarkup:
+    """Клавиатура пульта шпиона; переключатель уведомлений по текущей настройке."""
+    notify = await db.get_setting("spy_notify_enabled", "1")
+    notify_label = "🔔 Уведомления: ВЫКЛ" if notify != "1" else "🔔 Уведомления: ВКЛ"
+    builder = InlineKeyboardBuilder()
+    builder.button(text="📊 Статистика (24ч)", callback_data="spy_panel_stats")
+    builder.button(text="📝 Ключевые слова", callback_data="spy_panel_keywords")
+    builder.button(text="🌐 Ресурсы", callback_data="spy_panel_resources")
+    builder.button(text=notify_label, callback_data="spy_panel_toggle_notify")
+    builder.button(text="◀️ В админ-меню", callback_data="admin_menu")
+    builder.adjust(1, 1, 1, 1, 1)
+    return builder.as_markup()
+
+
+# === ПУЛЬТ УПРАВЛЕНИЯ ШПИОНОМ (инлайн) ===
+@router.callback_query(F.data == "admin_spy_panel")
+async def spy_panel_open(callback: CallbackQuery):
+    """Открыть пульт управления Шпионом."""
+    if not check_admin(callback.from_user.id):
+        await callback.answer("⛔ Нет доступа")
+        return
+    kb = await get_spy_panel_keyboard()
+    await callback.message.edit_text(
+        "🕵️ <b>Пульт управления Шпионом</b>\n\n"
+        "Выберите действие:",
+        reply_markup=kb,
+        parse_mode="HTML",
+    )
+    await callback.answer()
+
+
+@router.callback_query(F.data == "spy_panel_stats")
+async def spy_panel_stats(callback: CallbackQuery):
+    """Статистика за 24ч (логика /spy_status)."""
+    if not check_admin(callback.from_user.id):
+        await callback.answer("⛔ Нет доступа")
+        return
+    try:
+        tg_list = [f"📱 {ch['name']} (@{ch['id']})" for ch in scout_parser.TG_CHANNELS]
+        vk_list = [f"📘 {g['name']} (id{g['id']})" for g in scout_parser.VK_GROUPS]
+        resources = await db.get_target_resources(active_only=True)
+        db_list = [f"{'📱' if r['type'] == 'telegram' else '📘'} {r.get('title') or r['link']}" for r in resources]
+        lines = [
+            "📊 <b>Статистика шпиона (24ч)</b>",
+            "",
+            "<b>Telegram каналы:</b>",
+        ]
+        lines.extend(tg_list[:15] or ["— нет"])
+        if len(tg_list) > 15:
+            lines.append(f"… и ещё {len(tg_list) - 15}")
+        lines.append("<b>VK группы:</b>")
+        lines.extend(vk_list[:10] or ["— нет"])
+        if db_list:
+            lines.append("<b>Из админки:</b>")
+            lines.extend(db_list[:5])
+        count_24h = await db.get_spy_leads_count_24h()
+        lines.append("")
+        lines.append(f"📊 <b>Лидов за последние 24 ч:</b> {count_24h}")
+        kb = await get_spy_panel_keyboard()
+        await callback.message.edit_text("\n".join(lines), reply_markup=kb, parse_mode="HTML")
+    except Exception as e:
+        await callback.answer(f"❌ {e}", show_alert=True)
+        return
+    await callback.answer()
+
+
+@router.callback_query(F.data == "spy_panel_keywords")
+async def spy_panel_keywords(callback: CallbackQuery):
+    """Список ключевых слов и триггеров."""
+    if not check_admin(callback.from_user.id):
+        await callback.answer("⛔ Нет доступа")
+        return
+    try:
+        keywords = await db.get_spy_keywords(active_only=False)
+        kws = [kw["keyword"] for kw in keywords] if keywords else []
+        # Из кода ScoutParser
+        code_kws = list(scout_parser.KEYWORDS)[:25]
+        lines = [
+            "📝 <b>Ключевые слова</b>",
+            "",
+            "<b>Из кода (Scout):</b>",
+            ", ".join(code_kws) + ("…" if len(scout_parser.KEYWORDS) > 25 else ""),
+            "",
+        ]
+        if kws:
+            lines.append("<b>Из админки (БД):</b>")
+            lines.append(", ".join(kws[:30]) + ("…" if len(kws) > 30 else ""))
+        else:
+            lines.append("<b>Из админки:</b> — нет")
+        kb = await get_spy_panel_keyboard()
+        await callback.message.edit_text("\n".join(lines), reply_markup=kb, parse_mode="HTML")
+    except Exception as e:
+        await callback.answer(f"❌ {e}", show_alert=True)
+        return
+    await callback.answer()
+
+
+@router.callback_query(F.data == "spy_panel_resources")
+async def spy_panel_resources(callback: CallbackQuery):
+    """Список чатов/групп в мониторинге."""
+    if not check_admin(callback.from_user.id):
+        await callback.answer("⛔ Нет доступа")
+        return
+    try:
+        tg_list = [f"📱 {ch['name']} (@{ch['id']})" for ch in scout_parser.TG_CHANNELS]
+        vk_list = [f"📘 {g['name']} (id{g['id']})" for g in scout_parser.VK_GROUPS]
+        resources = await db.get_target_resources(active_only=True)
+        db_list = [f"{'📱' if r['type'] == 'telegram' else '📘'} {r.get('title') or r['link']}" for r in resources]
+        lines = [
+            "🌐 <b>Ресурсы в мониторинге</b>",
+            "",
+            "<b>Telegram (Scout):</b>",
+        ]
+        lines.extend(tg_list[:18] or ["— нет"])
+        if len(tg_list) > 18:
+            lines.append(f"… и ещё {len(tg_list) - 18}")
+        lines.append("<b>VK (Scout):</b>")
+        lines.extend(vk_list[:12] or ["— нет"])
+        if db_list:
+            lines.append("<b>Админка (target_resources):</b>")
+            lines.extend(db_list[:8])
+        kb = await get_spy_panel_keyboard()
+        await callback.message.edit_text("\n".join(lines), reply_markup=kb, parse_mode="HTML")
+    except Exception as e:
+        await callback.answer(f"❌ {e}", show_alert=True)
+        return
+    await callback.answer()
+
+
+@router.callback_query(F.data == "spy_panel_toggle_notify")
+async def spy_panel_toggle_notify(callback: CallbackQuery):
+    """Переключатель уведомлений в личку (ВКЛ/ВЫКЛ)."""
+    if not check_admin(callback.from_user.id):
+        await callback.answer("⛔ Нет доступа")
+        return
+    try:
+        current = await db.get_setting("spy_notify_enabled", "1")
+        new_val = "0" if current == "1" else "1"
+        await db.set_setting("spy_notify_enabled", new_val)
+        state = "ВКЛ" if new_val == "1" else "ВЫКЛ"
+        await callback.answer(f"🔔 Уведомления: {state}")
+        kb = await get_spy_panel_keyboard()
+        await callback.message.edit_reply_markup(reply_markup=kb)
+    except Exception as e:
+        await callback.answer(f"❌ {e}", show_alert=True)
 
 
 # === КОМАНДА /SPY_STATUS ===
