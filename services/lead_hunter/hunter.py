@@ -90,6 +90,24 @@ class LeadHunter:
                     if lead.get("hotness", 0) > 4:
                         logger.info(f"🔥 Горячий лид (Жюль, hotness={lead.get('hotness')}) → пересылка админу")
                         await self._send_hot_lead_to_admin(lead)
+                # Дублирование в рабочую группу: краткий отчёт о сохранённых лидах
+                if hot_leads:
+                    from config import BOT_TOKEN, LEADS_GROUP_CHAT_ID, THREAD_ID_LOGS
+                    if BOT_TOKEN and LEADS_GROUP_CHAT_ID:
+                        try:
+                            bot = Bot(token=BOT_TOKEN, default=DefaultBotProperties(parse_mode="HTML"))
+                            summary = f"🕵️ <b>Охота: в potential_leads сохранено {len(hot_leads)} лидов</b>\n\n"
+                            for i, lead in enumerate(hot_leads[:3], 1):
+                                content = (lead.get("content") or lead.get("intent") or "")[:80]
+                                summary += f"{i}. {content}…\n"
+                            await bot.send_message(
+                                LEADS_GROUP_CHAT_ID,
+                                summary,
+                                message_thread_id=THREAD_ID_LOGS,
+                            )
+                            await bot.session.close()
+                        except Exception as e:
+                            logger.warning("Не удалось отправить сводку лидов в группу: %s", e)
             except Exception as e:
                 logger.error(f"❌ Ошибка hunter_standalone (AI Жюля): {e}")
 

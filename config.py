@@ -67,8 +67,13 @@ TERION_CHANNEL_ID = CHANNEL_ID_TERION
 DOM_GRAND_CHANNEL_ID = CHANNEL_ID_DOM_GRAD
 # === ADMIN ===
 ADMIN_ID = int(os.getenv("ADMIN_ID", "223465437"))
-# Юлия: доступ к /stats и /hunt в рабочей группе (если задан)
-JULIA_USER_ID = int(os.getenv("JULIA_USER_ID", "0"))  # 0 = только ADMIN_ID
+# Юлия: полный доступ к /stats, /hunt и админ-меню
+JULIA_USER_ID = int(os.getenv("JULIA_USER_ID", "8438024806"))
+
+
+def is_admin(user_id: int) -> bool:
+    """Доступ к админ-меню, /stats, /hunt: админ или Юлия."""
+    return user_id == ADMIN_ID or (JULIA_USER_ID and user_id == JULIA_USER_ID)
 QUIZ_THREAD_ID = int(os.getenv("QUIZ_THREAD_ID", "2"))
 THREAD_ID_HOT_LEADS = int(os.getenv("THREAD_ID_HOT_LEADS", "10"))
 

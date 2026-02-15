@@ -3,7 +3,7 @@
 """
 from aiogram.types import ReplyKeyboardMarkup, KeyboardButton, InlineKeyboardMarkup, InlineKeyboardButton
 from aiogram import Bot
-from config import ADMIN_ID
+from config import ADMIN_ID, is_admin
 import os
 
 
@@ -84,8 +84,7 @@ async def send_main_menu(bot: Bot, chat_id: int, user_id: int | None = None):
         "Выберите действие:"
     )
     
-    admin_id = int(os.getenv("ADMIN_ID", ADMIN_ID))
-    if user_id and user_id == admin_id:
+    if user_id and is_admin(user_id):
         markup = get_admin_menu()
         text = (
             "🎯 <b>Главное меню</b>\n\n"
@@ -100,7 +99,6 @@ async def send_main_menu(bot: Bot, chat_id: int, user_id: int | None = None):
     await bot.send_message(chat_id, text, reply_markup=markup, parse_mode="HTML")
 
 
-def is_admin(user_id: int) -> bool:
-    """Проверка админа"""
-    admin_id = int(os.getenv("ADMIN_ID", ADMIN_ID))
-    return user_id == admin_id
+def _is_admin_user(user_id: int) -> bool:
+    """Проверка админа (дублирует config.is_admin для совместимости)."""
+    return is_admin(user_id)

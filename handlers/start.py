@@ -9,7 +9,7 @@ import logging
 
 from keyboards.main_menu import get_main_menu, get_admin_menu, get_urgent_btn, get_content_menu
 from handlers.quiz import QuizStates
-from config import ADMIN_ID
+from config import ADMIN_ID, is_admin
 from database import db
 from agents.creative_agent import creative_agent
 from services.publisher import publisher
@@ -60,7 +60,7 @@ async def handle_start(message: Message, state: FSMContext):
         )
         return
     
-    if str(user_id) == str(ADMIN_ID):
+    if is_admin(user_id):
         await message.answer(
             "🎯 <b>Главное меню</b>\n\n"
             "🛠 <b>Создать пост</b> — Текст → Фото → Публикация\n"
@@ -90,7 +90,7 @@ async def create_post_handler(message: Message, state: FSMContext):
 async def content_back_handler(callback: CallbackQuery, state: FSMContext):
     """Назад из меню контента — в главное меню админа"""
     await state.clear()
-    if str(callback.from_user.id) == str(ADMIN_ID):
+    if is_admin(callback.from_user.id):
         await callback.message.edit_text(
             "🎯 <b>Главное меню</b>\n\n"
             "🛠 Создать пост — Текст / Фото / ИИ-Визуал → публикация TERION, ДОМ ГРАНД, MAX\n"
@@ -219,7 +219,7 @@ async def urgent_handler(message: Message, state: FSMContext):
     user_id = message.from_user.id
     logger.info(f"🚀 Срочно от: {user_id}")
     
-    if str(user_id) != str(ADMIN_ID):
+    if not is_admin(user_id):
         return
     
     text = message.text.replace("Срочно:", "").strip()
