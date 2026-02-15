@@ -3,6 +3,7 @@ Creative Agent — генерация идей контента и анализ 
 Специализация: Согласование перепланировок и переустройства помещений.
 """
 import os
+import re
 import logging
 from typing import List, Dict
 from datetime import datetime
@@ -129,17 +130,128 @@ class CreativeAgent:
             "source": "template"
         }
     
+    def _normalize_title(self, raw: str) -> str:
+        """Убирает дубли номеров и лишние кавычки из заголовка (например «1. 1. «Тема»» → «Тема»)."""
+        if not raw or not isinstance(raw, str):
+            return raw or ""
+        s = raw.strip()
+        # Убрать ведущий номер типа "1. " или "2. "
+        s = re.sub(r"^\d+\.\s*", "", s)
+        # Убрать обрамляющие кавычки « »
+        if s.startswith("«") and s.endswith("»"):
+            s = s[1:-1].strip()
+        if s.startswith('"') and s.endswith('"'):
+            s = s[1:-1].strip()
+        return s.strip() or raw
+
     def _parse_response(self, response: str, query: str) -> Dict:
         """Парсит ответ ИИ"""
         lines = [l.strip() for l in response.strip().split('\n') if l.strip()]
-        
+        title = lines[0] if lines else f"Тема: {query}"
+        title = self._normalize_title(title)
         return {
             "query": query,
-            "title": lines[0] if lines else f"Тема: {query}",
+            "title": title,
             "why": lines[1] if len(lines) > 1 else "",
             "insight": lines[2] if len(lines) > 2 else "",
             "source": "ai"
         }
+
+    async def ideas_from_spy_leads(self, leads: List[Dict], count: int = 3) -> List[Dict]:
+        """
+        Генерирует идеи для постов на основе свежих лидов из spy_leads.
+        leads: список dict с полями text, source_name (опционально).
+        """
+        if not leads:
+            return await self.scout_topics(count)
+        logger.info("🔍 CreativeAgent: идеи из %s лидов шпиона...", len(leads))
+        context_parts = []
+        for i, lead in enumerate(leads[:20], 1):
+            text = (lead.get("text") or "").strip()
+            source = lead.get("source_name") or lead.get("source_type") or ""
+            if text:
+                context_parts.append(f"[{i}] ({source})\n{text[:400]}")
+        context = "\n\n".join(context_parts)[:4000]
+        system_prompt = """Ты — эксперт по контенту в нише согласования перепланировок.
+По обсуждениям из чатов жилых комплексов предложи 3 темы для постов.
+
+Требования:
+- Тема в формате заголовка (без номера и без кавычек в начале строки)
+- Цепляющая формулировка: проблема или вопрос + польза
+- Ключевой инсайт — одно предложение
+
+Формат ответа строго по одной теме в блоке, в каждом блоке 3 строки:
+Строка 1 — заголовок темы (коротко)
+Строка 2 — почему важно
+Строка 3 — ключевой инсайт
+Между блоками — пустая строка. Всего 3 блока."""
+
+        user_prompt = f"""Обсуждения из чатов (лиды шпиона):
+
+{context}
+
+Предложи 3 темы для постов. В каждом блоке: заголовок, почему важно, инсайт. Без нумерации в начале заголовка (не «1. Тема», а сразу «Тема»)."""
+
+        try:
+            response = await yandex_gpt.generate_response(
+                user_prompt=user_prompt,
+                system_prompt=system_prompt,
+                max_tokens=800
+            )
+            if response:
+                return self._parse_ideas_response(response)
+        except Exception as e:
+            logger.warning(f"YandexGPT ideas_from_spy_leads: {e}")
+        if self.use_router:
+            try:
+                response = await router_ai.generate_response(
+                    user_prompt=user_prompt,
+                    system_prompt=system_prompt,
+                    max_tokens=800
+                )
+                if response:
+                    return self._parse_ideas_response(response)
+            except Exception as e:
+                logger.warning(f"Router AI ideas_from_spy_leads: {e}")
+        return await self.scout_topics(count)
+
+    def _parse_ideas_response(self, response: str) -> List[Dict]:
+        """Парсит ответ с 3 темами (блоки из 3 строк: заголовок, почему, инсайт)."""
+        blocks = []
+        current = []
+        for line in response.strip().split("\n"):
+            line = line.strip()
+            if not line:
+                if current:
+                    title = self._normalize_title(current[0]) if current else ""
+                    blocks.append({
+                        "query": "",
+                        "title": title,
+                        "why": current[1] if len(current) > 1 else "",
+                        "insight": current[2] if len(current) > 2 else "",
+                        "source": "ai"
+                    })
+                    current = []
+            else:
+                current.append(line)
+        if current:
+            title = self._normalize_title(current[0]) if current else ""
+            blocks.append({
+                "query": "",
+                "title": title,
+                "why": current[1] if len(current) > 1 else "",
+                "insight": current[2] if len(current) > 2 else "",
+                "source": "ai"
+            })
+        while len(blocks) < 3:
+            blocks.append({
+                "query": "",
+                "title": f"Тема {len(blocks) + 1} (сгенерируйте вручную)",
+                "why": "",
+                "insight": "",
+                "source": "template"
+            })
+        return blocks[:3]
     
     async def generate_content_ideas(self, niche: str = "перепланировки") -> List[str]:
         """Генерирует идеи для контента"""

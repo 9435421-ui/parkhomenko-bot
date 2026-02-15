@@ -2,12 +2,15 @@
 Диалог с консультантом Антоном (RAG).
 Логика ответов: Router AI (GPT-4 nano / Kimi). Контекст из базы знаний (законодательство РФ).
 Fallback: YandexGPT (персональные данные, РФ акты — см. общую схему AI в config).
+Сообщения в режиме квиза не обрабатываем — их должен обрабатывать только quiz_router.
 """
 from aiogram import Router, F
 from aiogram.types import Message, CallbackQuery
 from aiogram.fsm.context import FSMContext
+from aiogram.fsm.filter import StateFilter
 from database import db
 from utils import router_ai, yandex_gpt, kb
+from handlers.quiz import QuizStates
 
 router = Router()
 
@@ -34,20 +37,10 @@ async def start_dialog(callback: CallbackQuery):
     await callback.answer()
 
 
-@router.message(F.text)
+@router.message(F.text, ~StateFilter(QuizStates))
 async def dialog_message_handler(message: Message, state: FSMContext):
-    """Обработка сообщений в диалоговом режиме"""
+    """Обработка сообщений в диалоговом режиме. Не срабатывает в состоянии квиза — тогда отвечает quiz."""
     user_id = message.from_user.id
-    
-    # DEBUG: проверяем текущее состояние FSM
-    current_state = await state.get_state()
-    print(f"DEBUG: User {user_id}, current state: {current_state}")
-    
-    # Если пользователь в квизе — НЕ отвечаем!
-    if current_state is not None:
-        print(f"DEBUG: User {user_id} in quiz state, ignoring dialog")
-        return
-    
     user_state = await db.get_user_state(user_id)
     
     # Проверяем, что пользователь в режиме диалога

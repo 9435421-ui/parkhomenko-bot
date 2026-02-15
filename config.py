@@ -33,6 +33,12 @@ CHANNEL_NAMES = {
 # === WORKING GROUP (ОБСУЖДЕНИЕ) ===
 LEADS_GROUP_CHAT_ID = int(os.getenv("LEADS_GROUP_CHAT_ID", "-1003370698977"))
 
+# === КОНТЕНТ-ПЛАН: ВРЕМЯ И ЛИМИТЫ (для будущего использования) ===
+# Время публикации по умолчанию (при сохранении поста без явной даты)
+PUBLISH_TIME_DEFAULT = os.getenv("PUBLISH_TIME_DEFAULT", "12:00")  # МСК, "ЧЧ:ММ"
+# Максимум постов в день в один канал (0 = без лимита)
+POSTS_PER_DAY_LIMIT = int(os.getenv("POSTS_PER_DAY_LIMIT", "0"))
+
 # === QUIZ LINK И ХЭШТЕГИ ДЛЯ ПОСТОВ ===
 VK_QUIZ_LINK = os.getenv("VK_QUIZ_LINK", "https://t.me/TERION_KvizBot?start=quiz")
 # Обязательные хэштеги в каждом посте (можно переопределить в .env)

@@ -1,14 +1,20 @@
 """
 Главное меню - старт квиза
 """
+import re
 from aiogram import Router, F
 from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton, BufferedInputFile
 from aiogram.filters import CommandStart
 from aiogram.fsm.context import FSMContext
+from aiogram.fsm.state import State, StatesGroup
 import logging
 
 from keyboards.main_menu import get_main_menu, get_admin_menu, get_urgent_btn, get_content_menu
 from handlers.quiz import QuizStates
+
+
+class QueueStates(StatesGroup):
+    editing = State()
 from config import ADMIN_ID, is_admin
 from database import db
 from agents.creative_agent import creative_agent
@@ -21,7 +27,7 @@ router = Router()
 GREETING_TEXT = (
     "🏢 <b>Вас приветствует компания ТЕРИОН!</b>\n\n"
     "Я — Антон, ваш ИИ-помощник по перепланировкам.\n\n"
-    "Нажимая кнопку ниже, вы даете согласие на обработку "
+    "Нажимая кнопку ниже, вы даёте согласие на обработку "
     "персональных данных, получение уведомлений и информационную переписку.\n\n"
     "📞 Все консультации носят информационный характер, "
     "финальное решение подтверждает эксперт ТЕРИОН."
@@ -59,13 +65,31 @@ async def handle_start(message: Message, state: FSMContext):
             parse_mode="HTML"
         )
         return
+
+    # Активация Продавца: если пользователь — лид из шпиона (ещё не контачили), начинаем диалог первыми
+    if not is_admin(user_id):
+        lead = await db.get_spy_lead_uncontacted_by_author(str(user_id))
+        if lead:
+            await db.mark_spy_lead_contacted(lead["id"])
+            source = (lead.get("source_name") or "чате").replace("<", "").replace(">", "")
+            pain = (lead.get("text") or "").strip().replace("\n", " ")[:150]
+            if len(lead.get("text") or "") > 150:
+                pain += "…"
+            await message.answer(
+                "🏢 <b>Вас приветствует компания ТЕРИОН!</b>\n\n"
+                f"Мы заметили ваш вопрос в <b>{source}</b> про перепланировку. "
+                "Готовы подсказать по согласованию и документам — бесплатно ответим на первые вопросы.\n\n"
+                "Напишите, что именно хотите сделать с объектом (квартира/дом), и мы подскажем с чего начать.",
+                parse_mode="HTML"
+            )
+            return
     
     if is_admin(user_id):
         await message.answer(
             "🎯 <b>Главное меню</b>\n\n"
             "🛠 <b>Создать пост</b> — Текст → Фото → Публикация\n"
-            "🕵️‍♂️ <b>Темы от Шпиона</b> — CreativeAgent ищет идеи\n"
-            "📅 <b>Очередь постов</b> — что запланировано на 12:00\n\n"
+            "🕵️‍♂️ <b>Темы от Шпиона</b> — идеи для постов по лидам из чатов\n"
+            "📅 <b>Очередь постов</b> — черновики и статус запланированных задач\n\n"
             "Выберите:",
             reply_markup=get_admin_menu()
         )
@@ -101,30 +125,43 @@ async def content_back_handler(callback: CallbackQuery, state: FSMContext):
     await callback.answer()
 
 
+def _normalize_display_title(s: str, max_len: int = 70) -> str:
+    """Читаемый заголовок: убрать «1. 1. «...»», обрезать по длине."""
+    if not s:
+        return "Без темы"
+    s = re.sub(r"^\d+\.\s*", "", str(s).strip())
+    if s.startswith("«") and s.endswith("»"):
+        s = s[1:-1].strip()
+    if len(s) > max_len:
+        s = s[: max_len - 2].rstrip() + "…"
+    return s or "Без темы"
+
+
 @router.message(F.text == "🕵️‍♂️ Темы от Шпиона")
 async def spy_topics_handler(message: Message, state: FSMContext):
-    """Темы от Шпиона - CreativeAgent"""
-    await message.answer("🔍 <b>Шпион ищет трендовые темы...</b>", parse_mode="HTML")
-    
+    """Темы от Шпиона: свежие лиды из spy_leads → 3 идеи через CreativeAgent."""
+    await message.answer("🔍 <b>Шпион подтягивает лиды и готовит идеи...</b>", parse_mode="HTML")
     try:
-        topics = await creative_agent.scout_topics(count=3)
-        # Сохраняем темы в состояние для последующего использования
+        leads = await db.get_recent_spy_leads(limit=30)
+        topics = await creative_agent.ideas_from_spy_leads(leads, count=3)
         await state.update_data(scout_topics=topics)
-        
         text = "🕵️‍♂️ <b>Темы от Шпиона</b>\n\n"
+        text += "Выберите, что сделать с темой:\n\n"
         buttons = []
         for i, topic in enumerate(topics, 1):
-            text += f"{i}. <b>{topic['title']}</b>\n"
-            text += f"   💡 {topic['insight']}\n\n"
-            
+            title = _normalize_display_title(topic.get("title", ""))
+            insight = (topic.get("insight") or "").strip()
+            text += f"<b>{i}. {title}</b>\n   💡 {insight}\n\n"
+            buttons.append([
+                InlineKeyboardButton(text=f"📝 Создать пост #{i}", callback_data=f"create_post_{i}"),
+                InlineKeyboardButton(text=f"📢 Опубликовать #{i}", callback_data=f"pub_topic_{i}"),
+            ])
             buttons.append([
                 InlineKeyboardButton(text=f"🖼 Обложка #{i}", callback_data=f"gen_img_{i}"),
-                InlineKeyboardButton(text=f"📢 Опубликовать #{i}", callback_data=f"pub_topic_{i}")
+                InlineKeyboardButton(text=f"📋 В черновики #{i}", callback_data=f"to_draft_{i}"),
             ])
-        
         buttons.append([InlineKeyboardButton(text="🔄 Новые темы", callback_data="refresh_spy")])
         keyboard = InlineKeyboardMarkup(inline_keyboard=buttons)
-        
         await message.answer(text, reply_markup=keyboard, parse_mode="HTML")
     except Exception as e:
         logger.error(f"Error in spy_topics_handler: {e}")
@@ -134,6 +171,62 @@ async def spy_topics_handler(message: Message, state: FSMContext):
 async def refresh_spy_handler(callback: CallbackQuery, state: FSMContext):
     await callback.answer("🔄 Обновляю темы...")
     await spy_topics_handler(callback.message, state)
+
+
+@router.callback_query(F.data.startswith("create_post_"))
+async def create_post_from_topic_handler(callback: CallbackQuery, state: FSMContext):
+    """Создать пост по выбранной теме: сохраняем в черновики и предлагаем перейти в Очередь."""
+    topic_idx = int(callback.data.split("_")[-1]) - 1
+    data = await state.get_data()
+    topics = data.get("scout_topics", [])
+    if topic_idx < 0 or topic_idx >= len(topics):
+        await callback.answer("❌ Тема не найдена")
+        return
+    topic = topics[topic_idx]
+    title = _normalize_display_title(topic.get("title", ""), max_len=200)
+    body = (topic.get("insight") or "").strip() or title
+    from datetime import datetime
+    post_id = await db.add_content_post(
+        title=title,
+        body=body,
+        cta="Записаться на консультацию",
+        channel="terion",
+        status="draft",
+    )
+    await callback.answer(f"📝 Пост #{post_id} добавлен в черновики")
+    await callback.message.answer(
+        f"✅ <b>Пост по теме добавлен в черновики</b>\n\n"
+        f"Заголовок: {title[:80]}{'…' if len(title) > 80 else ''}\n\n"
+        f"Откройте <b>📅 Очередь постов</b> — там можно отредактировать или опубликовать пост #{post_id}.",
+        parse_mode="HTML"
+    )
+
+
+@router.callback_query(F.data.startswith("to_draft_"))
+async def topic_to_draft_handler(callback: CallbackQuery, state: FSMContext):
+    """Сохранить тему в черновики (контент-план)."""
+    topic_idx = int(callback.data.split("_")[-1]) - 1
+    data = await state.get_data()
+    topics = data.get("scout_topics", [])
+    if topic_idx < 0 or topic_idx >= len(topics):
+        await callback.answer("❌ Тема не найдена")
+        return
+    topic = topics[topic_idx]
+    title = _normalize_display_title(topic.get("title", ""), max_len=200)
+    body = (topic.get("insight") or "").strip() or title
+    from datetime import datetime
+    post_id = await db.add_content_post(
+        title=title,
+        body=body,
+        cta="Записаться на консультацию",
+        channel="terion",
+        status="draft",
+    )
+    await callback.answer(f"📋 В черновики (#{post_id})")
+    await callback.message.answer(
+        f"✅ Тема сохранена в черновики (пост #{post_id}). Откройте <b>📅 Очередь постов</b>, чтобы отредактировать или опубликовать.",
+        parse_mode="HTML"
+    )
 
 @router.callback_query(F.data.startswith("gen_img_"))
 async def generate_image_handler(callback: CallbackQuery, state: FSMContext):
@@ -190,27 +283,127 @@ async def publish_topic_handler(callback: CallbackQuery, state: FSMContext):
     )
 
 
+def _format_scheduler_status() -> str:
+    """Краткий статус запланированных задач APScheduler."""
+    try:
+        from services.scheduler_ref import get_scheduler
+        sched = get_scheduler()
+        if not sched:
+            return ""
+        lines = []
+        for job in sched.get_jobs():
+            next_run = getattr(job, "next_run_time", None)
+            when = next_run.strftime("%H:%M %d.%m") if next_run else "—"
+            label = getattr(job, "id", None) or getattr(job, "name", None) or "задача"
+            lines.append(f"• {label}: след. запуск {when}")
+        if lines:
+            return "⏰ <b>По расписанию</b>\n" + "\n".join(lines[:5]) + "\n\n"
+    except Exception:
+        pass
+    return ""
+
+
 @router.message(F.text == "📅 Очередь постов")
 async def queue_handler(message: Message, state: FSMContext):
-    """Очередь постов"""
+    """Очередь постов: черновики из БД + статус задач APScheduler, с кнопками действий."""
     await message.answer("📅 <b>Очередь постов</b>\n\nЗагрузка...", parse_mode="HTML")
-    
     try:
         posts = await db.get_draft_posts()
-        
-        if not posts:
-            await message.answer("📭 Очередь пуста. Создайте первый пост!", parse_mode="HTML")
-            return
-        
         text = "📅 <b>Очередь постов</b>\n\n"
+        text += _format_scheduler_status()
+        if not posts:
+            text += "📭 Черновиков пока нет. Добавьте пост через <b>🛠 Создать пост</b> или из <b>🕵️‍♂️ Темы от Шпиона</b> (кнопка «В черновики»)."
+            await message.answer(text, parse_mode="HTML")
+            return
+        text += "📋 <b>Черновики</b> (можно опубликовать или отредактировать):\n\n"
+        buttons = []
         for post in posts[-10:]:
+            pid = post.get("id", "?")
             status = "⏳" if post.get("status") == "draft" else "📤"
-            topic = post.get("title", "Без темы")
-            text += f"{status} #{post.get('id', '?')} — {topic}\n"
-        
-        await message.answer(text, parse_mode="HTML")
+            topic = _normalize_display_title(post.get("title") or post.get("body", "Без темы")[:200], max_len=55)
+            text += f"{status} #{pid} — {topic}\n"
+            buttons.append([
+                InlineKeyboardButton(text=f"📤 Опубликовать #{pid}", callback_data=f"queue_pub_{pid}"),
+                InlineKeyboardButton(text=f"✏️ Редактировать #{pid}", callback_data=f"queue_edit_{pid}"),
+            ])
+        keyboard = InlineKeyboardMarkup(inline_keyboard=buttons)
+        await message.answer(text, reply_markup=keyboard, parse_mode="HTML")
     except Exception as e:
+        logger.exception("queue_handler")
         await message.answer(f"❌ Ошибка: {e}")
+
+
+@router.callback_query(F.data.startswith("queue_pub_"))
+async def queue_publish_handler(callback: CallbackQuery, state: FSMContext):
+    """Опубликовать пост из очереди (черновик) во все каналы."""
+    try:
+        post_id = int(callback.data.replace("queue_pub_", ""))
+    except ValueError:
+        await callback.answer("❌ Неверный ID")
+        return
+    post = await db.get_content_post(post_id)
+    if not post:
+        await callback.answer("❌ Пост не найден")
+        return
+    title = (post.get("title") or "").strip()
+    body = (post.get("body") or "").strip()
+    text = f"📌 <b>{title}</b>\n\n{body}\n\n#перепланировка #согласование #терион" if title else body + "\n\n#перепланировка #согласование #терион"
+    await callback.answer("📤 Публикую...")
+    results = await publisher.publish_all(text, image_bytes=None)
+    await db.mark_as_published(post_id)
+    success = sum(1 for r in results.values() if r)
+    await callback.message.answer(
+        f"✅ Пост #{post_id} опубликован. Успешно: {success}/{len(results)} каналов.",
+        parse_mode="HTML"
+    )
+
+
+@router.callback_query(F.data.startswith("queue_edit_"))
+async def queue_edit_handler(callback: CallbackQuery, state: FSMContext):
+    """Редактировать пост из очереди: запросить новый текст."""
+    try:
+        post_id = int(callback.data.replace("queue_edit_", ""))
+    except ValueError:
+        await callback.answer("❌ Неверный ID")
+        return
+    post = await db.get_content_post(post_id)
+    if not post:
+        await callback.answer("❌ Пост не найден")
+        return
+    await state.set_state(QueueStates.editing)
+    await state.update_data(queue_edit_post_id=post_id)
+    await callback.answer()
+    await callback.message.answer(
+        f"✏️ <b>Редактирование поста #{post_id}</b>\n\n"
+        "Отправьте одним сообщением новый текст поста (первая строка — заголовок, остальное — тело). Или /cancel для отмены.",
+        parse_mode="HTML"
+    )
+
+
+@router.message(QueueStates.editing, F.text)
+async def queue_edit_text_handler(message: Message, state: FSMContext):
+    """Принять новый текст поста и сохранить в контент-план."""
+    if not is_admin(message.from_user.id):
+        return
+    if message.text and message.text.strip().lower() == "/cancel":
+        await state.clear()
+        await message.answer("Отмена редактирования.")
+        return
+    data = await state.get_data()
+    post_id = data.get("queue_edit_post_id")
+    if not post_id:
+        await state.clear()
+        return
+    text = (message.text or "").strip()
+    if not text:
+        await message.answer("Текст не должен быть пустым. Отправьте снова или /cancel.")
+        return
+    lines = text.split("\n", 1)
+    title = lines[0].strip()
+    body = lines[1].strip() if len(lines) > 1 else title
+    await db.update_content_plan_entry(post_id, title=title, body=body)
+    await state.clear()
+    await message.answer(f"✅ Пост #{post_id} обновлён. Заголовок и тело сохранены. Откройте <b>📅 Очередь постов</b>, чтобы опубликовать.", parse_mode="HTML")
 
 
 @router.message(lambda m: m.text and m.text.startswith("Срочно:"))

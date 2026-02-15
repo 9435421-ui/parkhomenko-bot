@@ -252,6 +252,43 @@ async def cmd_spy_status(message: Message):
         await message.answer(f"❌ Ошибка: {e}")
 
 
+# === КОМАНДА /LEADS_REVIEW (ревизия лидов за ночь) ===
+@router.message(Command("leads_review"))
+async def cmd_leads_review(message: Message):
+    """Ревизия лидов: кто попался за последние 12 ч и какие «боли» озвучили (для утреннего плана)."""
+    if not check_admin(message.from_user.id):
+        await message.answer("⛔ У вас нет доступа")
+        return
+    try:
+        leads = await db.get_spy_leads_since_hours(since_hours=12)
+        if not leads:
+            await message.answer(
+                "📋 <b>Ревизия лидов</b> (за последние 12 ч)\n\n"
+                "Пока никого не попалось. Запустите /hunt для скана или подождите следующего цикла шпиона.",
+                parse_mode="HTML"
+            )
+            return
+        text = (
+            "📋 <b>Ревизия лидов</b> (за последние 12 ч)\n\n"
+            f"Попалось в сети: <b>{len(leads)}</b>\n\n"
+        )
+        for i, lead in enumerate(leads[:25], 1):
+            who = lead.get("username") or lead.get("author_id") or "—"
+            if lead.get("profile_url"):
+                who = f'<a href="{lead["profile_url"]}">{who}</a>'
+            source = (lead.get("source_name") or lead.get("source_type") or "—").replace("<", "").replace(">", "")
+            pain = (lead.get("text") or "").strip().replace("\n", " ")[:200]
+            if len(lead.get("text") or "") > 200:
+                pain += "…"
+            text += f"<b>{i}. {who}</b> · {source}\n{pain}\n\n"
+        if len(leads) > 25:
+            text += f"… и ещё {len(leads) - 25} лидов."
+        await message.answer(text, parse_mode="HTML")
+    except Exception as e:
+        logger.exception("leads_review")
+        await message.answer(f"❌ Ошибка: {e}")
+
+
 # === КОМАНДА /SPY_REPORT ===
 @router.message(Command("spy_report"))
 async def cmd_spy_report(message: Message):

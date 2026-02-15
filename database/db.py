@@ -201,9 +201,15 @@ class Database:
                     is_archived BOOLEAN DEFAULT FALSE
                 )
             """)
-            
             await self.conn.commit()
-    
+
+            # Миграция: колонка contacted_at для «Продавца» (первый диалог с лидом)
+            try:
+                await cursor.execute("ALTER TABLE spy_leads ADD COLUMN contacted_at TIMESTAMP NULL")
+                await self.conn.commit()
+            except Exception:
+                pass  # колонка уже есть
+
     async def get_or_create_user(self, user_id: int, username: Optional[str] = None,
                                 first_name: Optional[str] = None, last_name: Optional[str] = None) -> Dict:
         async with self.conn.cursor() as cursor:
@@ -376,6 +382,51 @@ class Database:
             )
             row = await cursor.fetchone()
             return row[0] if row else 0
+
+    async def get_recent_spy_leads(self, limit: int = 30) -> List[Dict]:
+        """Последние лиды от шпиона (для генерации идей контента)."""
+        async with self.conn.cursor() as cursor:
+            await cursor.execute(
+                "SELECT id, source_type, source_name, text, url, created_at FROM spy_leads ORDER BY created_at DESC LIMIT ?",
+                (limit,),
+            )
+            rows = await cursor.fetchall()
+            return [dict(row) for row in rows]
+
+    async def get_spy_leads_since_hours(self, since_hours: int = 12) -> List[Dict]:
+        """Лиды за последние N часов (ревизия: кто попался, какие боли)."""
+        async with self.conn.cursor() as cursor:
+            await cursor.execute(
+                """SELECT id, source_type, source_name, author_id, username, profile_url, text, url, created_at
+                   FROM spy_leads WHERE created_at >= datetime('now', ?)
+                   ORDER BY created_at DESC""",
+                (f"-{since_hours} hours",),
+            )
+            rows = await cursor.fetchall()
+            return [dict(row) for row in rows]
+
+    async def get_spy_lead_uncontacted_by_author(self, author_id: str) -> Optional[Dict]:
+        """Необработанный лид по author_id (для первого контакта «Продавец»). author_id — строка (TG user id)."""
+        if not author_id:
+            return None
+        async with self.conn.cursor() as cursor:
+            await cursor.execute(
+                """SELECT id, source_name, text, created_at FROM spy_leads
+                   WHERE (author_id = ? OR author_id = ?) AND (contacted_at IS NULL)
+                   ORDER BY created_at DESC LIMIT 1""",
+                (str(author_id), author_id),
+            )
+            row = await cursor.fetchone()
+            return dict(row) if row else None
+
+    async def mark_spy_lead_contacted(self, lead_id: int) -> None:
+        """Отметить лид как «с ним уже начали диалог» (Антон написал первым)."""
+        async with self.conn.cursor() as cursor:
+            await cursor.execute(
+                "UPDATE spy_leads SET contacted_at = datetime('now') WHERE id = ?",
+                (lead_id,),
+            )
+            await self.conn.commit()
 
     async def get_setting(self, key: str, default: str = "") -> str:
         """Получить значение настройки (bot_settings)."""

@@ -113,8 +113,31 @@ async def main():
         logger.error(f"Ошибка проверки связей: {e}")
     
     scheduler = AsyncIOScheduler()
-    scheduler.add_job(lambda: logger.info("⏰ Проверка постов"), 'cron', hour=12)
-    
+
+    async def check_and_publish_scheduled_posts():
+        """Публикация постов из контент-плана (status=approved, publish_date <= сейчас)."""
+        try:
+            posts = await db.get_posts_to_publish()
+            if not posts:
+                return
+            for post in posts:
+                try:
+                    title = (post.get("title") or "").strip()
+                    body = (post.get("body") or "").strip()
+                    text = f"📌 <b>{title}</b>\n\n{body}\n\n#перепланировка #согласование #терион" if title else body + "\n\n#перепланировка #согласование #терион"
+                    image_bytes = None  # TODO: загрузка по image_url при наличии
+                    await publisher.publish_all(text, image_bytes)
+                    await db.mark_as_published(post["id"])
+                    logger.info("✅ Опубликован пост #%s из контент-плана", post["id"])
+                except Exception as e:
+                    logger.error("Ошибка публикации поста #%s: %s", post.get("id"), e)
+        except Exception as e:
+            logger.error("Ошибка check_and_publish_scheduled_posts: %s", e)
+
+    # Проверка и публикация по расписанию: каждый час (посты с publish_date в прошлом и status=approved)
+    scheduler.add_job(check_and_publish_scheduled_posts, "interval", hours=1)
+    scheduler.add_job(check_and_publish_scheduled_posts, "cron", hour=12, minute=0)  # явно в 12:00
+
     # Lead Hunter & Creative Agent Integration
     hunter = LeadHunter()
     
@@ -167,6 +190,8 @@ async def main():
         except Exception as e:
             logger.warning(f"Ошибка отправки тем в группу: {e}")
     scheduler.add_job(post_creative_topics_to_group, 'interval', hours=6, args=[content_bot])
+    from services.scheduler_ref import set_scheduler
+    set_scheduler(scheduler)
     dp_content = Dispatcher(storage=MemoryStorage())
     dp_content.callback_query.middleware(UnhandledCallbackMiddleware())
     dp_content.include_routers(content_router)
@@ -179,10 +204,11 @@ async def main():
                 BotCommand(command="stats", description="Статистика скана"),
                 BotCommand(command="hunt", description="Охота за лидами"),
                 BotCommand(command="spy_status", description="Статус шпиона: чаты и лиды за 24 ч"),
+                BotCommand(command="leads_review", description="Ревизия лидов за 12 ч: кто попался, какие боли"),
             ],
             scope=BotCommandScopeChat(chat_id=LEADS_GROUP_CHAT_ID),
         )
-        logger.info("✅ Команды для рабочей группы заданы (stats, hunt, spy_status)")
+        logger.info("✅ Команды для рабочей группы заданы (stats, hunt, spy_status, leads_review)")
     except Exception as e:
         logger.warning("set_my_commands для группы: %s", e)
 
