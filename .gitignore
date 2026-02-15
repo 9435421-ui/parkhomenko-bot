@@ -30,6 +30,10 @@ pip-log.txt
 logs/
 nohup.out
 
+# === SESSION / CURSOR ===
+*.session
+.cursor/
+
 # === IDE ===
 .vscode/
 .idea/
