@@ -54,19 +54,24 @@ class ScoutParser:
     Ищет посты по ключевым словам и оставляет комментарии с предложением помощи.
     """
 
-    # === TELEGRAM КАНАЛЫ ===
+    # === TELEGRAM КАНАЛЫ (Москва и МО, по умолчанию при пустом .env) ===
     TG_CHANNELS = [
-        {"id": "-1001234567890", "name": "Химки", "geo": "Химки"},
-        {"id": "-1001234567891", "name": "Красногорск", "geo": "Красногорск"},
-        {"id": "-1001234567892", "name": "Север Москвы", "geo": "САО"},
-        {"id": "-1001234567893", "name": "СЗАО Москва", "geo": "СЗАО"},
+        {"id": "novostroyman", "name": "Новостройки Москвы и МО", "geo": "Москва/МО"},
+        {"id": "NovostroyM", "name": "Первичка Московский регион", "geo": "Москва/МО"},
+        {"id": "nedvigimost_moskva", "name": "Недвижимость Москва", "geo": "Москва/МО"},
+        {"id": "domostroy_channel", "name": "Строительство и недвижимость", "geo": "Москва/МО"},
+        {"id": "belaya_kaska", "name": "Белая каска недвижимость", "geo": "Москва/МО"},
+        {"id": "THEMOSCOWCITY", "name": "Москва-Сити", "geo": "Москва"},
+        {"id": "startyprodazh", "name": "Старты продаж", "geo": "Москва/МО"},
     ]
 
-    # === VK ГРУППЫ (ID групп) ===
+    # === VK ГРУППЫ (ID групп, Москва и МО) ===
     VK_GROUPS = [
-        {"id": "123456789", "name": "Химки Бесплатка", "geo": "Химки"},
-        {"id": "987654321", "name": "Красногорск Барахолка", "geo": "Красногорск"},
-        {"id": "456789123", "name": "Москва Перепланировка", "geo": "Москва"},
+        {"id": "133756068", "name": "Ремонт квартир Москва и Подмосковье", "geo": "Москва/МО"},
+        {"id": "124518536", "name": "Недвижимость услуги", "geo": "Москва/МО"},
+        {"id": "152491538", "name": "Реновация Москва (обсуждения)", "geo": "Москва"},
+        {"id": "235569022", "name": "ТЕРИОН / перепланировки", "geo": "Москва/МО"},
+        {"id": "29534144", "name": "Москва 24", "geo": "Москва"},
     ]
 
     # === КЛЮЧЕВЫЕ СЛОВА ===
@@ -107,12 +112,21 @@ class ScoutParser:
         from config import SCOUT_ENABLED, SCOUT_TG_CHANNELS, SCOUT_VK_GROUPS, SCOUT_TG_KEYWORDS, SCOUT_VK_KEYWORDS
         self.enabled = SCOUT_ENABLED
         self.check_interval = int(os.getenv("SCOUT_PARSER_INTERVAL", "1800"))  # 30 минут
-        
-        # Каналы и группы
-        self.tg_channels = [{"id": c, "name": c, "geo": "Москва/МО"} for c in SCOUT_TG_CHANNELS if c]
-        self.vk_groups = [{"id": g, "name": g, "geo": "Москва/МО"} for g in SCOUT_VK_GROUPS if g]
-        
-        logger.info(f"🔍 ScoutParser инициализирован. Включен: {'✅' if self.enabled else '❌'}")
+
+        # Каналы и группы: сначала детальный .env (SCOUT_TG_CHANNEL_1_ID и т.д.), иначе список из .env, иначе дефолт (Москва/МО)
+        self.tg_channels = self._load_tg_channels()
+        if not self.tg_channels and SCOUT_TG_CHANNELS:
+            self.tg_channels = [{"id": c.strip(), "name": c.strip(), "geo": "Москва/МО"} for c in SCOUT_TG_CHANNELS if c and c.strip()]
+        if not self.tg_channels:
+            self.tg_channels = self.TG_CHANNELS
+
+        self.vk_groups = self._load_vk_groups()
+        if not self.vk_groups and SCOUT_VK_GROUPS:
+            self.vk_groups = [{"id": g.strip(), "name": g.strip(), "geo": "Москва/МО"} for g in SCOUT_VK_GROUPS if g and g.strip()]
+        if not self.vk_groups:
+            self.vk_groups = self.VK_GROUPS
+
+        logger.info(f"🔍 ScoutParser инициализирован. Включен: {'✅' if self.enabled else '❌'}. TG каналов: {len(self.tg_channels)}, VK групп: {len(self.vk_groups)}")
 
     def _load_tg_channels(self) -> List[Dict]:
         """Загрузка TG каналов из .env"""
