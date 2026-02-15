@@ -107,6 +107,29 @@ class LeadHunter:
             logger.warning("Не удалось отправить файл лидов в группу: %s", e)
             return False
 
+    async def _send_lead_notify_to_admin(self, lead: dict, source_name: str = "", profile_url: str = ""):
+        """При нахождении лида — уведомление в личку админу (Юлия, ADMIN_ID)."""
+        from config import BOT_TOKEN, ADMIN_ID
+        if not BOT_TOKEN or not ADMIN_ID:
+            return
+        content = (lead.get("content") or lead.get("intent") or "")[:300]
+        text = (
+            "🕵️ <b>Новый лид (шпион)</b>\n\n"
+            f"📄 {content}{'…' if len(lead.get('content') or '') > 300 else ''}\n\n"
+            f"📍 Источник: {source_name or '—'}\n"
+            f"⭐ Горячность: {lead.get('hotness', 0)}/10\n"
+        )
+        if profile_url:
+            text += f"🔗 Профиль/пост: {profile_url}\n"
+        else:
+            text += f"🔗 {lead.get('url', '')}\n"
+        try:
+            bot = Bot(token=BOT_TOKEN, default=DefaultBotProperties(parse_mode="HTML"))
+            await bot.send_message(ADMIN_ID, text)
+            await bot.session.close()
+        except Exception as e:
+            logger.debug("Уведомление админу о лиде: %s", e)
+
     async def _send_hot_lead_to_admin(self, lead: dict):
         """Пересылает горячий лид (AI Жюля, hotness > 4) админу в Telegram."""
         from config import BOT_TOKEN, ADMIN_ID
@@ -172,10 +195,46 @@ class LeadHunter:
                 # Максимум карточек в группу за один запуск (чтобы не флудить)
                 MAX_CARDS_PER_RUN = 30
                 cards_sent = 0
+                # Сопоставление hot_lead с постом по url для author_id/username/profile_url
+                def find_post_by_url(url: str):
+                    for p in all_posts:
+                        post_url = getattr(p, "url", "") or f"{p.source_type}/{p.source_id}/{p.post_id}"
+                        if post_url == url or url in post_url:
+                            return p
+                    return None
+
                 for lead in hot_leads:
                     if lead.get("hotness", 0) > 4:
                         logger.info(f"🔥 Горячий лид (Жюль, hotness={lead.get('hotness')}) → пересылка админу")
                         await self._send_hot_lead_to_admin(lead)
+                    # Сохраняем лид в spy_leads (user_id, username, ссылка на профиль)
+                    post = find_post_by_url(lead.get("url", ""))
+                    author_id = getattr(post, "author_id", None) if post else None
+                    author_name = getattr(post, "author_name", None) if post else None
+                    source_name = getattr(post, "source_name", "") if post else "—"
+                    source_type = getattr(post, "source_type", "telegram") if post else "telegram"
+                    profile_url = ""
+                    if author_id is not None and source_type == "vk":
+                        aid = int(author_id) if isinstance(author_id, (int, str)) and str(author_id).lstrip("-").isdigit() else 0
+                        if aid > 0:  # пользователь, не группа
+                            profile_url = f"https://vk.com/id{aid}"
+                    elif author_id is not None and source_type == "telegram":
+                        profile_url = f"tg://user?id={author_id}"
+                    try:
+                        from database import db as main_db
+                        await main_db.add_spy_lead(
+                            source_type=source_type,
+                            source_name=source_name,
+                            url=lead.get("url", ""),
+                            text=(lead.get("content") or lead.get("intent") or "")[:2000],
+                            author_id=str(author_id) if author_id else None,
+                            username=author_name,
+                            profile_url=profile_url or None,
+                        )
+                    except Exception as e:
+                        logger.warning("Не удалось сохранить spy_lead: %s", e)
+                    # Уведомление в личку админу (Юлия) при каждом лиде
+                    await self._send_lead_notify_to_admin(lead, source_name, profile_url or lead.get("url", ""))
                     # Карточка лида в рабочую группу (топик «Горячие лиды»)
                     if cards_sent < MAX_CARDS_PER_RUN:
                         if await self._send_lead_card_to_group(lead):

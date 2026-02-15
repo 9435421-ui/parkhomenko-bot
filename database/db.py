@@ -159,6 +159,21 @@ class Database:
                 )
             """)
             
+            # Таблица лидов от шпиона (TG/VK: автор, ссылка на профиль, текст)
+            await cursor.execute("""
+                CREATE TABLE IF NOT EXISTS spy_leads (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    source_type TEXT NOT NULL,
+                    source_name TEXT NOT NULL,
+                    author_id TEXT,
+                    username TEXT,
+                    profile_url TEXT,
+                    text TEXT,
+                    url TEXT NOT NULL,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+
             # Таблица истории контента (финансовый трекинг)
             await cursor.execute("""
                 CREATE TABLE IF NOT EXISTS content_history (
@@ -319,6 +334,36 @@ class Database:
         async with self.conn.cursor() as cursor:
             await cursor.execute("UPDATE leads SET thread_id = ? WHERE id = ?", (thread_id, lead_id))
             await self.conn.commit()
+
+    # === ЛИДЫ ОТ ШПИОНА (spy_leads) ===
+    async def add_spy_lead(
+        self,
+        source_type: str,
+        source_name: str,
+        url: str,
+        text: str = "",
+        author_id: Optional[str] = None,
+        username: Optional[str] = None,
+        profile_url: Optional[str] = None,
+    ) -> int:
+        """Сохранить лид от шпиона: источник, автор, ссылка на профиль, текст."""
+        async with self.conn.cursor() as cursor:
+            await cursor.execute(
+                """INSERT INTO spy_leads (source_type, source_name, author_id, username, profile_url, text, url)
+                   VALUES (?, ?, ?, ?, ?, ?, ?)""",
+                (source_type, source_name, author_id or None, username or None, profile_url or None, text or "", url),
+            )
+            await self.conn.commit()
+            return cursor.lastrowid
+
+    async def get_spy_leads_count_24h(self) -> int:
+        """Количество лидов от шпиона за последние 24 часа."""
+        async with self.conn.cursor() as cursor:
+            await cursor.execute(
+                "SELECT COUNT(*) FROM spy_leads WHERE created_at >= datetime('now', '-1 day')",
+            )
+            row = await cursor.fetchone()
+            return row[0] if row else 0
 
     async def save_post(self, post_type: str, title: str, body: str, cta: str, publish_date: datetime,
                        channel: str = 'terion', theme: Optional[str] = None, 

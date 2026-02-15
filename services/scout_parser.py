@@ -272,12 +272,21 @@ class ScoutParser:
                         continue
                     scanned += 1
                     if self.detect_lead(message.text):
+                        author_id = getattr(message, "sender_id", None)
+                        author_name = None
+                        if getattr(message, "sender", None):
+                            s = message.sender
+                            author_name = getattr(s, "username", None) or getattr(s, "first_name", None)
+                            if author_name and getattr(s, "last_name", None):
+                                author_name = f"{author_name} {s.last_name}".strip()
                         post = ScoutPost(
                             source_type="telegram",
                             source_name=channel['name'],
                             source_id=str(channel['id']),
                             post_id=str(message.id),
                             text=message.text,
+                            author_id=author_id,
+                            author_name=author_name,
                             url=self._tg_post_url(channel['id'], message.id),
                         )
                         posts.append(post)

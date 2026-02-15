@@ -65,6 +65,45 @@ def get_back_to_admin() -> InlineKeyboardMarkup:
     return builder.as_markup()
 
 
+# === КОМАНДА /SPY_STATUS ===
+@router.message(Command("spy_status"))
+async def cmd_spy_status(message: Message):
+    """Статус шпиона: активные чаты/группы мониторинга и кол-во лидов за 24 ч (только для админа)."""
+    if not check_admin(message.from_user.id):
+        await message.answer("⛔ У вас нет доступа")
+        return
+    try:
+        # Активные источники: из scout_parser (TG + VK) и из БД (target_resources)
+        tg_list = [f"📱 {ch['name']} (@{ch['id']})" for ch in scout_parser.TG_CHANNELS]
+        vk_list = [f"📘 {g['name']} (id{g['id']})" for g in scout_parser.VK_GROUPS]
+        resources = await db.get_target_resources(active_only=True)
+        db_list = [f"{'📱' if r['type'] == 'telegram' else '📘'} {r.get('title') or r['link']}" for r in resources]
+        lines = [
+            "🕵️ <b>Статус шпиона</b>",
+            "",
+            "<b>Активные чаты/группы для мониторинга:</b>",
+            "<b>Telegram каналы (Scout):</b>",
+        ]
+        lines.extend(tg_list[:20] or ["— нет"])
+        if len(tg_list) > 20:
+            lines.append(f"… и ещё {len(tg_list) - 20}")
+        lines.append("<b>VK группы (Scout):</b>")
+        lines.extend(vk_list[:15] or ["— нет"])
+        if len(vk_list) > 15:
+            lines.append(f"… и ещё {len(vk_list) - 15}")
+        if db_list:
+            lines.append("<b>Из админки (target_resources):</b>")
+            lines.extend(db_list[:10])
+        # Лидов за 24 часа
+        count_24h = await db.get_spy_leads_count_24h()
+        lines.append("")
+        lines.append(f"📊 <b>Собрано лидов за последние 24 ч:</b> {count_24h}")
+        await message.answer("\n".join(lines), parse_mode="HTML")
+    except Exception as e:
+        logger.exception("spy_status")
+        await message.answer(f"❌ Ошибка: {e}")
+
+
 # === КОМАНДА /SPY_REPORT ===
 @router.message(Command("spy_report"))
 async def cmd_spy_report(message: Message):

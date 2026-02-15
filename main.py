@@ -178,10 +178,11 @@ async def main():
             commands=[
                 BotCommand(command="stats", description="Статистика скана"),
                 BotCommand(command="hunt", description="Охота за лидами"),
+                BotCommand(command="spy_status", description="Статус шпиона: чаты и лиды за 24 ч"),
             ],
             scope=BotCommandScopeChat(chat_id=LEADS_GROUP_CHAT_ID),
         )
-        logger.info("✅ Команды для рабочей группы заданы (stats, hunt)")
+        logger.info("✅ Команды для рабочей группы заданы (stats, hunt, spy_status)")
     except Exception as e:
         logger.warning("set_my_commands для группы: %s", e)
 
