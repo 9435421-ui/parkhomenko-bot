@@ -432,7 +432,23 @@ async def safe_edit_message(message, text, reply_markup=None, parse_mode="HTML")
 
 
 async def download_photo(bot: Bot, file_id: str) -> Optional[bytes]:
+    """
+    Загрузка фото: поддерживает URL (http/https) и file_id от Telegram.
+    - Если file_id начинается с http - качаем как файл
+    - Иначе - запрашиваем через bot.get_file
+    """
     try:
+        # Проверяем, если это URL
+        if file_id.startswith("http://") or file_id.startswith("https://"):
+            async with aiohttp.ClientSession() as session:
+                async with session.get(file_id) as resp:
+                    if resp.status == 200:
+                        return await resp.read()
+                    else:
+                        logger.error(f"HTTP download failed: {resp.status}")
+                        return None
+        
+        # Иначе - file_id от Telegram
         file = await bot.get_file(file_id)
         with tempfile.NamedTemporaryFile(suffix=".jpg", delete=False) as tmp:
             await bot.download_file(file.file_path, tmp.name)
@@ -677,6 +693,7 @@ async def ai_visual_handler(message: Message, state: FSMContext):
         await state.clear()
         return
     
+    tmp_path = None
     try:
         image_bytes = base64.b64decode(image_b64)
         with tempfile.NamedTemporaryFile(suffix=".jpg", delete=False) as tmp:
@@ -697,10 +714,16 @@ async def ai_visual_handler(message: Message, state: FSMContext):
             .as_markup(),
             parse_mode="HTML"
         )
-        os.unlink(tmp_path)
     except Exception as e:
         logger.error(f"Send error: {e}")
         await message.answer("❌ Ошибка отправки", reply_markup=get_back_btn())
+    finally:
+        # Всегда удаляем временный файл, даже если интернет моргнул
+        if tmp_path and os.path.exists(tmp_path):
+            try:
+                os.unlink(tmp_path)
+            except Exception:
+                pass
     
     await state.clear()
 
@@ -810,18 +833,28 @@ async def generate_series_images(callback: CallbackQuery, state: FSMContext):
         
         image_b64 = await yandex_art.generate(art_prompt) if model == 'yandex' else await router_ai.generate_image_gemini(art_prompt)
         
+        tmp_path = None
         if image_b64:
-            image_bytes = base64.b64decode(image_b64)
-            with tempfile.NamedTemporaryFile(suffix=".jpg", delete=False) as tmp:
-                tmp.write(image_bytes)
-                tmp_path = tmp.name
-            
-            await callback.message.answer_photo(
-                photo=FSInputFile(tmp_path),
-                caption=f"🎨 <b>День {i}</b> — {topic}",
-                parse_mode="HTML"
-            )
-            os.unlink(tmp_path)
+            try:
+                image_bytes = base64.b64decode(image_b64)
+                with tempfile.NamedTemporaryFile(suffix=".jpg", delete=False) as tmp:
+                    tmp.write(image_bytes)
+                    tmp_path = tmp.name
+                
+                await callback.message.answer_photo(
+                    photo=FSInputFile(tmp_path),
+                    caption=f"🎨 <b>День {i}</b> — {topic}",
+                    parse_mode="HTML"
+                )
+            except Exception as e:
+                logger.error(f"Ошибка генерации обложки дня {i}: {e}")
+            finally:
+                # Всегда удаляем временный файл
+                if tmp_path and os.path.exists(tmp_path):
+                    try:
+                        os.unlink(tmp_path)
+                    except Exception:
+                        pass
     
     await callback.message.answer("✅ <b>Все обложки готовы!</b>", reply_markup=get_back_btn(), parse_mode="HTML")
 

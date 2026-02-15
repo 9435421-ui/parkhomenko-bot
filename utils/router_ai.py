@@ -26,7 +26,7 @@ class RouterAIClient:
         temperature: float = 0.2,
         max_tokens: int = 500,
         model: Optional[str] = None
-    ) -> str:
+    ) -> Optional[str]:
         """
         Генерация ответа через Router AI
         
@@ -38,7 +38,7 @@ class RouterAIClient:
             model: Модель (kimi, qwen, deepseek)
         
         Returns:
-            str: Ответ от модели
+            Optional[str]: Ответ от модели или None для переключения на резерв
         """
         if not self.api_key:
             return "⚠️ ROUTER_AI_KEY не настроен. Обратитесь к администратору."
@@ -96,9 +96,12 @@ class RouterAIClient:
                                 max_tokens=max_tokens,
                                 model=self.fallback_model
                             )
-                        return f"Ошибка Router AI: {response.status}"
+                        # Возвращаем None для переключения на резерв (Яндекс)
+                        return None
         except Exception as e:
-            return f"Ошибка подключения к Router AI: {str(e)}"
+            print(f"⚠️ Ошибка подключения к Router AI: {str(e)}")
+            # Возвращаем None для переключения на резерв (Яндекс)
+            return None
     
     async def generate_with_context(
         self,
@@ -107,7 +110,7 @@ class RouterAIClient:
         dialog_history: Optional[List[Dict[str, str]]] = None,
         user_name: Optional[str] = None,
         consultant_style: bool = True
-    ) -> str:
+    ) -> Optional[str]:
         """
         Генерация ответа консультанта с контекстом
         
@@ -119,7 +122,7 @@ class RouterAIClient:
             consultant_style: Использовать стиль Антона
         
         Returns:
-            str: Ответ консультанта
+            Optional[str]: Ответ консультанта или None для переключения на резерв
         """
         if consultant_style:
             system_prompt = self._build_anton_system_prompt()

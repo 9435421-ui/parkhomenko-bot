@@ -103,6 +103,7 @@ async def main():
             except Exception as e:
                 logger.error(f"❌ Топик {name}: {e}")
         
+        # Закрываем сессии проверочных ботов внутри блока проверки
         await main_bot.session.close()
         await content_bot.session.close()
         
