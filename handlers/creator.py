@@ -147,7 +147,9 @@ async def creator_generate(message: types.Message, state: FSMContext):
         parse_mode="HTML"
     )
     
-    # Кнопки действий
+    # Сохраняем изображение в state для публикации с картинкой
+    await state.update_data(image_data=image_data, cost=cost)
+    
     builder = InlineKeyboardBuilder()
     builder.button(text="📝 Создать пост", callback_data=f"creator_post:{prompt}")
     builder.button(text="🔄 Ещё", callback_data="creator_generate")
@@ -157,8 +159,6 @@ async def creator_generate(message: types.Message, state: FSMContext):
         "Выберите действие:",
         reply_markup=builder.as_markup()
     )
-    
-    await state.clear()
 
 
 @creator_router.callback_query(F.data.startswith("creator_post:"))
@@ -190,10 +190,11 @@ async def creator_preview(message: types.Message, state: FSMContext):
         parse_mode="HTML"
     )
     
-    # Кнопки публикации
+    # Кнопки публикации (TERION, ДОМ ГРАНД, MAX)
     builder = InlineKeyboardBuilder()
-    builder.button(text="🚀 TERION", callback_data=f"pub_creator:terion")
-    builder.button(text="🏘 ДОМ ГРАНД", callback_data=f"pub_creator:dom_grnd")
+    builder.button(text="🚀 TERION", callback_data="pub_creator:terion")
+    builder.button(text="🏘 ДОМ ГРАНД", callback_data="pub_creator:dom_grnd")
+    builder.button(text="📱 MAX", callback_data="pub_creator:max")
     builder.button(text="❌ Отмена", callback_data="cancel")
     
     await message.answer(
@@ -206,34 +207,115 @@ async def creator_preview(message: types.Message, state: FSMContext):
 
 @creator_router.callback_query(F.data.startswith("pub_creator:"))
 async def publish_creator_post(callback: types.CallbackQuery, state: FSMContext):
-    """Публикация поста"""
+    """Публикация поста в TERION, ДОМ ГРАНД или MAX"""
     channel = callback.data.replace("pub_creator:", "")
     data = await state.get_data()
-    
+    final_text = data.get("final_text", data.get("post_text", ""))
+
+    if channel == "max":
+        await callback.answer("📱 Публикация в MAX...")
+        try:
+            from content_agent import ContentAgent
+            # Сохраняем пост в БД и публикуем в MAX
+            from database import db
+            post_id = await db.add_content_post(
+                title="Creator",
+                body=final_text,
+                cta="",
+                channel="creator",
+                status="draft",
+            )
+            agent = ContentAgent()
+            ok = await agent.post_to_max(post_id)
+            if ok:
+                await db.update_content_post(post_id, status="published")
+                await callback.message.edit_text(
+                    "✅ Пост опубликован в MAX",
+                    reply_markup=get_creator_menu()
+                )
+            else:
+                await callback.message.edit_text(
+                    "❌ Ошибка публикации в MAX. Проверьте MAX_DEVICE_TOKEN.",
+                    reply_markup=get_creator_menu()
+                )
+        except Exception as e:
+            logger.exception("pub_creator max")
+            await callback.message.edit_text(
+                f"❌ Ошибка MAX: {e}",
+                reply_markup=get_creator_menu()
+            )
+        await state.clear()
+        return
+
     if channel == "terion":
         channel_id = CHANNEL_ID_TERION
     else:
         channel_id = CHANNEL_ID_DOM_GRAD
-    
-    # TODO: Отправить изображение с текстом
-    # Пока просто подтверждаем
-    await callback.message.edit_text(
-        f"✅ Пост опубликован в {channel.upper()}",
-        reply_markup=get_creator_menu()
-    )
-    
-    # Финансовый лог админу
+
+    await callback.answer(f"🚀 Публикую в {channel.upper()}...")
+    try:
+        from aiogram.types import BufferedInputFile
+        image_data = data.get("image_data")
+        if image_data:
+            photo = BufferedInputFile(image_data, filename="post.jpg")
+            await callback.bot.send_photo(channel_id, photo=photo, caption=final_text[:1024], parse_mode="HTML")
+        else:
+            await callback.bot.send_message(channel_id, final_text, parse_mode="HTML")
+        await callback.message.edit_text(
+            f"✅ Пост опубликован в {channel.upper()}",
+            reply_markup=get_creator_menu()
+        )
+    except Exception as e:
+        logger.exception("pub_creator")
+        await callback.message.edit_text(
+            f"❌ Ошибка: {e}",
+            reply_markup=get_creator_menu()
+        )
     cost = data.get("cost", 0)
     await callback.bot.send_message(
         chat_id=ADMIN_ID,
-        text=f"💰 Пост #{channel} опубликован. Списано: {cost}₽"
+        text=f"💰 Пост в {channel.upper()} опубликован. Списано: {cost}₽"
     )
-    
-    await callback.answer()
     await state.clear()
 
 
-# === MAIN MENU ENTRY ===
+@creator_router.callback_query(F.data == "cancel")
+async def creator_cancel(callback: types.CallbackQuery, state: FSMContext):
+    """Отмена — назад в меню создателя"""
+    await state.clear()
+    await callback.message.edit_text(
+        "❌ Отменено.\n\nВыберите действие:",
+        reply_markup=get_creator_menu()
+    )
+    await callback.answer()
+
+
+# === MAIN MENU ENTRY (Создать пост → Текст/Фото/ИИ-Визуал) ===
+@creator_router.callback_query(F.data.in_(["content_visual", "content_text", "content_photo"]))
+async def content_menu_handler(callback: types.CallbackQuery, state: FSMContext):
+    """Текст / Фото / ИИ-Визуал из главного меню"""
+    await state.clear()
+    if callback.data == "content_visual":
+        await creator_start(callback, state)
+        return
+    if callback.data == "content_text":
+        await callback.message.edit_text(
+            "📝 <b>Текст</b>\n\nВведите текст поста:",
+            parse_mode="HTML"
+        )
+        await state.set_state(CreatorStates.preview)
+        await state.update_data(post_text="", image_data=None, image_generated=False)
+    else:
+        # content_photo: пока тот же поток (текст). Полноценно «фото + подпись» — в контент-боте
+        await callback.message.edit_text(
+            "📝 <b>Текст поста</b>\n\nВведите текст (посты с фото удобнее в контент-боте: 📸 Фото → Описание → Пост):",
+            parse_mode="HTML"
+        )
+        await state.set_state(CreatorStates.preview)
+        await state.update_data(post_text="", image_data=None, image_generated=False)
+    await callback.answer()
+
+
 async def show_creator_menu(message: types.Message):
     """Показать меню создателя контента"""
     await message.answer(
@@ -241,7 +323,7 @@ async def show_creator_menu(message: types.Message):
         "Создание контента с ИИ:\n"
         "• Генерация изображений\n"
         "• Написание постов\n"
-        "• Публикация в каналы",
+        "• Публикация в каналы (TERION / ДОМ ГРАНД / MAX)",
         reply_markup=get_creator_menu(),
         parse_mode="HTML"
     )

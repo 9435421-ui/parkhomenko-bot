@@ -18,17 +18,28 @@ class LeadHunter:
             "нежилое помещение", "коммерция", "антресоль", "отдельный вход", "общепит",
             "кафе", "офис", "изменение назначения",
         ]
+        # Ключевые фразы DIY/ремонт — «народные» запросы на перепланировку
+        self.lead_phrases = [
+            "своими руками",
+            "сломали стену",
+            "перенесли радиатор",
+            "залили пол",
+            "хотим объединить",
+        ]
 
     async def hunt(self, messages: List[Dict]):
         results = []
         for msg in messages:
+            text = (msg.get('text') or '').lower()
+            has_lead_phrase = any(p in text for p in self.lead_phrases)
             analysis = await self._analyze_intent(msg['text'])
-            if analysis['is_lead']:
+            if analysis['is_lead'] or has_lead_phrase:
                 lead_data = {
-                    'url': msg['url'], 'content': msg['text'],
-                    'intent': analysis['intent'], 'hotness': analysis['hotness'],
-                    'geo': "Москва/МО" if self._check_geo(msg['text']) else "Не указано",
-                    'context_summary': analysis['context_summary']
+                    'url': msg.get('url', ''), 'content': msg.get('text', ''),
+                    'intent': analysis.get('intent', 'DIY/ремонт') if has_lead_phrase else analysis['intent'],
+                    'hotness': max(analysis.get('hotness', 3), 4 if has_lead_phrase else 0),
+                    'geo': "Москва/МО" if self._check_geo(msg.get('text', '')) else "Не указано",
+                    'context_summary': analysis.get('context_summary', '') or ('по фразе: ' + next((p for p in self.lead_phrases if p in text), ''))
                 }
                 if await self.db.save_lead(lead_data):
                     results.append(lead_data)

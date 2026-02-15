@@ -88,11 +88,18 @@ def _get_expert_signature() -> str:
     return _load_content_template("signature.txt", default).rstrip("\n") or default
 
 
+def _markdown_bold_to_html(text: str) -> str:
+    """Конвертирует **жирный** в <b>жирный</b> для Telegram HTML."""
+    if not text:
+        return text
+    return re.sub(r"\*\*([^*]+)\*\*", r"<b>\1</b>", text)
+
+
 def ensure_quiz_and_hashtags(text: str) -> str:
-    """Добавляет в пост ссылку на квиз и обязательные хэштеги, если их ещё нет."""
+    """Добавляет в пост ссылку на квиз и обязательные хэштеги; конвертирует ** в <b>."""
     if not text or not text.strip():
         return text
-    out = text.rstrip()
+    out = _markdown_bold_to_html(text.rstrip())
     if VK_QUIZ_LINK not in out:
         out += f"\n\n📍 <a href='{VK_QUIZ_LINK}'>Пройти квиз</a>"
     if CONTENT_HASHTAGS and CONTENT_HASHTAGS.strip():
@@ -1428,15 +1435,17 @@ async def save_draft(callback: CallbackQuery, state: FSMContext):
     
     try:
         kb = get_queue_keyboard(post_id)
+        hint = "\n\n💡 Кнопки: 🚀 TERION | 🏘 ДОМ ГРАНД | 📱 MAX | 🌐 VK"
+        body = f"📝 <b>Черновик #{post_id}</b>\n\n{post['body']}{hint}"
         if post.get("image_url"):
             await callback.bot.send_photo(
                 LEADS_GROUP_CHAT_ID, post["image_url"],
-                f"📝 <b>Черновик #{post_id}</b>\n\n{post['body']}",
+                body,
                 message_thread_id=THREAD_ID_DRAFTS, parse_mode="HTML", reply_markup=kb
             )
         else:
             await callback.bot.send_message(
-                LEADS_GROUP_CHAT_ID, f"📝 <b>Черновик #{post_id}</b>\n\n{post['body']}",
+                LEADS_GROUP_CHAT_ID, body,
                 message_thread_id=THREAD_ID_DRAFTS, parse_mode="HTML", reply_markup=kb
             )
         

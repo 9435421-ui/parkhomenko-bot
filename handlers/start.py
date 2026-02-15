@@ -78,12 +78,27 @@ async def handle_start(message: Message, state: FSMContext):
 
 @router.message(F.text == "🛠 Создать пост")
 async def create_post_handler(message: Message, state: FSMContext):
-    """Создание поста"""
+    """Создание поста: Текст, Фото, ИИ-Визуал. Публикация — TERION / ДОМ ГРАНД / MAX."""
     await message.answer(
         "🛠 <b>Создание поста</b>\n\n"
-        "Выберите формат:",
+        "Выберите формат (публикация в каналы — под превью):",
         reply_markup=get_content_menu()
     )
+
+
+@router.callback_query(F.data.in_(["back_to_menu", "content_back"]))
+async def content_back_handler(callback: CallbackQuery, state: FSMContext):
+    """Назад из меню контента — в главное меню админа"""
+    await state.clear()
+    if str(callback.from_user.id) == str(ADMIN_ID):
+        await callback.message.edit_text(
+            "🎯 <b>Главное меню</b>\n\n"
+            "🛠 Создать пост — Текст / Фото / ИИ-Визуал → публикация TERION, ДОМ ГРАНД, MAX\n"
+            "🕵️‍♂️ Темы от Шпиона\n"
+            "📅 Очередь постов\n\n"
+            "Выберите кнопку ниже:"
+        )
+    await callback.answer()
 
 
 @router.message(F.text == "🕵️‍♂️ Темы от Шпиона")

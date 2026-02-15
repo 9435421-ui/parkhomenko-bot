@@ -37,10 +37,11 @@ def get_admin_menu() -> ReplyKeyboardMarkup:
 
 
 def get_content_menu() -> InlineKeyboardMarkup:
-    """Меню создания контента"""
+    """Меню создания контента (Текст, Фото, ИИ-Визуал). Публикация: TERION / ДОМ ГРАНД / MAX — в превью поста."""
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="📝 Текст", callback_data="content_text")],
         [InlineKeyboardButton(text="🖼 Фото", callback_data="content_photo")],
+        [InlineKeyboardButton(text="🎨 ИИ-Визуал", callback_data="content_visual")],
         [InlineKeyboardButton(text="⬅️ Назад", callback_data="back_to_menu")]
     ])
 
@@ -53,7 +54,7 @@ def get_back_btn() -> InlineKeyboardMarkup:
 
 
 def get_approve_post_btn(post_id: int) -> InlineKeyboardMarkup:
-    """Кнопки аппрува поста"""
+    """Кнопки аппрува поста. Публикация (TERION / ДОМ ГРАНД / MAX / VK) — под черновиком в рабочей группе или в контент-боте."""
     return InlineKeyboardMarkup(inline_keyboard=[
         [
             InlineKeyboardButton("✅ Одобрить", callback_data=f"approve_{post_id}"),

@@ -1,12 +1,13 @@
 import logging
 import os
+from datetime import datetime
 from aiogram import Bot
 from aiogram.client.default import DefaultBotProperties
 
 from .discovery import Discovery
 from .analyzer import LeadAnalyzer
 from .outreach import Outreach
-from services.scout_parser import ScoutParser
+from services.scout_parser import scout_parser
 from hunter_standalone import HunterDatabase, LeadHunter as StandaloneLeadHunter
 
 logger = logging.getLogger(__name__)
@@ -21,7 +22,7 @@ class LeadHunter:
         self.discovery = Discovery()
         self.analyzer = LeadAnalyzer()
         self.outreach = Outreach()
-        self.parser = ScoutParser()
+        self.parser = scout_parser  # общий экземпляр: отчёт последнего скана доступен и для /spy_report
 
     async def _send_hot_lead_to_admin(self, lead: dict):
         """Пересылает горячий лид (AI Жюля, hotness > 4) админу в Telegram."""
@@ -49,6 +50,9 @@ class LeadHunter:
     async def hunt(self):
         """Полный цикл: поиск → анализ → привлечение + проверка через AI Жюля и пересылка горячих лидов."""
         logger.info("🏹 LeadHunter: начало охоты за лидами...")
+
+        self.parser.last_scan_report = []
+        self.parser.last_scan_at = datetime.now()
 
         tg_posts = await self.parser.parse_telegram()
         vk_posts = await self.parser.parse_vk()
@@ -81,5 +85,20 @@ class LeadHunter:
                         await self._send_hot_lead_to_admin(lead)
             except Exception as e:
                 logger.error(f"❌ Ошибка hunter_standalone (AI Жюля): {e}")
+
+        # Отчёт в рабочую группу: где был шпион, в какие группы/каналы удалось попасть
+        try:
+            from config import BOT_TOKEN, LEADS_GROUP_CHAT_ID, THREAD_ID_LOGS
+            report = self.parser.get_last_scan_report()
+            if BOT_TOKEN and LEADS_GROUP_CHAT_ID and report and "Отчёта ещё нет" not in report:
+                bot = Bot(token=BOT_TOKEN, default=DefaultBotProperties(parse_mode="HTML"))
+                await bot.send_message(
+                    LEADS_GROUP_CHAT_ID,
+                    report,
+                    message_thread_id=THREAD_ID_LOGS,
+                )
+                await bot.session.close()
+        except Exception as e:
+            logger.warning("Не удалось отправить отчёт шпиона в группу: %s", e)
 
         logger.info(f"🏹 LeadHunter: охота завершена. Обработано {len(all_posts)} постов.")

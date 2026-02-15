@@ -12,6 +12,7 @@ import logging
 
 from database import db
 from config import ADMIN_ID, NOTIFICATIONS_CHANNEL_ID, THREAD_ID_LOGS
+from services.scout_parser import scout_parser
 
 logger = logging.getLogger(__name__)
 router = Router()
@@ -62,6 +63,17 @@ def get_back_to_admin() -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
     builder.button(text="◀️ Админ-панель", callback_data="admin_menu")
     return builder.as_markup()
+
+
+# === КОМАНДА /SPY_REPORT ===
+@router.message(Command("spy_report"))
+async def cmd_spy_report(message: Message):
+    """Где был шпион: последний скан каналов и групп (только для админа)."""
+    if not check_admin(message.from_user.id):
+        await message.answer("⛔ У вас нет доступа")
+        return
+    report = scout_parser.get_last_scan_report()
+    await message.answer(report)
 
 
 # === КОМАНДА /ADMIN ===

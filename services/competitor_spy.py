@@ -114,7 +114,7 @@ class CompetitorSpy:
 
     def __init__(self):
         self.monitoring_enabled = os.getenv("COMPETITOR_SPY_ENABLED", "false").lower() == "true"
-        self.geo_monitoring_enabled = os.getenv("GEO_SPY_ENABLED", "false").lower() == "true"
+        self.geo_monitoring_enabled = os.getenv("GEO_SPY_ENABLED", "true").lower() == "true"
         self.check_interval = int(os.getenv("COMPETITOR_SPY_INTERVAL", "3600"))
         self.geo_check_interval = int(os.getenv("GEO_SPY_INTERVAL", "300"))
         

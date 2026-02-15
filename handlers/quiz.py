@@ -125,9 +125,30 @@ def get_thread_id(object_type: str) -> int:
 
 
 # === СОГЛАСИЕ С ПД → КОНТАКТ ===
-@router.message(QuizStates.consent_pdp, F.text.in_(["✅ Принимаю", "Принимаю", "Я согласен", "Согласен"]))
+def _is_consent_text(text: str) -> bool:
+    """Проверка: пользователь принял согласие (любой вариант формулировки/клиента)."""
+    if not text or not text.strip():
+        return False
+    t = text.strip().lower()
+    return (
+        "принимаю" in t
+        or "согласен" in t
+        or "согласна" in t
+        or t == "да"
+        or t == "yes"
+    )
+
+
+@router.message(QuizStates.consent_pdp, F.text)
 async def process_consent_accept(message: Message, state: FSMContext):
-    """После согласия — запрос контакта"""
+    """После согласия — запрос контакта. Принимаем любую форму «принимаю/согласен»."""
+    if not _is_consent_text(message.text or ""):
+        await message.answer(
+            "Пожалуйста, нажмите кнопку <b>«✅ Принимаю»</b>, чтобы продолжить.",
+            reply_markup=get_consent_keyboard(),
+            parse_mode="HTML"
+        )
+        return
     await state.set_state(QuizStates.greeting)
     await message.answer(
         "✅ Спасибо. Теперь нужен контакт для связи.\n\n"
@@ -139,6 +160,7 @@ async def process_consent_accept(message: Message, state: FSMContext):
 
 @router.message(QuizStates.consent_pdp)
 async def process_consent_fallback(message: Message, state: FSMContext):
+    """Фолбэк: не текст (фото и т.д.) — просим нажать кнопку."""
     await message.answer(
         "Пожалуйста, нажмите кнопку <b>«✅ Принимаю»</b>, чтобы продолжить.",
         reply_markup=get_consent_keyboard(),

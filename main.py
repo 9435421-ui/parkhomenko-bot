@@ -14,12 +14,14 @@ from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from config import BOT_TOKEN, CONTENT_BOT_TOKEN
 from handlers import admin_router, start_router, quiz_router, dialog_router
 from handlers import content_router
+from handlers.creator import creator_router
 from database import db
 from utils import kb
 from middleware.logging import UnhandledCallbackMiddleware
 from services.scout_parser import ScoutParser
 from agents.creative_agent import creative_agent
 from services.lead_hunter import LeadHunter
+from services.competitor_spy import competitor_spy
 from services.publisher import publisher
 from services.image_generator import image_generator
 
@@ -116,9 +118,21 @@ async def main():
     # Lead Hunter & Creative Agent Integration
     hunter = LeadHunter()
     
-    # Поиск клиентов раз в 2 часа
+    # Поиск клиентов раз в 2 часа (каналы TG + VK)
     scheduler.add_job(hunter.hunt, 'interval', hours=2)
-    
+
+    # Гео-шпион 24/7: чаты ЖК (Перекрёсток, Самолёт, ПИК и т.д.) — каждые 5 мин
+    async def run_geo_spy_job():
+        if not competitor_spy.geo_monitoring_enabled:
+            return
+        try:
+            leads = await competitor_spy.scan_geo_chats()
+            if leads:
+                logger.info("🎯 GEO-Spy: найдено %s лидов", len(leads))
+        except Exception as e:
+            logger.error("GEO-Spy: %s", e)
+    scheduler.add_job(run_geo_spy_job, "interval", seconds=competitor_spy.geo_check_interval)
+
     # Поиск идей для контента раз в 6 часов (темы ещё отправляются в группу после создания content_bot)
     scheduler.add_job(creative_agent.scout_topics, 'interval', hours=6)
     
@@ -134,8 +148,9 @@ async def main():
     dp_main = Dispatcher(storage=MemoryStorage())
     dp_main.callback_query.middleware(UnhandledCallbackMiddleware())
     dp_main.include_router(admin_router)
+    dp_main.include_router(creator_router)
+    dp_main.include_router(quiz_router)   # раньше start: квиз по ссылке из поста обрабатывается первым
     dp_main.include_router(start_router)
-    dp_main.include_router(quiz_router)
     dp_main.include_router(dialog_router)
     
     # 3. Настройка ДОМ ГРАНД
