@@ -527,7 +527,8 @@ class ContentAgent:
         
         headers = {
             "X-Device-Token": device_token,
-            "Content-Type": "application/json"
+            "Content-Type": "application/json",
+            "Authorization": f"Bearer {device_token}",
         }
         
         # Получаем пост из БД

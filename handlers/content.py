@@ -113,7 +113,7 @@ def ensure_quiz_and_hashtags(text: str) -> str:
 @content_router.message(F.text.in_([
     "📸 Фото → Описание → Пост",
     "🎨 ИИ-Визуал",
-    "📅 7 дней прогрева",
+    "✨ Креативный прогрев",
     "📰 Новость",
     "📋 Интерактивный План",
     "📝 Быстрый текст",
@@ -130,7 +130,7 @@ async def global_menu_handler(message: Message, state: FSMContext):
         await photo_start(message, state)
     elif text == "🎨 ИИ-Визуал":
         await visual_select_model(message, state)
-    elif text == "📅 7 дней прогрева":
+    elif text == "✨ Креативный прогрев":
         await series_start(message, state)
     elif text == "📰 Новость":
         await news_start(message, state)
@@ -461,7 +461,7 @@ class ContentStates(StatesGroup):
 def get_main_menu() -> ReplyKeyboardMarkup:
     kb = [
         [KeyboardButton(text="📸 Фото → Описание → Пост")],
-        [KeyboardButton(text="🎨 ИИ-Визуал"), KeyboardButton(text="📅 7 дней прогрева")],
+        [KeyboardButton(text="🎨 ИИ-Визуал"), KeyboardButton(text="✨ Креативный прогрев")],
         [KeyboardButton(text="📰 Новость"), KeyboardButton(text="📋 Интерактивный План")],
         [KeyboardButton(text="📝 Быстрый текст"), KeyboardButton(text="💡 Интересный факт")],
         [KeyboardButton(text="🎉 Праздник РФ")]
@@ -471,26 +471,28 @@ def get_main_menu() -> ReplyKeyboardMarkup:
 
 def get_preview_keyboard(post_id: int, has_image: bool = False) -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
-    builder.button(text="🚀 Опубликовать: TERION", callback_data=f"pub_terion:{post_id}")
-    builder.button(text="🏘 Опубликовать: ДОМ ГРАНД", callback_data=f"pub_dom_grnd:{post_id}")
-    builder.button(text="📱 Опубликовать: MAX", callback_data=f"pub_max:{post_id}")
-    builder.button(text="🌐 Только VK", callback_data=f"pub_vk:{post_id}")
+    builder.button(text="📤 Во все каналы", callback_data=f"pub_all:{post_id}")
+    builder.button(text="🚀 TERION", callback_data=f"pub_terion:{post_id}")
+    builder.button(text="🏘 ДОМ ГРАНД", callback_data=f"pub_dom_grnd:{post_id}")
+    builder.button(text="📱 MAX", callback_data=f"pub_max:{post_id}")
+    builder.button(text="🌐 VK", callback_data=f"pub_vk:{post_id}")
     builder.button(text="🗑 В черновики", callback_data=f"draft:{post_id}")
     builder.button(text="✏️ Редактировать", callback_data=f"edit:{post_id}")
     builder.button(text="❌ Отмена", callback_data="cancel")
-    builder.adjust(1, 1, 1, 1, 1)
+    builder.adjust(1, 2, 2, 1, 1, 1)
     return builder.as_markup()
 
 
 def get_queue_keyboard(post_id: int) -> InlineKeyboardMarkup:
-    """Кнопки для меню Очередь постов"""
+    """Кнопки для черновиков в рабочей группе: TERION, ДОМ ГРАНД, MAX, VK, Во все каналы."""
     builder = InlineKeyboardBuilder()
-    builder.button(text="🚀 Опубликовать: TERION", callback_data=f"pub_terion:{post_id}")
-    builder.button(text="🏘 Опубликовать: ДОМ ГРАНД", callback_data=f"pub_dom_grnd:{post_id}")
-    builder.button(text="📱 Опубликовать: MAX", callback_data=f"pub_max:{post_id}")
-    builder.button(text="🗑 В черновики", callback_data=f"draft:{post_id}")
+    builder.button(text="📤 Во все каналы", callback_data=f"pub_all:{post_id}")
+    builder.button(text="🚀 TERION", callback_data=f"pub_terion:{post_id}")
+    builder.button(text="🏘 ДОМ ГРАНД", callback_data=f"pub_dom_grnd:{post_id}")
+    builder.button(text="📱 MAX", callback_data=f"pub_max:{post_id}")
+    builder.button(text="🌐 VK", callback_data=f"pub_vk:{post_id}")
     builder.button(text="❌ Отмена", callback_data="cancel")
-    builder.adjust(1, 1, 1, 1)
+    builder.adjust(1, 2, 2, 1)
     return builder.as_markup()
 
 
@@ -659,15 +661,13 @@ async def process_photo(message: Message, state: FSMContext):
     
     cases_content = _load_content_template("expert_cases.txt", "МЖИ, несущие стены, трассировка, акты скрытых работ.")
     prompt = (
-        f"Ты — эксперт по перепланировкам. Тема: «{topic}»\n\n"
-        f"Реальные кейсы и термины (обязательно использовать по делу):\n{cases_content}\n\n"
-        f"Проанализируй фото и напиши пост:\n"
-        f"1. <b>Заголовок</b> — конкретный, без клише 'уникальный дизайн', 'за 3 дня'\n"
-        f"2. <b>Описание</b> — что на фото, тип здания\n"
-        f"3. <b>Экспертный комментарий</b> — укажи МЖИ, несущие стены или трассировку/акты скрытых работ по смыслу\n"
-        f"4. <b>Важно</b> — согласование, проектная документация\n"
-        f"5. <b>Призыв</b> — консультация @terion_bot\n\n"
-        f"ЗАПРЕЩЕНО: общие фразы без терминов (МЖИ, несущие стены, трассировка, акты скрытых работ). Стиль профессиональный, 400-700 знаков, эмодзи."
+        f"Ты — ведущий эксперт TERION. Тема поста: «{topic}»\n\n"
+        f"Реальные кейсы и термины:\n{cases_content}\n\n"
+        f"Задача: реально проанализируй фото (не шаблон).\n"
+        f"1. Опиши, что на фото: планировка, демонтаж, ремонт, тип здания.\n"
+        f"2. Выдели технические нюансы: МЖИ, несущие стены, трассировка, акты скрытых работ — по смыслу.\n"
+        f"3. Составь пост с призывом к действию (консультация @terion_bot).\n\n"
+        f"Формат: <b>Заголовок</b>, описание, экспертный комментарий, призыв. 400-700 знаков, эмодзи. ЗАПРЕЩЕНО общие фразы без анализа фото."
     )
     
     description = await router_ai.analyze_image(image_b64, prompt)
@@ -776,22 +776,19 @@ async def ai_visual_handler(message: Message, state: FSMContext):
         await state.clear()
         return
     
-    tmp_path = None
     try:
         image_bytes = base64.b64decode(image_b64)
-        with tempfile.NamedTemporaryFile(suffix=".jpg", delete=False) as tmp:
-            tmp.write(image_bytes)
-            tmp_path = tmp.name
-        
+        # Отправка файлом из памяти (io.BytesIO), без временного файла — устраняет «Ошибка отправки»
+        photo = BufferedInputFile(image_bytes, filename="visual.jpg")
         await message.answer_photo(
-            photo=FSInputFile(tmp_path),
+            photo=photo,
             caption=(
                 f"✅ <b>Готово!</b>\n\n"
                 f"🎨 <b>Модель:</b> {'Яндекс АРТ' if model == 'yandex' else 'Gemini Nano'}\n"
                 f"📝 <b>Промпт:</b> <code>{user_prompt[:50]}...</code>"
             ),
             reply_markup=InlineKeyboardBuilder()
-            .button(text="📝 Создать пост", callback_data=f"art_to_post:{user_prompt}")
+            .button(text="📝 Создать пост", callback_data=f"art_to_post:{user_prompt[:28]}")
             .button(text="🔄 Еще вариант", callback_data="visual_back")
             .button(text="◀️ Меню", callback_data="back_menu")
             .as_markup(),
@@ -800,13 +797,6 @@ async def ai_visual_handler(message: Message, state: FSMContext):
     except Exception as e:
         logger.error(f"Send error: {e}")
         await message.answer("❌ Ошибка отправки", reply_markup=get_back_btn())
-    finally:
-        # Всегда удаляем временный файл, даже если интернет моргнул
-        if tmp_path and os.path.exists(tmp_path):
-            try:
-                os.unlink(tmp_path)
-            except Exception:
-                pass
     
     await state.clear()
 
@@ -821,10 +811,10 @@ async def visual_back(callback: CallbackQuery, state: FSMContext):
 
 async def series_start(message: Message, state: FSMContext):
     await message.answer(
-        "📅 <b>Серия постов</b>\n\n"
-        "Введите через запятую:\n"
-        "<code>количество дней, тема</code>\n\n"
-        "Пример: <code>7, перепланировка студии</code>",
+        "✨ <b>Креативный прогрев (роль Креативщика)</b>\n\n"
+        "Введите через запятую: <code>дней, тема</code>\n\n"
+        "Пример: <code>7, перепланировка студии</code>\n\n"
+        "Будет сторителлинг: боли, юмор, прогрев через эмоции.",
         reply_markup=get_back_btn(),
         parse_mode="HTML"
     )
@@ -855,11 +845,10 @@ async def ai_series_handler(message: Message, state: FSMContext):
 
     cases_content = _load_content_template("expert_cases.txt", "МЖИ, несущие стены, трассировка, акты скрытых работ.")
     prompt_default = (
-        "Создай {days} постов для прогрева по теме «{topic}». "
-        "Перепланировки, недвижимость, экспертный контент.\n\n"
-        "ОБЯЗАТЕЛЬНО используй кейсы и термины (не выдумывай общие фразы):\n{cases}\n\n"
-        "Формат: День N: Заголовок\nТекст 80-120 слов\nПризыв к действию\n\n"
-        "В каждом посте используй по смыслу: МЖИ, несущие стены, трассировка или акты скрытых работ. ЗАПРЕЩЕНО: 'уникальный дизайн', 'за 3 дня', общие фразы без терминов. Тон: экспертный, МНИИТЭП, Жилищная инспекция. Эмодзи."
+        "Роль: Креативщик TERION. Создай {days} постов для креативного прогрева по теме «{topic}».\n\n"
+        "Стиль: сторителлинг, боли клиентов, лёгкий юмор, прогрев через эмоции. Перепланировки и недвижимость — живым языком.\n\n"
+        "Кейсы для опоры (используй по смыслу):\n{cases}\n\n"
+        "Формат: День N: Заголовок\nТекст 80-120 слов, призыв к действию. Эмодзи. Можно использовать МЖИ, несущие стены, трассировку по смыслу. Без клише 'уникальный дизайн', 'за 3 дня'."
     )
     prompt_tpl = _load_content_template("series_warmup_prompt.txt", prompt_default)
     try:
@@ -965,10 +954,10 @@ async def generate_series_images(callback: CallbackQuery, state: FSMContext):
 
 async def plan_start(message: Message, state: FSMContext):
     await message.answer(
-        "📋 <b>Контент-план</b>\n\n"
-        "Введите через запятую:\n"
-        "<code>дни, тема</code>\n\n"
-        "Пример: <code>5, объединение кухни и гостиной</code>",
+        "📋 <b>Интерактивный План (роль Техдиректора)</b>\n\n"
+        "Введите через запятую: <code>дни, тема</code>\n\n"
+        "Пример: <code>5, объединение кухни и гостиной</code>\n\n"
+        "Будет сформирован пошаговый чек-лист со ссылками на СНиП, МЖИ, трассировку.",
         reply_markup=get_back_btn(),
         parse_mode="HTML"
     )
@@ -987,7 +976,7 @@ async def ai_plan_handler(message: Message, state: FSMContext):
         else:
             await message.answer("❌ Введите: дни, тема")
             return
-    except:
+    except Exception:
         await message.answer("❌ Неверный формат")
         return
     
@@ -995,13 +984,17 @@ async def ai_plan_handler(message: Message, state: FSMContext):
         await message.answer("❌ 1-30 дней")
         return
     
-    await message.answer(f"⏳ <b>Создаю план на {days} дней...</b>", parse_mode="HTML")
+    await message.answer(f"⏳ <b>Создаю план на {days} дней (Техдиректор)...</b>", parse_mode="HTML")
     
+    cases_content = _load_content_template("expert_cases.txt", "МЖИ, несущие стены, трассировка, акты скрытых работ.")
     prompt = (
-        f"Контент-план на {days} дней. Тема: «{topic}»\n"
-        f"Перепланировки, согласование, дизайн.\n\n"
-        f"Для каждого дня: заголовок, содержание (2-3 предл), формат (текст/фото/карусель).\n\n"
-        f"Тон: профессиональный, экспертный, московское бюро перепланировок. Избегай клише 'уникальный дизайн' и 'за 3 дня'. Используй юридические термины (Жилищная инспекция, проект, МНИИТЭП)."
+        f"Роль: Техдиректор TERION. Контент-план на {days} дней. Тема: «{topic}»\n\n"
+        f"Сформируй пошаговый чек-лист для каждого дня. Для каждого шага укажи:\n"
+        f"- заголовок и содержание (2-3 предложения);\n"
+        f"- ссылки на нормы: СНиП, МЖИ (Мосжилинспекция), трассировка, акты скрытых работ — по смыслу;\n"
+        f"- формат (текст/фото/карусель).\n\n"
+        f"Термины для опоры:\n{cases_content}\n\n"
+        f"Тон: профессиональный, без клише. Используй Жилищную инспекцию, проект, МНИИТЭП."
     )
     
     plan = await router_ai.generate(prompt, max_tokens=3000)
@@ -1636,7 +1629,23 @@ async def save_draft(callback: CallbackQuery, state: FSMContext):
     
     try:
         kb = get_queue_keyboard(post_id)
-        hint = "\n\n💡 Кнопки: 🚀 TERION | 🏘 ДОМ ГРАНД | 📱 MAX | 🌐 VK"
+        pub_date = post.get("publish_date")
+        time_str = "12:00"
+        if pub_date:
+            try:
+                from datetime import datetime as dt
+                if hasattr(pub_date, "strftime"):
+                    time_str = pub_date.strftime("%d.%m %H:%M")
+                elif isinstance(pub_date, str):
+                    # SQLite: "2026-02-15 12:00:00" или ISO
+                    if "T" in pub_date:
+                        d = dt.fromisoformat(pub_date.replace("Z", "+00:00"))
+                    else:
+                        d = dt.strptime(pub_date[:19], "%Y-%m-%d %H:%M:%S")
+                    time_str = d.strftime("%d.%m %H:%M")
+            except Exception:
+                pass
+        hint = f"\n\n🕐 <b>Время публикации:</b> {time_str}\n💡 Кнопки: 📤 Во все каналы | 🚀 TERION | 🏘 ДОМ ГРАНД | 📱 MAX | 🌐 VK"
         body = f"📝 <b>Черновик #{post_id}</b>\n\n{post['body']}{hint}"
         if post.get("image_url"):
             photo = await _photo_input_for_send(callback.bot, post["image_url"])

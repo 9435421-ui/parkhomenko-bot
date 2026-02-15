@@ -380,14 +380,15 @@ class Database:
     # Алиас для совместимости с handlers/content.py
     async def add_content_post(self, title: str, body: str, cta: str, channel: str = "draft",
                               scheduled_date: datetime = None, **kwargs) -> int:
-        """Алиас для save_post — добавить пост в контент-план"""
+        """Алиас для save_post — добавить пост в контент-план. По умолчанию время публикации 12:00."""
+        default_time = datetime.now().replace(hour=12, minute=0, second=0, microsecond=0)
         return await self.save_post(
             post_type=kwargs.get("type", "post"),
             title=title,
             body=body,
             cta=cta,
             channel=channel,
-            publish_date=scheduled_date or datetime.now(),
+            publish_date=scheduled_date or default_time,
             theme=kwargs.get("theme"),
             image_url=kwargs.get("image_url"),
             admin_id=kwargs.get("admin_id"),
