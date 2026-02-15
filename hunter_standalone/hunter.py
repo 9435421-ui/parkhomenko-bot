@@ -13,7 +13,11 @@ except ImportError:
 class LeadHunter:
     def __init__(self, db: HunterDatabase):
         self.db = db
-        self.geo_keywords = ["москва", "мск", "подмосковье", "мо", "жк", "корпус", "ремонт в москве"]
+        self.geo_keywords = [
+            "москва", "мск", "подмосковье", "мо", "жк", "корпус", "ремонт в москве",
+            "нежилое помещение", "коммерция", "антресоль", "отдельный вход", "общепит",
+            "кафе", "офис", "изменение назначения",
+        ]
 
     async def hunt(self, messages: List[Dict]):
         results = []
