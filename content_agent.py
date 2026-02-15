@@ -19,7 +19,7 @@ class ContentAgent:
         self.folder_id = os.getenv("FOLDER_ID")
         self.api_key = os.getenv("ROUTER_AI_KEY") or os.getenv("YANDEX_API_KEY")
         self.image_api_key = os.getenv("ROUTER_AI_IMAGE_KEY") or self.api_key
-        self.endpoint = os.getenv("ROUTER_AI_ENDPOINT", "https://api.router.ai/v1/completion")
+        self.endpoint = os.getenv("ROUTER_AI_ENDPOINT", "https://routerai.ru/api/v1/chat/completions")
         
         # Fallback шаблоны на случай ошибок
         self.fallback_templates = {

@@ -13,7 +13,7 @@ class RouterAIClient:
     
     def __init__(self):
         self.api_key = os.getenv("ROUTER_AI_KEY")
-        self.endpoint = os.getenv("ROUTER_AI_ENDPOINT", "https://router.huge.ai/api/chat/completions")
+        self.endpoint = os.getenv("ROUTER_AI_ENDPOINT", "https://routerai.ru/api/v1/chat/completions")
         self.default_model = os.getenv("ROUTER_AI_CHAT_MODEL", "gpt-4o-mini")
         self.fallback_model = os.getenv("ROUTER_AI_CHAT_FALLBACK", "qwen")
         self.max_prompt_length = 8000

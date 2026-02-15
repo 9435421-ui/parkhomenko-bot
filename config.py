@@ -52,7 +52,7 @@ THREAD_ID_LOGS = int(os.getenv("THREAD_ID_LOGS", "88"))           # Логи с�
 # Яндекс: персональные данные, хранение, законодательство РФ, акты. Опционально Яндекс АРТ для картинок.
 # Router AI: одного ключа достаточно — логика ответов в чате и генерация изображений (Nano Banana / DALL-E).
 ROUTER_AI_KEY = os.getenv("ROUTER_AI_KEY")
-ROUTER_AI_ENDPOINT = os.getenv("ROUTER_AI_ENDPOINT", "https://router.huge.ai/api/chat/completions")
+ROUTER_AI_ENDPOINT = os.getenv("ROUTER_AI_ENDPOINT", "https://routerai.ru/api/v1/chat/completions")
 ROUTER_AI_CHAT_MODEL = os.getenv("ROUTER_AI_CHAT_MODEL", "gpt-4o-mini")  # логика чата: gpt-4o-mini / nano / kimi
 ROUTER_AI_CHAT_FALLBACK = os.getenv("ROUTER_AI_CHAT_FALLBACK", "qwen")
 ROUTER_AI_IMAGE_KEY = os.getenv("ROUTER_AI_IMAGE_KEY") or ROUTER_AI_KEY  # опционально отдельный ключ для генерации изображений
