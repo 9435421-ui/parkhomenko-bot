@@ -11,7 +11,7 @@ from aiogram.utils.keyboard import InlineKeyboardBuilder
 import logging
 
 from database import db
-from config import ADMIN_ID, NOTIFICATIONS_CHANNEL_ID, THREAD_ID_LOGS
+from config import ADMIN_ID, JULIA_USER_ID, NOTIFICATIONS_CHANNEL_ID, THREAD_ID_LOGS
 from services.scout_parser import scout_parser
 
 logger = logging.getLogger(__name__)
@@ -25,7 +25,7 @@ class AdminStates(StatesGroup):
 
 def check_admin(user_id: int) -> bool:
     """Проверка прав администратора"""
-    return user_id == ADMIN_ID
+    return user_id == ADMIN_ID or (JULIA_USER_ID and user_id == JULIA_USER_ID)
 
 
 def get_admin_keyboard() -> InlineKeyboardMarkup:
@@ -74,6 +74,35 @@ async def cmd_spy_report(message: Message):
         return
     report = scout_parser.get_last_scan_report()
     await message.answer(report)
+
+
+# === КОМАНДА /STATS (для рабочей группы) ===
+@router.message(Command("stats"))
+async def cmd_stats(message: Message):
+    """Краткий отчёт шпиона: где сканировали, сколько постов (только для админа)."""
+    if not check_admin(message.from_user.id):
+        await message.answer("⛔ У вас нет доступа")
+        return
+    report = scout_parser.get_last_scan_report()
+    await message.answer(report)
+
+
+# === КОМАНДА /HUNT (для рабочей группы) ===
+@router.message(Command("hunt"))
+async def cmd_hunt(message: Message):
+    """Запуск охоты за лидами: скан TG/VK, анализ, отчёт в группу (только для админа)."""
+    if not check_admin(message.from_user.id):
+        await message.answer("⛔ У вас нет доступа")
+        return
+    await message.answer("🏹 Запускаю охоту за лидами...")
+    try:
+        from services.lead_hunter import LeadHunter
+        hunter = LeadHunter()
+        await hunter.hunt()
+        await message.answer("✅ Охота завершена. Отчёт — в топике «Логи».")
+    except Exception as e:
+        logger.exception("hunt")
+        await message.answer(f"❌ Ошибка охоты: {e}")
 
 
 # === КОМАНДА /ADMIN ===

@@ -49,14 +49,16 @@ class ImageGenerator:
         return None
     
     def _create_prompt(self, title: str, style: str) -> str:
-        """Создание промпта. Генерация только без текста (ИИ часто ошибается на русском)."""
-        base = f"Professional real estate cover image for article: '{title}'. "
+        """Создание промпта. Короткий промпт снижает риск 400 от Yandex Art. 401 = неверный API-ключ."""
+        # Упрощённый промпт: без кавычек и длинных фраз (меньше 400 ошибок)
+        safe_title = (title or "real estate")[:60].replace('"', "'").strip()
+        base = f"Real estate cover, {safe_title}. "
         styles = {
-            'modern': 'Modern Moscow architecture, clean minimalist design, blue and white colors, professional photography style, high quality',
-            'classic': 'Classic Russian architecture, warm golden colors, elegant traditional design, professional photo',
-            'minimal': 'Minimalist white background, geometric shapes, modern typography space, clean design'
+            'modern': 'Modern architecture, minimalist, blue and white, professional photo.',
+            'classic': 'Classic architecture, warm colors, professional photo.',
+            'minimal': 'Minimalist white background, clean design.'
         }
-        no_text = " No text, no words, no letters, no captions, no watermarks — image only."
+        no_text = " No text, no words, no letters. Image only."
         return base + styles.get(style, styles['modern']) + no_text
     
     async def _generate_yandex(self, prompt: str) -> Optional[bytes]:
@@ -92,6 +94,10 @@ class ImageGenerator:
                     if resp.status != 200:
                         text = await resp.text()
                         logger.error(f"Yandex Art HTTP {resp.status}: {text[:200]}")
+                        if resp.status == 401:
+                            logger.error("Yandex Art 401: проверьте YANDEX_API_KEY и FOLDER_ID в .env")
+                        elif resp.status == 400:
+                            logger.error("Yandex Art 400: промпт упрощён в _create_prompt; при повторе — укоротите тему.")
                         return None
                     
                     result = await resp.json()

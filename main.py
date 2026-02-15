@@ -11,7 +11,7 @@ from aiogram.fsm.storage.memory import MemoryStorage
 from aiogram.client.default import DefaultBotProperties
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
-from config import BOT_TOKEN, CONTENT_BOT_TOKEN
+from config import BOT_TOKEN, CONTENT_BOT_TOKEN, LEADS_GROUP_CHAT_ID
 from handlers import admin_router, start_router, quiz_router, dialog_router
 from handlers import content_router
 from handlers.creator import creator_router
@@ -171,13 +171,25 @@ async def main():
     dp_content.callback_query.middleware(UnhandledCallbackMiddleware())
     dp_content.include_routers(content_router)
     
-    # 4. Параллельный запуск
+    # 4. Команды для рабочей группы (всплывают как подсказки при /)
+    from aiogram.types import BotCommand, BotCommandScopeChat
+    try:
+        await main_bot.set_my_commands(
+            commands=[
+                BotCommand(command="stats", description="Статистика скана"),
+                BotCommand(command="hunt", description="Охота за лидами"),
+            ],
+            scope=BotCommandScopeChat(chat_id=LEADS_GROUP_CHAT_ID),
+        )
+        logger.info("✅ Команды для рабочей группы заданы (stats, hunt)")
+    except Exception as e:
+        logger.warning("set_my_commands для группы: %s", e)
+
+    # 5. Параллельный запуск
     logger.info("🚀 Очистка соединений и запуск polling...")
-    
-    # Сбрасываем все зависшие обновления, чтобы не было Conflict
     await main_bot.delete_webhook(drop_pending_updates=True)
     await content_bot.delete_webhook(drop_pending_updates=True)
-    
+
     await asyncio.gather(
         dp_main.start_polling(main_bot),
         dp_content.start_polling(content_bot)

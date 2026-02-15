@@ -6,7 +6,7 @@ from aiogram import Router, F, Bot
 from aiogram.types import (
     Message, CallbackQuery, InlineKeyboardMarkup, 
     ReplyKeyboardMarkup, KeyboardButton, FSInputFile,
-    InputMediaPhoto
+    InputMediaPhoto, BufferedInputFile,
 )
 from aiogram.filters import CommandStart
 from aiogram.utils.keyboard import InlineKeyboardBuilder
@@ -34,6 +34,7 @@ import io
 from database import db
 from handlers.vk_publisher import VKPublisher
 from content_agent import ContentAgent
+from hunter_standalone import HunterDatabase
 from config import (
     CONTENT_BOT_TOKEN,
     CHANNEL_ID_TERION,
@@ -138,13 +139,7 @@ async def global_menu_handler(message: Message, state: FSMContext):
     elif text == "📝 Быстрый текст":
         await quick_start(message, state)
     elif text == "💡 Интересный факт":
-        await message.answer(
-            "💡 <b>Интересный факт</b>\n\nВведите тему (например: перепланировка в сталинках, МНИИТЭП, Жилищная инспекция):",
-            reply_markup=get_back_btn(),
-            parse_mode="HTML"
-        )
-        await state.set_state(ContentStates.ai_text)
-        await state.update_data(quick_prompt_prefix="fact")
+        await fact_start(message, state)
     elif text == "🎉 Праздник РФ":
         await holiday_rf_start(message, state)
 
@@ -455,6 +450,9 @@ class ContentStates(StatesGroup):
     ai_visual_prompt = State()
     ai_plan = State()
     ai_news = State()
+    ai_news_choose = State()   # Выбор темы из горячих лидов или своя
+    ai_fact_choose = State()   # Выбор реальной ситуации для интересного факта
+    holiday_rf = State()
     edit_post = State()
 
 
@@ -545,6 +543,23 @@ async def download_photo(bot: Bot, file_id: str) -> Optional[bytes]:
     except Exception as e:
         logger.error(f"Download error: {e}")
     return None
+
+
+async def _photo_input_for_send(bot: Bot, image_url: str):
+    """
+    Для send_photo: если image_url — http(s) ссылка, скачиваем и возвращаем BufferedInputFile,
+    иначе возвращаем file_id (Telegram не принимает битые/временные URL).
+    Возвращает (photo=...) для вызова bot.send_photo(chat_id, photo=..., caption=...).
+    """
+    if not image_url:
+        return None
+    if image_url.startswith("http://") or image_url.startswith("https://"):
+        data = await download_photo(bot, image_url)
+        if data:
+            return BufferedInputFile(data, filename="post.jpg")
+        logger.error("Не удалось скачать фото по URL, пропуск изображения")
+        return None
+    return image_url  # file_id — передаём как есть
 
 
 async def compress_image(image_bytes: bytes, max_size: int = 1024, quality: int = 85) -> bytes:
@@ -642,15 +657,17 @@ async def process_photo(message: Message, state: FSMContext):
     compressed = await compress_image(image_bytes, max_size=1024)
     image_b64 = base64.b64encode(compressed).decode()
     
+    cases_content = _load_content_template("expert_cases.txt", "МЖИ, несущие стены, трассировка, акты скрытых работ.")
     prompt = (
         f"Ты — эксперт по перепланировкам. Тема: «{topic}»\n\n"
+        f"Реальные кейсы и термины (обязательно использовать по делу):\n{cases_content}\n\n"
         f"Проанализируй фото и напиши пост:\n"
-        f"1. <b>Заголовок</b> — конкретный, профессиональный, без клише 'уникальный дизайн' и 'за 3 дня'\n"
-        f"2. <b>Описание</b> — что на фото, особенности объекта, тип здания\n"
-        f"3. <b>Экспертный комментарий</b> — нюансы перепланировки, требования Жилищной инспекции, МНИИТЭП\n"
-        f"4. <b>Важно</b> — юридические/технические моменты, согласование, проектная документация\n"
+        f"1. <b>Заголовок</b> — конкретный, без клише 'уникальный дизайн', 'за 3 дня'\n"
+        f"2. <b>Описание</b> — что на фото, тип здания\n"
+        f"3. <b>Экспертный комментарий</b> — укажи МЖИ, несущие стены или трассировку/акты скрытых работ по смыслу\n"
+        f"4. <b>Важно</b> — согласование, проектная документация\n"
         f"5. <b>Призыв</b> — консультация @terion_bot\n\n"
-        f"Требования: стиль профессиональный, экспертный, московское бюро перепланировок. Избегай клише 'уникальный дизайн' и 'за 3 дня'. Используй юридические термины (Жилищная инспекция, проект, МНИИТЭП). Реальные сроки, 400-700 знаков, эмодзи."
+        f"ЗАПРЕЩЕНО: общие фразы без терминов (МЖИ, несущие стены, трассировка, акты скрытых работ). Стиль профессиональный, 400-700 знаков, эмодзи."
     )
     
     description = await router_ai.analyze_image(image_b64, prompt)
@@ -836,19 +853,22 @@ async def ai_series_handler(message: Message, state: FSMContext):
     
     await message.answer(f"⏳ <b>Генерирую {days} постов...</b>", parse_mode="HTML")
 
+    cases_content = _load_content_template("expert_cases.txt", "МЖИ, несущие стены, трассировка, акты скрытых работ.")
     prompt_default = (
         "Создай {days} постов для прогрева по теме «{topic}». "
         "Перепланировки, недвижимость, экспертный контент.\n\n"
-        "Реальные кейсы для опоры (используй по возможности, не выдумывай):\n{cases}\n\n"
+        "ОБЯЗАТЕЛЬНО используй кейсы и термины (не выдумывай общие фразы):\n{cases}\n\n"
         "Формат: День N: Заголовок\nТекст 80-120 слов\nПризыв к действию\n\n"
-        "Тон: профессиональный, экспертный, московское бюро перепланировок. Избегай клише 'уникальный дизайн' и 'за 3 дня'. Используй юридические термины (Жилищная инспекция, проект, МНИИТЭП). Добавь эмодзи."
+        "В каждом посте используй по смыслу: МЖИ, несущие стены, трассировка или акты скрытых работ. ЗАПРЕЩЕНО: 'уникальный дизайн', 'за 3 дня', общие фразы без терминов. Тон: экспертный, МНИИТЭП, Жилищная инспекция. Эмодзи."
     )
     prompt_tpl = _load_content_template("series_warmup_prompt.txt", prompt_default)
-    cases_content = _load_content_template("expert_cases.txt", "Здесь будут реальные кейсы Юлии.")
     try:
         prompt = prompt_tpl.format(days=days, topic=topic, cases=cases_content)
     except KeyError:
         prompt = prompt_default.format(days=days, topic=topic, cases=cases_content)
+    # Убедимся, что кейсы подставлены
+    if "{cases}" in prompt:
+        prompt = prompt.replace("{cases}", cases_content)
 
     result = await router_ai.generate(prompt, max_tokens=4000)
     
@@ -1013,45 +1033,118 @@ async def ai_plan_handler(message: Message, state: FSMContext):
 
 # === 📰 НОВОСТЬ ===
 
-async def news_start(message: Message, state: FSMContext):
-    await message.answer(
-        "📰 <b>Экспертная новость</b>\n\n"
-        "Введите тему:\n"
-        "• Перепланировка — изменения в законе\n"
-        "• Ипотека — ставки, программы\n"
-        "• Строительство — новые технологии",
-        reply_markup=get_back_btn(),
-        parse_mode="HTML"
+def _potential_leads_db_path() -> str:
+    return os.path.join(os.path.dirname(__file__), "..", "database", "potential_leads.db")
+
+
+async def _generate_news_by_topic(message_or_callback, state: FSMContext, topic: str, is_callback: bool = False):
+    """Общая генерация новости по теме (вызов после выбора темы или ввода текста)."""
+    if is_callback:
+        await message_or_callback.message.edit_text("🔍 <b>Пишу новость...</b>", parse_mode="HTML")
+        target = message_or_callback.message
+    else:
+        await message_or_callback.answer("🔍 <b>Пишу новость...</b>", parse_mode="HTML")
+        target = message_or_callback
+    cases_content = _load_content_template("expert_cases.txt", "МЖИ, несущие стены, трассировка, акты скрытых работ.")
+    prompt = (
+        f"Экспертная новость на тему «{topic}». "
+        f"Структура: заголовок, суть новости, комментарий эксперта, что значит для людей, призыв к консультации. "
+        f"200-250 слов. ОБЯЗАТЕЛЬНО используй термины: МЖИ, несущие стены, трассировка или акты скрытых работ — по смыслу. "
+        f"Реальные кейсы для опоры:\n{cases_content}\n\n"
+        f"ЗАПРЕЩЕНО: общие фразы без конкретики. Хештеги: #новость #недвижимость #TERION"
     )
-    await state.set_state(ContentStates.ai_news)
+    news = await router_ai.generate(prompt)
+    if not news:
+        if is_callback:
+            await message_or_callback.message.edit_text("❌ Ошибка генерации", reply_markup=get_back_btn())
+        else:
+            await message_or_callback.answer("❌ Ошибка", reply_markup=get_back_btn())
+        await state.clear()
+        return
+    if VK_QUIZ_LINK not in news:
+        news += f"\n\n📍 <a href='{VK_QUIZ_LINK}'>Пройти квиз</a> @terion_bot\n#TERION #перепланировка #москва"
+    post_id = await show_preview(target, news)
+    await state.set_state(ContentStates.preview_mode)
+    await state.update_data(post_id=post_id, text=news)
+
+
+async def news_start(message: Message, state: FSMContext):
+    db_path = os.path.abspath(_potential_leads_db_path())
+    leads: list = []
+    try:
+        if os.path.isfile(db_path):
+            hunter_db = HunterDatabase(db_path)
+            await hunter_db.connect()
+            leads = await hunter_db.get_latest_hot_leads(3)
+            if hunter_db.conn:
+                await hunter_db.conn.close()
+    except Exception as e:
+        logger.warning("potential_leads.db для новостей: %s", e)
+    if leads:
+        builder = InlineKeyboardBuilder()
+        topics = []
+        for i, row in enumerate(leads):
+            full = (row.get("content") or row.get("intent") or "Тема").strip()
+            topics.append(full)
+            label = full[:38] + "…" if len(full) > 40 else full
+            builder.button(text=f"🔥 {i + 1}. {label}", callback_data=f"topic_news:{i}")
+        builder.button(text="✏️ Своя тема", callback_data="topic_news:custom")
+        builder.adjust(1)
+        await state.update_data(hot_topics=topics)
+        await message.answer(
+            "📰 <b>Экспертная новость</b>\n\n"
+            "Выберите горячую тему или введите свою в чат:",
+            reply_markup=builder.as_markup(),
+            parse_mode="HTML"
+        )
+        await state.set_state(ContentStates.ai_news_choose)
+    else:
+        await message.answer(
+            "📰 <b>Экспертная новость</b>\n\n"
+            "Введите тему:\n"
+            "• Перепланировка — изменения в законе\n"
+            "• Ипотека — ставки, программы\n"
+            "• Строительство — новые технологии",
+            reply_markup=get_back_btn(),
+            parse_mode="HTML"
+        )
+        await state.set_state(ContentStates.ai_news)
+
+
+@content_router.callback_query(F.data.startswith("topic_news:"), ContentStates.ai_news_choose)
+async def news_topic_selected(callback: CallbackQuery, state: FSMContext):
+    part = callback.data.split(":", 1)[1]
+    if part == "custom":
+        await callback.answer("Введите тему в чат")
+        await callback.message.edit_text(
+            "📰 Введите тему новости (например: перепланировка, ипотека, новые материалы):",
+            reply_markup=get_back_btn(),
+            parse_mode="HTML"
+        )
+        await state.set_state(ContentStates.ai_news)
+        return
+    try:
+        idx = int(part)
+    except ValueError:
+        await callback.answer("Ошибка выбора")
+        return
+    data = await state.get_data()
+    topics = data.get("hot_topics") or []
+    if idx < 0 or idx >= len(topics):
+        await callback.answer("Тема не найдена")
+        return
+    topic = topics[idx]
+    await callback.answer()
+    await _generate_news_by_topic(callback, state, topic, is_callback=True)
 
 
 @content_router.message(ContentStates.ai_news)
 async def ai_news_handler(message: Message, state: FSMContext):
-    topic = message.text
-    
-    await message.answer("🔍 <b>Пишу новость...</b>", parse_mode="HTML")
-    
-    prompt = (
-        f"Экспертная новость на тему «{topic}». "
-        f"Структура: заголовок, суть новости, комментарий эксперта, "
-        f"что значит для людей, призыв к консультации. "
-        f"200-250 слов. Хештеги: #новость #недвижимость #TERION"
-    )
-    
-    news = await router_ai.generate(prompt)
-    
-    if not news:
-        await message.answer("❌ Ошибка", reply_markup=get_back_btn())
-        await state.clear()
+    topic = (message.text or "").strip()
+    if not topic:
+        await message.answer("Введите тему текстом.")
         return
-    
-    if VK_QUIZ_LINK not in news:
-        news += f"\n\n📍 <a href='{VK_QUIZ_LINK}'>Пройти квиз</a> @terion_bot\n#TERION #перепланировка #москва"
-    
-    post_id = await show_preview(message, news)
-    await state.set_state(ContentStates.preview_mode)
-    await state.update_data(post_id=post_id, text=news)
+    await _generate_news_by_topic(message, state, topic, is_callback=False)
 
 
 # === 🎉 ПРАЗДНИК РФ ===
@@ -1092,9 +1185,9 @@ async def holiday_rf_selected(callback: CallbackQuery, state: FSMContext):
         post = await agent.generate_greeting_post(person_name=None, occasion=occasion)
         body = (post.get("title") or "") + "\n\n" + (post.get("body") or "")
         if not body.strip():
-            body = f"🎉 С праздником — {label}! Желаем мира, добра и уюта в вашем доме."
+            body = f"🎉 С праздником — {label}! От имени TERION желаем мира, добра и уюта в вашем доме."
         if VK_QUIZ_LINK not in body:
-            body += f"\n\n📍 @terion_bot — консультации по перепланировкам"
+            body += f"\n\n📍 <a href='{VK_QUIZ_LINK}'>Пройти квиз</a> @terion_bot\n#TERION #перепланировка #москва"
         post_id = await db.add_content_post(
             title=f"Праздник: {label}",
             body=body,
@@ -1114,7 +1207,7 @@ async def holiday_rf_selected(callback: CallbackQuery, state: FSMContext):
 # === 📝 БЫСТРЫЙ ТЕКСТ ===
 
 async def quick_start(message: Message, state: FSMContext):
-    await state.update_data(quick_prompt_prefix=None)
+    await state.update_data(quick_prompt_prefix=None, fact_from_lead=None)
     await message.answer(
         "📝 <b>Быстрый текст</b>\n\n"
         "Введите тему:",
@@ -1122,6 +1215,95 @@ async def quick_start(message: Message, state: FSMContext):
         parse_mode="HTML"
     )
     await state.set_state(ContentStates.ai_text)
+
+
+# === 💡 ИНТЕРЕСНЫЙ ФАКТ (из реальных ситуаций potential_leads.db) ===
+
+async def fact_start(message: Message, state: FSMContext):
+    """Сначала предлагаем реальные ситуации из чатов (potential_leads.db), иначе — ввод темы."""
+    db_path = os.path.abspath(_potential_leads_db_path())
+    leads: list = []
+    try:
+        if os.path.isfile(db_path):
+            hunter_db = HunterDatabase(db_path)
+            await hunter_db.connect()
+            leads = await hunter_db.get_latest_hot_leads(3)
+            if hunter_db.conn:
+                await hunter_db.conn.close()
+    except Exception as e:
+        logger.warning("potential_leads для фактов: %s", e)
+    if leads:
+        builder = InlineKeyboardBuilder()
+        situations = []
+        for i, row in enumerate(leads):
+            raw = (row.get("content") or row.get("intent") or "")[:50]
+            situations.append(raw)
+            label = raw + "…" if len(raw) >= 50 else raw
+            builder.button(text=f"📌 {i + 1}. {label}", callback_data=f"fact_lead:{i}")
+        builder.button(text="✏️ Своя тема", callback_data="fact_lead:custom")
+        builder.adjust(1)
+        await state.update_data(fact_situations=situations, quick_prompt_prefix="fact")
+        await message.answer(
+            "💡 <b>Интересный факт</b>\n\nВыберите реальную ситуацию из чатов или введите свою тему в чат:",
+            reply_markup=builder.as_markup(),
+            parse_mode="HTML"
+        )
+        await state.set_state(ContentStates.ai_fact_choose)
+    else:
+        await state.update_data(quick_prompt_prefix="fact", fact_from_lead=None)
+        await message.answer(
+            "💡 <b>Интересный факт</b>\n\nВведите тему (например: перепланировка в сталинках, МНИИТЭП, МЖИ):",
+            reply_markup=get_back_btn(),
+            parse_mode="HTML"
+        )
+        await state.set_state(ContentStates.ai_text)
+
+
+@content_router.callback_query(F.data.startswith("fact_lead:"), ContentStates.ai_fact_choose)
+async def fact_lead_selected(callback: CallbackQuery, state: FSMContext):
+    part = callback.data.split(":", 1)[1]
+    if part == "custom":
+        await callback.answer("Введите тему в чат")
+        await callback.message.edit_text(
+            "💡 Введите тему интересного факта (например: несущие стены, МЖИ, акты скрытых работ):",
+            reply_markup=get_back_btn(),
+            parse_mode="HTML"
+        )
+        await state.update_data(fact_from_lead=None)
+        await state.set_state(ContentStates.ai_text)
+        return
+    try:
+        idx = int(part)
+    except ValueError:
+        await callback.answer("Ошибка выбора")
+        return
+    data = await state.get_data()
+    situations = data.get("fact_situations") or []
+    if idx < 0 or idx >= len(situations):
+        await callback.answer("Ситуация не найдена")
+        return
+    situation = situations[idx]
+    await state.update_data(fact_from_lead=situation, quick_prompt_prefix="fact")
+    await callback.answer()
+    await callback.message.edit_text("⏳ <b>Пишу интересный факт по реальной ситуации...</b>", parse_mode="HTML")
+    # Генерируем сразу по выбранной ситуации
+    cases_content = _load_content_template("expert_cases.txt", "МЖИ, несущие стены, трассировка, акты скрытых работ.")
+    prompt = (
+        f"Интересный факт для поста в TG на основе РЕАЛЬНОЙ ситуации из чата (не выдумывай):\n\n{situation}\n\n"
+        f"Требования: короткая познавательная заметка 80-120 слов, экспертный тон. "
+        f"Используй термины по смыслу: МЖИ, несущие стены, трассировка, акты скрытых работ. Реальные кейсы:\n{cases_content}\n\n"
+        f"Без продаж, мягкий призыв к @terion_bot. ЗАПРЕЩЕНО общие фразы без конкретики."
+    )
+    text = await router_ai.generate(prompt)
+    if not text:
+        await callback.message.edit_text("❌ Ошибка генерации", reply_markup=get_back_btn())
+        await state.clear()
+        return
+    if VK_QUIZ_LINK not in text:
+        text += f"\n\n📍 <a href='{VK_QUIZ_LINK}'>Пройти квиз</a> @terion_bot\n#TERION #перепланировка #москва"
+    post_id = await show_preview(callback.message, text)
+    await state.set_state(ContentStates.preview_mode)
+    await state.update_data(post_id=post_id, text=text)
 
 
 @content_router.message(ContentStates.ai_text)
@@ -1132,9 +1314,11 @@ async def ai_text_handler(message: Message, state: FSMContext):
     await message.answer("⏳ <b>Пишу...</b>" if not is_fact else "⏳ <b>Пишу интересный факт...</b>", parse_mode="HTML")
 
     if is_fact:
+        cases_content = _load_content_template("expert_cases.txt", "МЖИ, несущие стены, трассировка, акты скрытых работ.")
         prompt = (
             f"Интересный факт для поста в TG на тему «{topic}». "
-            f"Короткая познавательная заметка, экспертный тон, 80-120 слов. Эмодзи. Без продаж, мягкий призыв к @terion_bot."
+            f"Короткая познавательная заметка, экспертный тон, 80-120 слов. Используй по смыслу: МЖИ, несущие стены, трассировка или акты скрытых работ. Реальные кейсы:\n{cases_content}\n\n"
+            f"Эмодзи. Без продаж, мягкий призыв к @terion_bot. ЗАПРЕЩЕНО общие фразы без конкретики."
         )
     else:
         prompt = (
@@ -1181,11 +1365,15 @@ def clean_html_for_vk(text: str) -> str:
 
 
 async def send_post(bot: Bot, channel_id: int, post: dict, channel_name: str) -> tuple[bool, str]:
-    """Отправка поста в канал: всегда ссылка на квиз + обязательные хэштеги."""
+    """Отправка поста в канал: всегда ссылка на квиз + обязательные хэштеги. URL фото скачиваем и отправляем файлом."""
     text = ensure_quiz_and_hashtags(post['body'])
     try:
         if post.get("image_url"):
-            msg = await bot.send_photo(channel_id, post["image_url"], text, parse_mode="HTML")
+            photo = await _photo_input_for_send(bot, post["image_url"])
+            if photo is not None:
+                msg = await bot.send_photo(channel_id, photo, caption=text, parse_mode="HTML")
+            else:
+                msg = await bot.send_message(channel_id, text, parse_mode="HTML")
         else:
             msg = await bot.send_message(channel_id, text, parse_mode="HTML")
         
@@ -1318,7 +1506,11 @@ async def publish_all(callback: CallbackQuery, state: FSMContext):
     # TG TERION
     try:
         if post.get("image_url"):
-            await callback.bot.send_photo(CHANNEL_ID_TERION, post["image_url"], text, parse_mode="HTML")
+            photo = await _photo_input_for_send(callback.bot, post["image_url"])
+            if photo is not None:
+                await callback.bot.send_photo(CHANNEL_ID_TERION, photo, caption=text, parse_mode="HTML")
+            else:
+                await callback.bot.send_message(CHANNEL_ID_TERION, text, parse_mode="HTML")
         else:
             await callback.bot.send_message(CHANNEL_ID_TERION, text, parse_mode="HTML")
         results.append("✅ TERION TG")
@@ -1328,7 +1520,11 @@ async def publish_all(callback: CallbackQuery, state: FSMContext):
     # TG ДОМ ГРАНД
     try:
         if post.get("image_url"):
-            await callback.bot.send_photo(CHANNEL_ID_DOM_GRAD, post["image_url"], text, parse_mode="HTML")
+            photo = await _photo_input_for_send(callback.bot, post["image_url"])
+            if photo is not None:
+                await callback.bot.send_photo(CHANNEL_ID_DOM_GRAD, photo, caption=text, parse_mode="HTML")
+            else:
+                await callback.bot.send_message(CHANNEL_ID_DOM_GRAD, text, parse_mode="HTML")
         else:
             await callback.bot.send_message(CHANNEL_ID_DOM_GRAD, text, parse_mode="HTML")
         results.append("✅ ДОМ ГРАНД TG")
@@ -1374,8 +1570,13 @@ async def publish_tg_only(callback: CallbackQuery, state: FSMContext):
     text = ensure_quiz_and_hashtags(post['body']) + _get_expert_signature()
     try:
         if post.get("image_url"):
-            await callback.bot.send_photo(CHANNEL_ID_TERION, post["image_url"], text, parse_mode="HTML")
-            await callback.bot.send_photo(CHANNEL_ID_DOM_GRAD, post["image_url"], text, parse_mode="HTML")
+            photo = await _photo_input_for_send(callback.bot, post["image_url"])
+            if photo is not None:
+                await callback.bot.send_photo(CHANNEL_ID_TERION, photo, caption=text, parse_mode="HTML")
+                await callback.bot.send_photo(CHANNEL_ID_DOM_GRAD, photo, caption=text, parse_mode="HTML")
+            else:
+                await callback.bot.send_message(CHANNEL_ID_TERION, text, parse_mode="HTML")
+                await callback.bot.send_message(CHANNEL_ID_DOM_GRAD, text, parse_mode="HTML")
         else:
             await callback.bot.send_message(CHANNEL_ID_TERION, text, parse_mode="HTML")
             await callback.bot.send_message(CHANNEL_ID_DOM_GRAD, text, parse_mode="HTML")
@@ -1438,11 +1639,17 @@ async def save_draft(callback: CallbackQuery, state: FSMContext):
         hint = "\n\n💡 Кнопки: 🚀 TERION | 🏘 ДОМ ГРАНД | 📱 MAX | 🌐 VK"
         body = f"📝 <b>Черновик #{post_id}</b>\n\n{post['body']}{hint}"
         if post.get("image_url"):
-            await callback.bot.send_photo(
-                LEADS_GROUP_CHAT_ID, post["image_url"],
-                body,
-                message_thread_id=THREAD_ID_DRAFTS, parse_mode="HTML", reply_markup=kb
-            )
+            photo = await _photo_input_for_send(callback.bot, post["image_url"])
+            if photo is not None:
+                await callback.bot.send_photo(
+                    LEADS_GROUP_CHAT_ID, photo, caption=body,
+                    message_thread_id=THREAD_ID_DRAFTS, parse_mode="HTML", reply_markup=kb
+                )
+            else:
+                await callback.bot.send_message(
+                    LEADS_GROUP_CHAT_ID, body,
+                    message_thread_id=THREAD_ID_DRAFTS, parse_mode="HTML", reply_markup=kb
+                )
         else:
             await callback.bot.send_message(
                 LEADS_GROUP_CHAT_ID, body,

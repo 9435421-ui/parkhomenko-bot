@@ -45,3 +45,21 @@ class HunterDatabase:
                 return True
         except aiosqlite.IntegrityError:
             return False
+
+    async def get_latest_hot_leads(self, limit: int = 3) -> List[Dict]:
+        """Последние горячие темы: по hotness и дате, для выбора темы новости."""
+        if not self.conn:
+            await self.connect()
+        async with self.conn.cursor() as cursor:
+            await cursor.execute("""
+                SELECT content, intent, hotness, created_at
+                FROM potential_leads
+                WHERE content IS NOT NULL AND TRIM(content) != ''
+                ORDER BY hotness DESC, created_at DESC
+                LIMIT ?
+            """, (limit,))
+            rows = await cursor.fetchall()
+        return [
+            {"content": row[0], "intent": row[1], "hotness": row[2], "created_at": row[3]}
+            for row in rows
+        ]

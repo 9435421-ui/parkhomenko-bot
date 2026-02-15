@@ -15,14 +15,17 @@ class LeadAnalyzer:
         Анализирует пост, сверяясь с базой знаний продаж.
         Возвращает оценку от 0 до 1.
         """
+        if text is None:
+            text = ""
+        text = (text or "").strip()
         logger.info("🧠 LeadAnalyzer: глубокий анализ через Базу Знаний...")
-        
+
         # 1. Читаем ваши инструкции
         manual = ""
         if os.path.exists(self.kb_path):
             with open(self.kb_path, 'r', encoding='utf-8') as f:
                 manual = f.read()
-        
+
         # 2. Если пост совсем короткий или пустой
         if len(text) < 10:
             return 0.0
@@ -40,15 +43,16 @@ class LeadAnalyzer:
         """
         
         try:
-            # Используем router_ai (как в scout_agent.py)
             response = await router_ai.generate_response(prompt)
-            score = float(response.strip())
+            if response is None or not (response and str(response).strip()):
+                raise ValueError("Router AI вернул пустой ответ")
+            score = float(str(response).strip())
             logger.info(f"🎯 Оценка лида: {score}")
             return score
         except Exception as e:
             logger.error(f"❌ Ошибка анализатора: {e}")
-            # Fallback: если ИИ упал, ищем ваши ключевые слова вручную
+            # Fallback: если ИИ упал, ищем ключевые слова вручную
             triggers = ["мокрая точка", "узаконить", "химки", "красногорск", "перепланиров"]
-            if any(word in text.lower() for word in triggers):
+            if text and any(word in text.lower() for word in triggers):
                 return 0.8
             return 0.1

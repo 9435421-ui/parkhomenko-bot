@@ -1,0 +1,14 @@
+[Unit]
+Description=TERION Bot (Антон + контент, квиз, шпион)
+After=network.target
+
+[Service]
+User=root
+WorkingDirectory=/root/PARKHOMENKO_BOT
+Environment="PATH=/root/PARKHOMENKO_BOT/venv/bin"
+ExecStart=/root/PARKHOMENKO_BOT/venv/bin/python3 /root/PARKHOMENKO_BOT/main.py
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target

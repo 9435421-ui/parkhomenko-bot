@@ -67,6 +67,8 @@ TERION_CHANNEL_ID = CHANNEL_ID_TERION
 DOM_GRAND_CHANNEL_ID = CHANNEL_ID_DOM_GRAD
 # === ADMIN ===
 ADMIN_ID = int(os.getenv("ADMIN_ID", "223465437"))
+# Юлия: доступ к /stats и /hunt в рабочей группе (если задан)
+JULIA_USER_ID = int(os.getenv("JULIA_USER_ID", "0"))  # 0 = только ADMIN_ID
 QUIZ_THREAD_ID = int(os.getenv("QUIZ_THREAD_ID", "2"))
 THREAD_ID_HOT_LEADS = int(os.getenv("THREAD_ID_HOT_LEADS", "10"))
 

@@ -58,6 +58,13 @@ class LeadHunter:
         vk_posts = await self.parser.parse_vk()
         all_posts = tg_posts + vk_posts
 
+        tg_ok = [r for r in (self.parser.last_scan_report or []) if r.get("type") == "telegram" and r.get("status") == "ok"]
+        vk_ok = [r for r in (self.parser.last_scan_report or []) if r.get("type") == "vk" and r.get("status") == "ok"]
+        logger.info(
+            "🔍 ScoutParser: просканировано TG каналов=%s, VK групп=%s, постов с ключевыми словами=%s",
+            len(tg_ok), len(vk_ok), len(all_posts)
+        )
+
         for post in all_posts:
             score = await self.analyzer.analyze_post(post.text)
             if score > 0.7:
