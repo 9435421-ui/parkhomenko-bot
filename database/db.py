@@ -194,22 +194,37 @@ class Database:
             row = await cursor.fetchone()
             return dict(row) if row else None
     
+    # Разрешённые поля для update_user_state (whitelist)
+    ALLOWED_USER_STATE_FIELDS = {
+        'mode', 'quiz_step', 'name', 'phone', 'extra_contact',
+        'object_type', 'city', 'floor', 'total_floors',
+        'remodeling_status', 'change_plan', 'bti_status',
+        'consent_given', 'contact_received', 'updated_at'
+    }
+
     async def update_user_state(self, user_id: int, **kwargs):
+        """Обновить состояние пользователя с whitelist защитой от SQL-инъекций"""
+        # Фильтруем только разрешённые поля
+        filtered_kwargs = {k: v for k, v in kwargs.items() if k in self.ALLOWED_USER_STATE_FIELDS}
+        
+        if not filtered_kwargs:
+            return  # Нечего обновлять
+        
         async with self.conn.cursor() as cursor:
             await cursor.execute("SELECT user_id FROM user_states WHERE user_id = ?", (user_id,))
             exists = await cursor.fetchone()
             
-            kwargs['updated_at'] = datetime.now()
+            filtered_kwargs['updated_at'] = datetime.now()
             
             if exists:
-                set_clause = ", ".join([f"{k} = ?" for k in kwargs.keys()])
-                values = list(kwargs.values()) + [user_id]
+                set_clause = ", ".join([f"{k} = ?" for k in filtered_kwargs.keys()])
+                values = list(filtered_kwargs.values()) + [user_id]
                 await cursor.execute(f"UPDATE user_states SET {set_clause} WHERE user_id = ?", values)
             else:
-                kwargs['user_id'] = user_id
-                columns = ", ".join(kwargs.keys())
-                placeholders = ", ".join(["?" for _ in kwargs])
-                await cursor.execute(f"INSERT INTO user_states ({columns}) VALUES ({placeholders})", list(kwargs.values()))
+                filtered_kwargs['user_id'] = user_id
+                columns = ", ".join(filtered_kwargs.keys())
+                placeholders = ", ".join(["?" for _ in filtered_kwargs])
+                await cursor.execute(f"INSERT INTO user_states ({columns}) VALUES ({placeholders})", list(filtered_kwargs.values()))
             
             await self.conn.commit()
     
@@ -311,10 +326,23 @@ class Database:
             await cursor.execute("UPDATE content_plan SET status = 'published' WHERE id = ?", (post_id,))
             await self.conn.commit()
 
+    # Разрешённые поля для update_content_plan_entry (whitelist)
+    ALLOWED_CONTENT_PLAN_FIELDS = {
+        'type', 'channel', 'title', 'body', 'cta', 'theme',
+        'publish_date', 'status', 'image_url', 'admin_id', 'published_at'
+    }
+
     async def update_content_plan_entry(self, post_id: int, **kwargs):
+        """Обновить запись контент-плана с whitelist защитой от SQL-инъекций"""
+        # Фильтруем только разрешённые поля
+        filtered_kwargs = {k: v for k, v in kwargs.items() if k in self.ALLOWED_CONTENT_PLAN_FIELDS}
+        
+        if not filtered_kwargs:
+            return  # Нечего обновлять
+        
         async with self.conn.cursor() as cursor:
-            set_clause = ", ".join([f"{k} = ?" for k in kwargs.keys()])
-            values = list(kwargs.values()) + [post_id]
+            set_clause = ", ".join([f"{k} = ?" for k in filtered_kwargs.keys()])
+            values = list(filtered_kwargs.values()) + [post_id]
             await cursor.execute(f"UPDATE content_plan SET {set_clause} WHERE id = ?", values)
             await self.conn.commit()
 
