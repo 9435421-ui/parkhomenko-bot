@@ -24,6 +24,42 @@ class LeadHunter:
         self.outreach = Outreach()
         self.parser = scout_parser  # общий экземпляр: отчёт последнего скана доступен и для /spy_report
 
+    def _format_lead_card(self, lead: dict) -> str:
+        """Форматирует одну карточку лида для отправки в группу."""
+        content = (lead.get("content") or lead.get("intent") or "")[:600]
+        if len(lead.get("content") or "") > 600:
+            content += "…"
+        return (
+            "🕵️ <b>Карточка лида (шпион)</b>\n\n"
+            f"📄 {content}\n\n"
+            f"🎯 <b>Интент:</b> {lead.get('intent', '—')}\n"
+            f"⭐ <b>Горячность:</b> {lead.get('hotness', 0)}/10\n"
+            f"📍 <b>Гео:</b> {lead.get('geo', '—')}\n"
+            f"💡 <b>Контекст:</b> {lead.get('context_summary', '—')}\n\n"
+            f"🔗 {lead.get('url', '')}"
+        )
+
+    async def _send_lead_card_to_group(self, lead: dict) -> bool:
+        """Отправляет карточку лида в рабочую группу (топик «Горячие лиды»)."""
+        from config import BOT_TOKEN, LEADS_GROUP_CHAT_ID, THREAD_ID_HOT_LEADS
+        if not BOT_TOKEN or not LEADS_GROUP_CHAT_ID:
+            logger.warning("⚠️ BOT_TOKEN или LEADS_GROUP_CHAT_ID не заданы — карточка в группу не отправлена")
+            return False
+        text = self._format_lead_card(lead)
+        try:
+            bot = Bot(token=BOT_TOKEN, default=DefaultBotProperties(parse_mode="HTML"))
+            thread_id = THREAD_ID_HOT_LEADS if THREAD_ID_HOT_LEADS else None
+            await bot.send_message(
+                LEADS_GROUP_CHAT_ID,
+                text,
+                message_thread_id=thread_id,
+            )
+            await bot.session.close()
+            return True
+        except Exception as e:
+            logger.error("❌ Не удалось отправить карточку лида в группу: %s", e)
+            return False
+
     async def _send_hot_lead_to_admin(self, lead: dict):
         """Пересылает горячий лид (AI Жюля, hotness > 4) админу в Telegram."""
         from config import BOT_TOKEN, ADMIN_ID
@@ -86,17 +122,29 @@ class LeadHunter:
                 hot_leads = await standalone.hunt(messages)
                 if db.conn:
                     await db.conn.close()
+                # Максимум карточек в группу за один запуск (чтобы не флудить)
+                MAX_CARDS_PER_RUN = 30
+                cards_sent = 0
                 for lead in hot_leads:
                     if lead.get("hotness", 0) > 4:
                         logger.info(f"🔥 Горячий лид (Жюль, hotness={lead.get('hotness')}) → пересылка админу")
                         await self._send_hot_lead_to_admin(lead)
+                    # Карточка лида в рабочую группу (топик «Горячие лиды»)
+                    if cards_sent < MAX_CARDS_PER_RUN:
+                        if await self._send_lead_card_to_group(lead):
+                            cards_sent += 1
+                if cards_sent:
+                    logger.info("📋 В рабочую группу отправлено карточек лидов: %s", cards_sent)
                 # Дублирование в рабочую группу: краткий отчёт о сохранённых лидах
                 if hot_leads:
                     from config import BOT_TOKEN, LEADS_GROUP_CHAT_ID, THREAD_ID_LOGS
                     if BOT_TOKEN and LEADS_GROUP_CHAT_ID:
                         try:
                             bot = Bot(token=BOT_TOKEN, default=DefaultBotProperties(parse_mode="HTML"))
-                            summary = f"🕵️ <b>Охота: в potential_leads сохранено {len(hot_leads)} лидов</b>\n\n"
+                            summary = f"🕵️ <b>Охота: в potential_leads сохранено {len(hot_leads)} лидов</b>"
+                            if cards_sent:
+                                summary += f", в топик «Горячие лиды» отправлено карточек: {cards_sent}"
+                            summary += "\n\n"
                             for i, lead in enumerate(hot_leads[:3], 1):
                                 content = (lead.get("content") or lead.get("intent") or "")[:80]
                                 summary += f"{i}. {content}…\n"

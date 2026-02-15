@@ -75,7 +75,7 @@ def is_admin(user_id: int) -> bool:
     """Доступ к админ-меню, /stats, /hunt: админ или Юлия."""
     return user_id == ADMIN_ID or (JULIA_USER_ID and user_id == JULIA_USER_ID)
 QUIZ_THREAD_ID = int(os.getenv("QUIZ_THREAD_ID", "2"))
-THREAD_ID_HOT_LEADS = int(os.getenv("THREAD_ID_HOT_LEADS", "10"))
+THREAD_ID_HOT_LEADS = int(os.getenv("THREAD_ID_HOT_LEADS", "811"))  # топик «Горячие лиды» в рабочей группе
 
 # === PATHS ===
 DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///parkhomenko_bot.db")
