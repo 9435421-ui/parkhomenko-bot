@@ -1,8 +1,10 @@
+import io
 import logging
 import os
 from datetime import datetime
 from aiogram import Bot
 from aiogram.client.default import DefaultBotProperties
+from aiogram.types import BufferedInputFile
 
 from .discovery import Discovery
 from .analyzer import LeadAnalyzer
@@ -58,6 +60,51 @@ class LeadHunter:
             return True
         except Exception as e:
             logger.error("❌ Не удалось отправить карточку лида в группу: %s", e)
+            return False
+
+    def _build_raw_leads_file(self, all_posts: list, max_entries: int = 1000) -> bytes:
+        """Собирает текстовый файл со списком лидов: источник | превью текста | ссылка."""
+        lines = [
+            "Лиды шпиона (последний скан)",
+            f"Дата: {datetime.now().strftime('%d.%m.%Y %H:%M')}",
+            f"Всего постов с ключевыми словами: {len(all_posts)}",
+            "",
+            "---",
+            "",
+        ]
+        for i, post in enumerate(all_posts[:max_entries], 1):
+            source = getattr(post, "source_name", post.source_id) if hasattr(post, "source_name") else post.source_id
+            text_preview = (post.text or "").replace("\n", " ").strip()[:400]
+            url = getattr(post, "url", "") or f"{post.source_type}/{post.source_id}/{post.post_id}"
+            lines.append(f"[{i}] {source}")
+            lines.append(f"Текст: {text_preview}")
+            lines.append(f"Ссылка: {url}")
+            lines.append("")
+        if len(all_posts) > max_entries:
+            lines.append(f"... и ещё {len(all_posts) - max_entries} лидов (обрезано).")
+        return "\n".join(lines).encode("utf-8")
+
+    async def _send_raw_leads_file_to_group(self, all_posts: list) -> bool:
+        """Отправляет в рабочую группу файл со списком всех лидов (источник, превью, ссылка)."""
+        from config import BOT_TOKEN, LEADS_GROUP_CHAT_ID, THREAD_ID_LOGS
+        if not BOT_TOKEN or not LEADS_GROUP_CHAT_ID:
+            return False
+        try:
+            file_bytes = self._build_raw_leads_file(all_posts)
+            filename = f"scout_leads_{datetime.now().strftime('%Y-%m-%d_%H-%M')}.txt"
+            doc = BufferedInputFile(file_bytes, filename=filename)
+            bot = Bot(token=BOT_TOKEN, default=DefaultBotProperties(parse_mode="HTML"))
+            await bot.send_document(
+                LEADS_GROUP_CHAT_ID,
+                doc,
+                caption=f"📎 Список лидов по скану ({len(all_posts)} постов с ключевыми словами). Источник, превью текста, ссылка.",
+                message_thread_id=THREAD_ID_LOGS,
+            )
+            await bot.session.close()
+            logger.info("📎 Файл со списком лидов отправлен в группу (топик Логи)")
+            return True
+        except Exception as e:
+            logger.warning("Не удалось отправить файл лидов в группу: %s", e)
             return False
 
     async def _send_hot_lead_to_admin(self, lead: dict):
@@ -173,5 +220,9 @@ class LeadHunter:
                 await bot.session.close()
         except Exception as e:
             logger.warning("Не удалось отправить отчёт шпиона в группу: %s", e)
+
+        # Файл со списком всех лидов (источник, превью текста, ссылка) — в тот же топик «Логи»
+        if all_posts:
+            await self._send_raw_leads_file_to_group(all_posts)
 
         logger.info(f"🏹 LeadHunter: охота завершена. Обработано {len(all_posts)} постов.")
