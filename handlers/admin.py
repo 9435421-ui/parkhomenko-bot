@@ -849,7 +849,72 @@ async def admin_back(callback: CallbackQuery, state: FSMContext):
     await callback.answer()
 
 
-# === ОТВЕТ ЛИДУ ОТ ИМЕНИ АНТОНА (кнопка на карточке лида) ===
+# === ОТВЕТ ЭКСПЕРТНО (Агент-Антон, до 500 знаков + дисклеймер + квиз) ===
+@router.callback_query(F.data.startswith("lead_expert_reply_"))
+async def lead_expert_reply(callback: CallbackQuery):
+    """Кнопка «Ответить экспертно»: генерация ответа через Агента-Антона (Retrieval), отправка лиду в ЛС."""
+    if not check_admin(callback.from_user.id):
+        await callback.answer("⛔ Нет доступа", show_alert=True)
+        return
+    try:
+        lead_id = int(callback.data.replace("lead_expert_reply_", ""))
+    except ValueError:
+        await callback.answer("❌ Неверный ID лида")
+        return
+    lead = await db.get_spy_lead(lead_id)
+    if not lead:
+        await callback.answer("❌ Лид не найден")
+        return
+    await callback.answer("⏳ Генерирую ответ через Антона...")
+    context = (lead.get("text") or lead.get("url") or "")[:2000]
+    try:
+        from utils.yandex_ai_agents import call_anton_agent
+        reply = await call_anton_agent(context, max_chars=500)
+    except Exception as e:
+        reply = f"Произошла ошибка при генерации ответа. Ответьте лиду вручную. ({e})"
+    author_id = lead.get("author_id")
+    source_type = lead.get("source_type", "telegram")
+    if source_type == "telegram" and author_id:
+        try:
+            await callback.bot.send_message(int(author_id), reply, parse_mode="HTML")
+            await callback.message.answer("✅ Экспертный ответ отправлен лиду в ЛС.")
+        except Exception as e:
+            await callback.message.answer(f"❌ Не удалось отправить в ЛС: {e}. Скопируйте текст и ответьте вручную:\n\n{reply[:500]}")
+    else:
+        await callback.message.answer(f"📋 Ответ (отправьте лиду вручную):\n\n{reply}")
+
+
+# === ВЗЯТЬ В РАБОТУ (контакт Юлии в личку лиду) ===
+@router.callback_query(F.data.startswith("lead_take_work_"))
+async def lead_take_work(callback: CallbackQuery):
+    """Кнопка «Взять в работу»: пересылает контакт Юлии лиду в личку."""
+    if not check_admin(callback.from_user.id):
+        await callback.answer("⛔ Нет доступа", show_alert=True)
+        return
+    try:
+        lead_id = int(callback.data.replace("lead_take_work_", ""))
+    except ValueError:
+        await callback.answer("❌ Неверный ID лида")
+        return
+    lead = await db.get_spy_lead(lead_id)
+    if not lead:
+        await callback.answer("❌ Лид не найден")
+        return
+    from config import JULIA_CONTACT
+    author_id = lead.get("author_id")
+    if lead.get("source_type") == "telegram" and author_id:
+        try:
+            await callback.bot.send_message(int(author_id), f"🛠 Взят в работу.\n\n{JULIA_CONTACT}", parse_mode="HTML")
+            await callback.answer("✅ Контакт Юлии отправлен лиду.")
+        except Exception as e:
+            await callback.answer()
+            await callback.message.answer(f"❌ Не удалось отправить: {e}. Напишите лиду вручную: {JULIA_CONTACT}")
+    else:
+        await callback.answer()
+        await callback.message.answer(f"Отправьте лиду вручную: {JULIA_CONTACT}")
+
+
+# === ОТВЕТ ЛИДУ ОТ ИМЕНИ АНТОНА (ручной ввод текста) ===
 @router.callback_query(F.data.startswith("lead_reply_"))
 async def lead_reply_start(callback: CallbackQuery, state: FSMContext):
     """По нажатию «🤖 Ответить от имени Антона» — запрашиваем текст ответа."""

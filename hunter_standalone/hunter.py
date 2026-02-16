@@ -30,31 +30,56 @@ class LeadHunter:
     async def hunt(self, messages: List[Dict]):
         results = []
         for msg in messages:
-            text = (msg.get('text') or '').lower()
-            has_lead_phrase = any(p in text for p in self.lead_phrases)
-            analysis = await self._analyze_intent(msg['text'])
-            if analysis['is_lead'] or has_lead_phrase:
+            text = (msg.get('text') or '').strip()
+            text_lower = text.lower()
+            has_lead_phrase = any(p in text_lower for p in self.lead_phrases)
+            analysis = await self._analyze_intent(msg.get('text', ''))
+            hotness = max(analysis.get('hotness', 3), 4 if has_lead_phrase else 0)
+            if hotness >= 2 or analysis.get('is_lead') or has_lead_phrase:
                 lead_data = {
-                    'url': msg.get('url', ''), 'content': msg.get('text', ''),
-                    'intent': analysis.get('intent', 'DIY/ремонт') if has_lead_phrase else analysis['intent'],
-                    'hotness': max(analysis.get('hotness', 3), 4 if has_lead_phrase else 0),
+                    'url': msg.get('url', ''),
+                    'content': text,
+                    'intent': analysis.get('intent', 'DIY/ремонт') if has_lead_phrase else analysis.get('intent', '—'),
+                    'hotness': hotness,
                     'geo': "Москва/МО" if self._check_geo(msg.get('text', '')) else "Не указано",
-                    'context_summary': analysis.get('context_summary', '') or ('по фразе: ' + next((p for p in self.lead_phrases if p in text), ''))
+                    'context_summary': analysis.get('context_summary', '') or ('по фразе: ' + next((p for p in self.lead_phrases if p in text_lower), '')),
+                    'recommendation': analysis.get('recommendation', ''),
+                    'pain_level': analysis.get('pain_level', min(hotness, 5)),
                 }
                 if await self.db.save_lead(lead_data):
                     results.append(lead_data)
         return results
 
     def _check_geo(self, text: str) -> bool:
-        return any(kw in text.lower() for kw in self.geo_keywords)
+        return any(kw in (text or "").lower() for kw in self.geo_keywords)
 
     async def _analyze_intent(self, text: str) -> Dict:
+        if not text or not (text or "").strip():
+            return {"is_lead": False, "intent": "", "hotness": 0, "context_summary": ""}
+        # Умный Охотник v2.0: приоритет — Агент-Шпион (Yandex AI Studio)
+        try:
+            from utils.yandex_ai_agents import call_spy_agent
+            spy = await call_spy_agent(text)
+            hotness = spy.get("hotness", 3)
+            return {
+                "is_lead": hotness >= 2,
+                "intent": spy.get("recommendation", "")[:200] or "Запрос по перепланировке",
+                "hotness": hotness,
+                "context_summary": spy.get("recommendation", "")[:300],
+                "recommendation": spy.get("recommendation", ""),
+                "pain_level": spy.get("pain_level", min(hotness, 5)),
+            }
+        except Exception:
+            pass
         if not router_ai:
-            return {"is_lead": "ищу" in text.lower(), "intent": "Поиск", "hotness": 3, "context_summary": "AI offline"}
+            return {"is_lead": "ищу" in text.lower(), "intent": "Поиск", "hotness": 3, "context_summary": "AI offline", "recommendation": "", "pain_level": 3}
 
         prompt = f"Проанализируй сообщение: {text}. Если это запрос услуги (дизайн/перепланировка) - is_lead: true. Выдай JSON: is_lead, intent, hotness (1-5), context_summary"
         try:
             response = await router_ai.generate_response(prompt, model="kimi")
-            return json.loads(re.search(r'\{.*\}', response, re.DOTALL).group(0))
+            out = json.loads(re.search(r'\{.*\}', response, re.DOTALL).group(0))
+            out.setdefault("recommendation", out.get("context_summary", ""))
+            out.setdefault("pain_level", min(out.get("hotness", 3), 5))
+            return out
         except Exception:
-            return {"is_lead": False, "intent": "error", "hotness": 0, "context_summary": "ошибка анализа"}
+            return {"is_lead": False, "intent": "error", "hotness": 0, "context_summary": "ошибка анализа", "recommendation": "", "pain_level": 3}

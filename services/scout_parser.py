@@ -876,6 +876,11 @@ class ScoutParser:
                     "scanned": scanned_wall + scanned_comments,
                     "error": None,
                 })
+                if count > 0 and db:
+                    try:
+                        await db.set_setting("scout_vk_lead_" + str(group["id"]), datetime.now().isoformat())
+                    except Exception:
+                        pass
             except Exception as e:
                 logger.error(f"❌ Ошибка группы {group['name']}: {e}")
                 self.last_scan_report.append({

@@ -765,9 +765,17 @@ class Database:
             return dict(row) if row else None
 
     async def get_active_targets_for_scout(self) -> List[Dict]:
-        """Список целей для парсера/хантера: active + telegram. Поля: link, title, geo_tag, id, is_high_priority."""
+        """Список целей для парсера/хантера: active + telegram. Поля: link, title, geo_tag, id, is_high_priority, last_lead_at."""
         async with self.conn.cursor() as cursor:
             try:
+                await cursor.execute(
+                    """SELECT id, link, title, COALESCE(geo_tag, '') AS geo_tag,
+                          COALESCE(is_high_priority, 0) AS is_high_priority, last_lead_at
+                       FROM target_resources
+                       WHERE (status = 'active' OR (is_active = 1 AND (status IS NULL OR status = '')))
+                         AND (platform = 'telegram' OR type = 'telegram')"""
+                )
+            except Exception:
                 await cursor.execute(
                     """SELECT id, link, title, COALESCE(geo_tag, '') AS geo_tag,
                           COALESCE(is_high_priority, 0) AS is_high_priority
@@ -775,14 +783,20 @@ class Database:
                        WHERE (status = 'active' OR (is_active = 1 AND (status IS NULL OR status = '')))
                          AND (platform = 'telegram' OR type = 'telegram')"""
                 )
-            except Exception:
-                await cursor.execute(
-                    """SELECT id, link, title, COALESCE(geo_tag, '') AS geo_tag FROM target_resources
-                       WHERE (status = 'active' OR (is_active = 1 AND (status IS NULL OR status = '')))
-                         AND (platform = 'telegram' OR type = 'telegram')"""
-                )
             rows = await cursor.fetchall()
             return [dict(row) for row in rows]
+
+    async def update_target_last_lead_at(self, link: str) -> None:
+        """Обновить время последнего найденного лида по ресурсу (для исключения из скана через 48ч)."""
+        link_clean = (link or "").strip().rstrip("/")
+        if not link_clean:
+            return
+        async with self.conn.cursor() as cursor:
+            await cursor.execute(
+                "UPDATE target_resources SET last_lead_at = ?, updated_at = ? WHERE link = ? OR link = ?",
+                (datetime.now(), datetime.now(), link_clean, link_clean + "/"),
+            )
+            await self.conn.commit()
 
     async def get_pending_targets(self) -> List[Dict]:
         """Список ресурсов со статусом pending для /approve_targets. Поля: id, title, link, participants_count."""

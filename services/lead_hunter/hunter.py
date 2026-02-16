@@ -33,7 +33,11 @@ class LeadHunter:
         card_header: str = "",
         anton_recommendation: str = "",
     ) -> str:
-        """Форматирует одну карточку лида. card_header — гео/высотка; anton_recommendation — подсказка Ассистента Продаж."""
+        """Форматирует карточку лида. Умный Охотник v2.0: при наличии recommendation — формат с вердиктом и болью."""
+        recommendation = (lead.get("recommendation") or anton_recommendation or "").strip()
+        pain_level = lead.get("pain_level") or min(lead.get("hotness", 3), 5)
+        if recommendation and pain_level:
+            return self._format_lead_card_v2(lead, profile_url, card_header, recommendation, pain_level)
         content = (lead.get("content") or lead.get("intent") or "")[:600]
         if len(lead.get("content") or "") > 600:
             content += "…"
@@ -58,6 +62,41 @@ class LeadHunter:
         lines.append(f"\n🔗 Пост: {lead.get('url', '')}")
         return "\n".join(lines)
 
+    def _format_lead_card_v2(
+        self,
+        lead: dict,
+        profile_url: str = "",
+        card_header: str = "",
+        recommendation: str = "",
+        pain_level: int = 3,
+    ) -> str:
+        """Формат карточки Умный Охотник v2.0: ГОРЯЧИЙ ЛИД, цитата, аналитика, вердикт."""
+        source = card_header or "Чат ЖК"
+        client_line = "👤 <b>Клиент:</b> "
+        if profile_url and profile_url.startswith("http"):
+            client_line += f'<a href="{profile_url}">профиль</a>'
+        elif profile_url and profile_url.startswith("tg://"):
+            client_line += f"<code>{profile_url}</code>"
+        else:
+            client_line += "—"
+        quote = (lead.get("content") or lead.get("intent") or "")[:400]
+        if len(lead.get("content") or "") > 400:
+            quote += "…"
+        pain_label = "Критично" if pain_level >= 4 else "Высокая" if pain_level >= 3 else "Средняя"
+        lines = [
+            f"🔥 <b>ГОРЯЧИЙ ЛИД:</b> {source}",
+            "",
+            client_line,
+            f"📝 <b>Цитата:</b> «{quote}»",
+            "",
+            "🎯 <b>Аналитика Антона:</b>",
+            f"Уровень боли: {pain_level}/5 ({pain_label})",
+            f"<b>Вердикт:</b> {recommendation[:500]}",
+            "",
+            f"🔗 Пост: {lead.get('url', '')}",
+        ]
+        return "\n".join(lines)
+
     async def _send_lead_card_to_group(
         self,
         lead: dict,
@@ -77,7 +116,8 @@ class LeadHunter:
         if profile_url and profile_url.startswith("http"):
             buttons.append(InlineKeyboardButton(text="👤 Профиль", url=profile_url))
         buttons.append(InlineKeyboardButton(text="🔗 Пост", url=post_url[:500]))
-        buttons.append(InlineKeyboardButton(text="🤖 Ответить от имени Антона", callback_data=f"lead_reply_{lead_id}"))
+        buttons.append(InlineKeyboardButton(text="🛠 Ответить экспертно", callback_data=f"lead_expert_reply_{lead_id}"))
+        buttons.append(InlineKeyboardButton(text="🛠 Взять в работу", callback_data=f"lead_take_work_{lead_id}"))
         keyboard = InlineKeyboardMarkup(inline_keyboard=[buttons])
         try:
             bot = Bot(token=BOT_TOKEN, default=DefaultBotProperties(parse_mode="HTML"))
@@ -207,7 +247,7 @@ class LeadHunter:
 
         from database import db as main_db
         tg_posts = await self.parser.parse_telegram(db=main_db)
-        vk_posts = await self.parser.parse_vk()
+        vk_posts = await self.parser.parse_vk(db=main_db)
         all_posts = tg_posts + vk_posts
 
         tg_ok = [r for r in (self.parser.last_scan_report or []) if r.get("type") == "telegram" and r.get("status") == "ok"]
@@ -250,6 +290,8 @@ class LeadHunter:
                     return None
 
                 for lead in hot_leads:
+                    if lead.get("hotness", 0) < 3:
+                        continue
                     if lead.get("hotness", 0) > 4:
                         logger.info(f"🔥 Горячий лид (Жюль, hotness={lead.get('hotness')}) → пересылка админу")
                         await self._send_hot_lead_to_admin(lead)

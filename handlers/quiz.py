@@ -462,6 +462,40 @@ async def process_extra_done(message: Message, state: FSMContext, bot: Bot):
             extra_questions="\n---\n".join(extra_texts) if extra_texts else None,
         )
         await db.set_lead_thread(lead_id, thread_id)
+
+        # Умный квиз v2: сводка -> Агент-Антон -> предварительное заключение, уведомление Юлии
+        quiz_summary = (
+            f"Клиент: {user_name}, телефон: {phone}. "
+            f"Город: {data.get('city', '—')}. Тип объекта: {data.get('object_type', '—')}. "
+            f"Этажность: {data.get('floors', '—')}. Площадь: {data.get('area', '—')} кв.м. "
+            f"Статус перепланировки: {data.get('status', '—')}. "
+            f"Описание: {data.get('description', '—')}. План: {plan_text}."
+        )
+        if extra_texts:
+            quiz_summary += " Доп. вопросы/документы: " + "; ".join(extra_texts[:5])
+        conclusion = ""
+        try:
+            from utils.yandex_ai_agents import call_anton_quiz_summary
+            conclusion = await call_anton_quiz_summary(quiz_summary)
+        except Exception as e:
+            logger.warning("Anton quiz conclusion failed: %s", e)
+        if conclusion:
+            await message.answer(
+                f"📋 <b>Предварительное заключение эксперта Юлии Пархоменко</b>\n\n{conclusion}",
+                parse_mode="HTML",
+            )
+        try:
+            julia_notice = "📌 Лид из чата ЖК прошел квиз. Вероятность сделки: Высокая."
+            if conclusion:
+                julia_notice += f"\n\n{conclusion[:500]}"
+            await bot.send_message(
+                chat_id=LEADS_GROUP_CHAT_ID,
+                message_thread_id=thread_id,
+                text=julia_notice,
+                parse_mode="HTML",
+            )
+        except Exception as e:
+            logger.warning("Julia quiz notification failed: %s", e)
     except Exception as e:
         await message.answer(f"❌ Ошибка отправки заявки. Попробуйте ещё раз или напишите в поддержку.", parse_mode="HTML")
         return
