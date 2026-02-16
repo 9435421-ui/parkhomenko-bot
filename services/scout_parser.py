@@ -1,20 +1,11 @@
 """
-Scout Parser — агент для парсинга Telegram каналов и VK групп.
+Scout Parser — снайперский мониторинг жилых ЖК.
 
-Функционал:
-1. Telegram: Парсинг каналов Химок, Красногорска, Севера/СЗ Москвы
-2. VK: Парсинг групп, поиск по ключевым словам, комментарии и личные сообщения
+Фокус: локальные чаты жилых комплексов (обжитые дома), «горячие» проблемы
+перепланировок. Лид = вопрос + технический термин (не «посоветуйте рабочих»).
 
-Каналы для мониторинга:
-- Химки, Красногорск, Север/СЗ Москвы
-
-Ключевые слова:
-- "перепланировка", "согласование", "узаконить"
-
-VK группы:
-- "Химки Бесплатка"
-- "Красногорск Барахолка"
-- "Москва Перепланировка"
+Приоритетные ЖК: Сердце Столицы, Символ, Зиларт, Пресня Сити, Сити (Башни).
+Цели задаются через .env (SCOUT_TG_CHANNEL_1_ID, NAME, GEO) или дефолт ниже.
 """
 import asyncio
 import logging
@@ -54,40 +45,23 @@ class ScoutParser:
     Ищет посты по ключевым словам и оставляет комментарии с предложением помощи.
     """
 
-    # === TELEGRAM КАНАЛЫ (Москва и МО: жилая + коммерция + дизайн/строй) ===
+    # === ПРИОРИТЕТНЫЕ ЖК ДЛЯ МОНИТОРИНГА (снайперский режим) ===
+    # ID чатов задаются в .env: SCOUT_TG_CHANNEL_1_ID, SCOUT_TG_CHANNEL_1_NAME, SCOUT_TG_CHANNEL_1_GEO и т.д.
+    # Если не заданы — используются эти дефолты (id нужно заменить на реальные чаты ЖК).
     TG_CHANNELS = [
-        {"id": "novostroyman", "name": "Новостройки Москвы и МО", "geo": "Москва/МО"},
-        {"id": "NovostroyM", "name": "Первичка Московский регион", "geo": "Москва/МО"},
-        {"id": "nedvigimost_moskva", "name": "Недвижимость Москва", "geo": "Москва/МО"},
-        {"id": "domostroy_channel", "name": "Строительство и недвижимость", "geo": "Москва/МО"},
-        {"id": "belaya_kaska", "name": "Белая каска недвижимость", "geo": "Москва/МО"},
-        {"id": "THEMOSCOWCITY", "name": "Москва-Сити", "geo": "Москва"},
-        {"id": "startyprodazh", "name": "Старты продаж", "geo": "Москва/МО"},
-        # Коммерческая недвижимость, брокеры, стрит-ритейл
-        {"id": "nmarketpro_commerce", "name": "Нмаркет.ПРО коммерция", "geo": "Москва/МО"},
-        {"id": "mallsru", "name": "Malls.ru торговля и недвижимость", "geo": "Москва/МО"},
-        {"id": "arendmoscow", "name": "Аренда Москва (офисы, помещения)", "geo": "Москва/МО"},
-        # Дизайн и ремонт (согласованиями часто не занимаются)
-        {"id": "decor_journal", "name": "Дизайн и ремонт | Интерьер", "geo": "Москва/МО"},
-        {"id": "avenco", "name": "АВЕНКО дизайн и ремонт Москва", "geo": "Москва/МО"},
-        {"id": "ukvartira", "name": "Уютная квартира | дизайн", "geo": "Москва/МО"},
-        # DIY и ремонт — «народные» чаты
-        {"id": "idea_remont", "name": "Идеи для ремонта", "geo": "Москва/МО"},
-        {"id": "remont_sovet", "name": "Советы по ремонту", "geo": "Москва/МО"},
-        {"id": "design_kvartiry", "name": "Дизайн и отделка", "geo": "Москва/МО"},
-        {"id": "kvartira_vopros", "name": "Вопросы жильцов", "geo": "Москва/МО"},
+        {"id": "", "name": "ЖК «Сердце Столицы»", "geo": "Москва"},
+        {"id": "", "name": "ЖК «Символ»", "geo": "Москва"},
+        {"id": "", "name": "ЖК «Зиларт»", "geo": "Москва"},
+        {"id": "", "name": "ЖК «Пресня Сити»", "geo": "Москва"},
+        {"id": "", "name": "Сити (Башни)", "geo": "Москва"},
     ]
 
-    # === VK ГРУППЫ (ID групп, Москва и МО) ===
+    # === VK ГРУППЫ (при необходимости добавить чаты ЖК в VK) ===
     VK_GROUPS = [
-        {"id": "133756068", "name": "Ремонт квартир Москва и Подмосковье", "geo": "Москва/МО"},
-        {"id": "124518536", "name": "Недвижимость услуги", "geo": "Москва/МО"},
-        {"id": "152491538", "name": "Реновация Москва (обсуждения)", "geo": "Москва"},
         {"id": "235569022", "name": "ТЕРИОН / перепланировки", "geo": "Москва/МО"},
-        {"id": "29534144", "name": "Москва 24", "geo": "Москва"},
     ]
 
-    # === КЛЮЧЕВЫЕ СЛОВА ===
+    # === КЛЮЧЕВЫЕ СЛОВА (в т.ч. боли жильцов) ===
     KEYWORDS = [
         "перепланировка",
         "согласование",
@@ -105,6 +79,13 @@ class ScoutParser:
         "кафе",
         "офис",
         "изменение назначения",
+        # Боли жильцов ЖК
+        "предписание МЖИ",
+        "штраф за перепланировку",
+        "акт скрытых работ",
+        "проект СРО",
+        "согласие соседей",
+        "мокрая зона",
         # DIY и ремонт
         "своими руками",
         "сломали стену",
@@ -113,14 +94,56 @@ class ScoutParser:
         "хотим объединить",
     ]
 
-    # === ТРИГГЕРНЫЕ ФРАЗЫ ДЛЯ ПОИСКА ЛИДОВ ===
+    # === ТЕХНИЧЕСКИЕ ТЕРМИНЫ (Intent: лид только если есть вопрос + один из них) ===
+    TECHNICAL_TERMS = [
+        r"перепланиров",
+        r"согласовани",
+        r"узакони",
+        r"предписание\s+МЖИ",
+        r"МЖИ",
+        r"штраф\s+за\s+перепланировку",
+        r"акт\s+скрытых\s+работ",
+        r"проект\s+СРО",
+        r"согласие\s+соседей",
+        r"мокрая\s+зона",
+        r"снос\s+(стен|подоконн|блока)",
+        r"подоконн\w*\s+блок",
+        r"объединен",
+        r"нежилое\s+помещен",
+        r"проект\s+перепланировки",
+        r"план\s+(квартир|помещен)",
+    ]
+
+    # === ПАТТЕРНЫ ВОПРОСА (Intent: считаем лидом только вопрос + термин) ===
+    QUESTION_PATTERNS = [
+        r"кто\s+(согласовывал|оформлял|делал|заказывал)",
+        r"как\s+(согласовать|узаконить|оформить|сделать)",
+        r"подскажите\s+(,\s*)?(кто|как|где|можно)",
+        r"посоветуйте\s+(,\s*)?(кто|кого|как)",
+        r"соседи\s*[,:]",
+        r"кто\s*[-–]?\s*нибудь",
+        r"есть\s+ли\s+кто",
+        r"может\s+кто\s+(знает|сталкивался|делал)",
+        r"где\s+(согласовывал|оформлял)",
+        r"можно\s+ли\s+(сносит|объединят|переносит)",
+        r"\?\s*$",  # заканчивается вопросом
+    ]
+
+    # === ТРИГГЕРНЫЕ ФРАЗЫ (расширенные: боли жильцов) ===
     LEAD_TRIGGERS = [
         r"перепланиров",
         r"согласовани",
         r"узакони",
+        r"предписание\s+МЖИ",
+        r"штраф\s+за\s+перепланировку",
+        r"акт\s+скрытых\s+работ",
+        r"проект\s+СРО",
+        r"согласие\s+соседей",
+        r"мокрая\s+зона",
         r"проект",
         r"план\s+(квартир|комнат| помещен)",
         r"снос\s+стен",
+        r"снос\s+подоконн",
         r"объединение\s+(кухни|комнат|ванной)",
         r"ремонт\s+(в|своей)\s+квартир",
         r"нежилое\s+помещен",
@@ -131,7 +154,6 @@ class ScoutParser:
         r"изменение\s+назначен",
         r"офис",
         r"кафе",
-        # DIY и «народные» формулировки
         r"своими\s+руками",
         r"сломали\s+стену",
         r"перенесли\s+радиатор",
@@ -211,18 +233,104 @@ class ScoutParser:
             return [k.strip() for k in keywords_str.split(",") if k.strip()]
         return self.KEYWORDS
 
+    # Минимум слов для «боли» (не мусор, не просто ссылка)
+    MIN_WORDS_FOR_LEAD = 5
+    # Регулярка: только ссылка (http/https или tg://)
+    URL_ONLY_PATTERN = re.compile(
+        r"^\s*(https?://[^\s]+\s*|tg://[^\s]+\s*)*\s*$",
+        re.IGNORECASE,
+    )
+
+    def _is_relevant_post(self, text: str) -> bool:
+        """Фильтр мусора: нужны боли, а не упоминания. Меньше 5 слов или только ссылка — игнорируем."""
+        if not text or not isinstance(text, str):
+            return False
+        stripped = text.strip()
+        words = [w for w in stripped.split() if w]
+        if len(words) < self.MIN_WORDS_FOR_LEAD:
+            return False
+        # Только ссылки без текста — не лид
+        if self.URL_ONLY_PATTERN.match(stripped):
+            return False
+        return True
+
+    def _has_question(self, text: str) -> bool:
+        """Есть ли в тексте вопрос (интент: «ищет ответ/совет»). Игнорируем «Посоветуйте рабочих» без техтерминов."""
+        if not text:
+            return False
+        t = text.strip()
+        if not t.endswith("?"):
+            t = t + " "
+        text_lower = t.lower()
+        for pat in self.QUESTION_PATTERNS:
+            if re.search(pat, text_lower):
+                return True
+        return False
+
+    def _has_technical_term(self, text: str) -> bool:
+        """Есть ли технический термин (перепланировка, МЖИ, акт скрытых работ и т.д.)."""
+        if not text:
+            return False
+        text_lower = text.lower()
+        for pat in self.TECHNICAL_TERMS:
+            if re.search(pat, text_lower):
+                return True
+        keywords = self._load_keywords()
+        for kw in keywords:
+            if kw.lower() in text_lower:
+                return True
+        return False
+
     def detect_lead(self, text: str) -> bool:
-        """Проверка, содержит ли текст триггерную фразу"""
+        """
+        Интеллектуальный фильтр (Intent): лид только если есть вопрос + технический термин.
+        Пример мусора: «Посоветуйте рабочих» — игнорируем.
+        Пример лида: «Соседи, кто согласовывал снос подоконного блока в нашем корпусе?» — берём.
+        """
+        if not self._is_relevant_post(text):
+            return False
+        if not self._has_question(text) or not self._has_technical_term(text):
+            return False
         text_lower = text.lower()
         for trigger in self.LEAD_TRIGGERS:
             if re.search(trigger, text_lower):
                 return True
-        # Также проверяем ключевые слова
-        keywords = self._load_keywords()
-        for keyword in keywords:
+        for keyword in self._load_keywords():
             if keyword.lower() in text_lower:
                 return True
         return False
+
+    def extract_geo_header(self, text: str, source_name: str = "") -> str:
+        """
+        Гео-привязка: если в сообщении есть номер корпуса или название ЖК — вынести в заголовок карточки.
+        Возвращает строку вида «ЖК Зиларт, корп. 5» или «ЖК Сердце Столицы» или source_name.
+        """
+        if not text:
+            return source_name or ""
+        t = text.strip()
+        parts = []
+        # Номер корпуса: корпус 5, корп. 3, корп 1, 2 корпус
+        corp = re.search(r"(?:корпус|корп\.?)\s*[№#]?\s*(\d+[а-яa-z]?)", t, re.IGNORECASE)
+        if corp:
+            parts.append(f"корп. {corp.group(1)}")
+        # Названия ЖК из нашего списка
+        jk_names = ["сердце столицы", "символ", "зиларт", "пресня сити", "сити", "башн"]
+        for jk in jk_names:
+            if jk in t.lower():
+                if "сердце" in jk or jk == "сердце столицы":
+                    parts.insert(0, "ЖК «Сердце Столицы»")
+                elif jk == "символ":
+                    parts.insert(0, "ЖК «Символ»")
+                elif jk == "зиларт":
+                    parts.insert(0, "ЖК «Зиларт»")
+                elif "пресня" in jk or jk == "пресня сити":
+                    parts.insert(0, "ЖК «Пресня Сити»")
+                elif jk == "сити" or jk == "башн":
+                    parts.insert(0, "Сити (Башни)")
+                break
+        if not parts:
+            return source_name or ""
+        return ", ".join(parts)
 
     def generate_outreach_message(self, source_type: str = "telegram", geo: str = "") -> str:
         """Генерация сообщения для комментария/ответа"""
@@ -246,10 +354,40 @@ class ScoutParser:
             return f"https://t.me/c/{sid.replace('-100', '')}/{message_id}"
         return f"https://t.me/{channel_id}/{message_id}"
 
+    def _channel_id_to_link(self, channel_id) -> str:
+        """Ссылка на чат/канал по ID (для сохранения в target_resources)."""
+        sid = str(channel_id).strip()
+        if sid.startswith("-100"):
+            return f"https://t.me/c/{sid.replace('-100', '')}"
+        return f"https://t.me/{sid}"
+
+    @staticmethod
+    def _extract_tme_links(text: str) -> List[str]:
+        """Извлечь из текста ссылки на чаты: t.me/joinchat/..., t.me/name, t.me/c/123."""
+        if not text:
+            return []
+        out = []
+        # t.me/joinchat/xxx или t.me/+xxx
+        for m in re.finditer(r"https?://(?:www\.)?t\.me/(?:joinchat/|\+)([a-zA-Z0-9_-]+)", text, re.IGNORECASE):
+            out.append(f"https://t.me/joinchat/{m.group(1)}")
+        # t.me/username (без суффикса /123 — это уже пост)
+        for m in re.finditer(r"https?://(?:www\.)?t\.me/([a-zA-Z][a-zA-Z0-9_]{4,})(?:/|$|\s)", text, re.IGNORECASE):
+            out.append(f"https://t.me/{m.group(1)}")
+        # t.me/c/1234567890
+        for m in re.finditer(r"https?://(?:www\.)?t\.me/c/(\d+)(?:/|$|\s)", text, re.IGNORECASE):
+            out.append(f"https://t.me/c/{m.group(1)}")
+        return list(dict.fromkeys(out))
+
     # === TELEGRAM PARSING ===
 
-    async def parse_telegram(self) -> List[ScoutPost]:
+    async def parse_telegram(self, db=None) -> List[ScoutPost]:
+        """
+        Парсинг Telegram. Если передан db:
+        - Режим «Разведка»: чаты, в которых увидели сообщения и которых нет в target_resources, добавляются с пометкой «Обнаружен автоматически».
+        - Ловля ссылок: из текста сообщений извлекаются t.me/joinchat... и t.me/name, простукиваются и при успехе добавляются в target_resources.
+        """
         from telethon import TelegramClient
+        from telethon.tl.types import Channel, Chat
         from config import API_ID, API_HASH
 
         posts = []
@@ -260,17 +398,46 @@ class ScoutParser:
             logger.error("❌ Антон не авторизован в Telegram!")
             return []
 
-        # Лимит постов на канал (раньше 15 — мало; люди спрашивают в чатах, не в каналах)
         tg_limit = int(os.getenv("SCOUT_TG_MESSAGES_LIMIT", "50"))
+        existing_links = set()
+        if db:
+            try:
+                resources = await db.get_target_resources(resource_type="telegram", active_only=False)
+                existing_links = {r.get("link", "").rstrip("/") for r in resources if r.get("link")}
+            except Exception as e:
+                logger.warning("Не удалось загрузить target_resources для разведки: %s", e)
 
         for channel in self.tg_channels:
+            cid = channel.get("id") or ""
+            if not str(cid).strip():
+                continue
             count = 0
             scanned = 0
             try:
-                async for message in client.iter_messages(channel['id'], limit=tg_limit):
+                async for message in client.iter_messages(cid, limit=tg_limit):
                     if not message.text:
                         continue
                     scanned += 1
+                    # Ловля ссылок: если в сообщении есть ссылка на другой чат ЖК — простукать и добавить в ресурсы
+                    if db:
+                        for url in self._extract_tme_links(message.text):
+                            url_norm = url.rstrip("/")
+                            if url_norm in existing_links:
+                                continue
+                            try:
+                                entity = await client.get_entity(url)
+                                if isinstance(entity, (Channel, Chat)):
+                                    title = getattr(entity, "title", None) or getattr(entity, "username", None) or str(entity.id)
+                                    if entity.id:
+                                        link_to_store = self._channel_id_to_link(entity.id)
+                                    else:
+                                        link_to_store = url_norm
+                                    if link_to_store.rstrip("/") not in existing_links:
+                                        await db.add_target_resource("telegram", link_to_store, title=title, notes="Обнаружен автоматически (ссылка в чате)")
+                                        existing_links.add(link_to_store.rstrip("/"))
+                                        logger.info("🔗 Добавлен ресурс по ссылке из сообщения: %s", link_to_store)
+                            except Exception as e:
+                                logger.debug("Не удалось разрешить ссылку %s: %s", url, e)
                     if self.detect_lead(message.text):
                         author_id = getattr(message, "sender_id", None)
                         author_name = None
@@ -287,7 +454,7 @@ class ScoutParser:
                             text=message.text,
                             author_id=author_id,
                             author_name=author_name,
-                            url=self._tg_post_url(channel['id'], message.id),
+                            url=self._tg_post_url(cid, message.id),
                         )
                         posts.append(post)
                         count += 1
@@ -300,6 +467,17 @@ class ScoutParser:
                     "scanned": scanned,
                     "error": None,
                 })
+                # Режим «Разведка»: чат, в котором увидели сообщения и которого нет в базе — добавляем
+                if db and cid:
+                    link = self._channel_id_to_link(cid)
+                    link_norm = link.rstrip("/")
+                    if link_norm not in existing_links:
+                        try:
+                            await db.add_target_resource("telegram", link, title=channel.get("name") or str(cid), notes="Обнаружен автоматически")
+                            existing_links.add(link_norm)
+                            logger.info("🏢 Режим Разведка: добавлен чат %s", link)
+                        except Exception as e:
+                            logger.debug("Не удалось добавить ресурс %s: %s", link, e)
             except Exception as e:
                 logger.error(f"❌ Ошибка парсинга ТГ {channel['name']}: {e}")
                 self.last_scan_report.append({
@@ -314,6 +492,49 @@ class ScoutParser:
 
         await client.disconnect()
         return posts
+
+    async def scan_all_chats(self) -> List[Dict]:
+        """
+        Команда-сканер: пробежаться по всем активным диалогам и чатам Telethon,
+        собрать ID, названия и количество участников. Для использования в /scan_chats.
+        """
+        from telethon import TelegramClient
+        from telethon.tl.types import Channel, Chat
+        from config import API_ID, API_HASH
+
+        client = TelegramClient('anton_parser', API_ID, API_HASH)
+        await client.connect()
+        if not await client.is_user_authorized():
+            await client.disconnect()
+            return []
+
+        result = []
+        try:
+            async for dialog in client.iter_dialogs():
+                e = dialog.entity
+                chat_id = getattr(e, "id", None)
+                if chat_id is None:
+                    continue
+                title = getattr(e, "title", None) or getattr(e, "first_name", None) or str(chat_id)
+                if getattr(e, "last_name", None):
+                    title = f"{title} {e.last_name}".strip()
+                link = self._channel_id_to_link(chat_id)
+                participants = getattr(e, "participants_count", None)
+                if participants is None and isinstance(e, (Channel, Chat)):
+                    try:
+                        full = await client.get_entity(e)
+                        participants = getattr(full, "participants_count", None)
+                    except Exception:
+                        participants = None
+                result.append({
+                    "id": chat_id,
+                    "title": title or "—",
+                    "link": link,
+                    "participants_count": participants,
+                })
+        finally:
+            await client.disconnect()
+        return result
 
     async def _send_telegram_comment(self, channel_id: str, message_id: int, text: str):
         """Отправка комментария в Telegram канал"""

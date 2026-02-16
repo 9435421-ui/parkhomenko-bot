@@ -209,6 +209,12 @@ class Database:
                 await self.conn.commit()
             except Exception:
                 pass  # колонка уже есть
+            # Миграция: колонка notes в target_resources («Обнаружен автоматически» и т.д.)
+            try:
+                await cursor.execute("ALTER TABLE target_resources ADD COLUMN notes TEXT NULL")
+                await self.conn.commit()
+            except Exception:
+                pass
 
     async def get_or_create_user(self, user_id: int, username: Optional[str] = None,
                                 first_name: Optional[str] = None, last_name: Optional[str] = None) -> Dict:
@@ -405,6 +411,16 @@ class Database:
             rows = await cursor.fetchall()
             return [dict(row) for row in rows]
 
+    async def get_spy_lead(self, lead_id: int) -> Optional[Dict]:
+        """Получить лид из spy_leads по id (для кнопки «Ответить от имени Антона»)."""
+        async with self.conn.cursor() as cursor:
+            await cursor.execute(
+                "SELECT id, source_type, source_name, author_id, username, profile_url, text, url FROM spy_leads WHERE id = ?",
+                (lead_id,),
+            )
+            row = await cursor.fetchone()
+            return dict(row) if row else None
+
     async def get_spy_lead_uncontacted_by_author(self, author_id: str) -> Optional[Dict]:
         """Необработанный лид по author_id (для первого контакта «Продавец»). author_id — строка (TG user id)."""
         if not author_id:
@@ -427,6 +443,54 @@ class Database:
                 (lead_id,),
             )
             await self.conn.commit()
+
+    async def get_top_trends(self, since_days: int = 7, limit: int = 15) -> List[Dict]:
+        """
+        Аналитика для креативщика: группировка лидов по темам (доля в %).
+        Темы заданы ключевыми фразами; считается, сколько лидов содержат каждую тему.
+        """
+        topic_keywords = [
+            ("ипотека", "ипотек"),
+            ("перепланировк", "перепланировку", "согласован"),
+            ("Москва-Сити", "Сити", "в Сити"),
+            ("узаконить", "узакони"),
+            ("лоджи", "лоджию", "балкон"),
+            ("нежилое", "нежилое помещение", "коммерц"),
+            ("МЖИ", "Мосжилинспекц", "жилинспекц"),
+            ("штраф", "штрафы"),
+            ("проект", "проект перепланировки"),
+            ("ремонт", "ремонт"),
+        ]
+        async with self.conn.cursor() as cursor:
+            await cursor.execute(
+                """SELECT id, text FROM spy_leads
+                   WHERE created_at >= datetime('now', ?)
+                   AND text IS NOT NULL AND text != ''""",
+                (f"-{since_days} days",),
+            )
+            rows = await cursor.fetchall()
+        leads = [dict(r) for r in rows]
+        total = len(leads)
+        if total == 0:
+            return []
+        counts = {}
+        for topic_name, *keywords in topic_keywords:
+            key = topic_name if isinstance(topic_name, str) else keywords[0]
+            count = 0
+            for lead in leads:
+                text = (lead.get("text") or "").lower()
+                if any(kw.lower() in text for kw in (topic_name, *keywords)):
+                    count += 1
+            if count > 0:
+                counts[key] = count
+        total_matched = sum(counts.values())
+        if total_matched == 0:
+            return []
+        result = [
+            {"topic": topic, "count": count, "percent": round(100.0 * count / total, 1)}
+            for topic, count in sorted(counts.items(), key=lambda x: -x[1])
+        ]
+        return result[:limit]
 
     async def get_setting(self, key: str, default: str = "") -> str:
         """Получить значение настройки (bot_settings)."""
@@ -573,16 +637,34 @@ class Database:
 
 
     # === ЦЕЛЕВЫЕ РЕСУРСЫ (TG чаты + VK группы) ===
-    async def add_target_resource(self, resource_type: str, link: str, title: str = None) -> int:
-        """Добавить ресурс для мониторинга"""
+    async def add_target_resource(
+        self,
+        resource_type: str,
+        link: str,
+        title: str = None,
+        notes: str = None,
+    ) -> int:
+        """Добавить ресурс для мониторинга. notes: например «Обнаружен автоматически»."""
         async with self.conn.cursor() as cursor:
             await cursor.execute(
-                "INSERT INTO target_resources (type, link, title) VALUES (?, ?, ?)",
-                (resource_type, link, title or link)
+                "INSERT INTO target_resources (type, link, title, notes) VALUES (?, ?, ?, ?)",
+                (resource_type, link, title or link, notes),
             )
             await self.conn.commit()
             return cursor.lastrowid
-    
+
+    async def get_target_resource_by_link(self, link: str) -> Optional[Dict]:
+        """Проверить, есть ли ресурс с такой ссылкой (для режима «Разведка» и ловли ссылок)."""
+        if not link or not link.strip():
+            return None
+        async with self.conn.cursor() as cursor:
+            await cursor.execute(
+                "SELECT * FROM target_resources WHERE link = ? OR link = ?",
+                (link.strip(), link.strip().rstrip("/")),
+            )
+            row = await cursor.fetchone()
+            return dict(row) if row else None
+
     async def get_target_resources(self, resource_type: str = None, active_only: bool = True) -> List[Dict]:
         """Получить список ресурсов"""
         async with self.conn.cursor() as cursor:

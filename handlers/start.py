@@ -143,7 +143,8 @@ async def spy_topics_handler(message: Message, state: FSMContext):
     await message.answer("🔍 <b>Шпион подтягивает лиды и готовит идеи...</b>", parse_mode="HTML")
     try:
         leads = await db.get_recent_spy_leads(limit=30)
-        topics = await creative_agent.ideas_from_spy_leads(leads, count=3)
+        trends = await db.get_top_trends(since_days=7)
+        topics = await creative_agent.ideas_from_spy_leads(leads, count=3, trends=trends)
         await state.update_data(scout_topics=topics)
         text = "🕵️‍♂️ <b>Темы от Шпиона</b>\n\n"
         text += "Выберите, что сделать с темой:\n\n"

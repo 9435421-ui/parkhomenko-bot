@@ -21,6 +21,7 @@ router = Router()
 class AdminStates(StatesGroup):
     wait_resource_link = State()
     wait_keyword = State()
+    wait_lead_reply = State()  # текст ответа лиду от имени Антона
 
 
 def check_admin(user_id: int) -> bool:
@@ -286,6 +287,57 @@ async def cmd_leads_review(message: Message):
         await message.answer(text, parse_mode="HTML")
     except Exception as e:
         logger.exception("leads_review")
+        await message.answer(f"❌ Ошибка: {e}")
+
+
+# ID с приоритетом для /scan_chats (пускать без очереди)
+SCAN_CHATS_PRIORITY_USER_ID = 8438024806
+
+# === КОМАНДА /SCAN_CHATS (сканер диалогов для добычи ID) ===
+@router.message(Command("scan_chats"))
+async def cmd_scan_chats(message: Message):
+    """Пробежаться по всем активным диалогам/чатам Telethon и выдать таблицу: ID, название, участники. Работает во всех топиках группы."""
+    user_id = message.from_user.id
+    logger.info("scan_chats: команда получена, user_id=%s, chat_id=%s, thread_id=%s", user_id, message.chat.id, getattr(message, "message_thread_id", None))
+    print("[/scan_chats] Сигнал дошел до хендлера", flush=True)
+    allow = user_id == SCAN_CHATS_PRIORITY_USER_ID or check_admin(user_id)
+    if not allow:
+        await message.answer("⛔ У вас нет доступа")
+        return
+    logger.info("Команда /scan_chats опознана для админа %s", user_id)
+    await message.answer("⏳ Начинаю сканирование...")
+    await message.answer("🔍 Сканирую диалоги и чаты (Telethon)...")
+    try:
+        chats = await scout_parser.scan_all_chats()
+        if not chats:
+            await message.answer(
+                "📭 Список пуст или Telethon не авторизован. Проверьте API_ID, API_HASH, TELEGRAM_PHONE.",
+                parse_mode="HTML"
+            )
+            return
+        lines = [
+            "📋 <b>Чаты и диалоги</b> (ID, название, участники)",
+            "",
+            "ID | Название | Участников | Ссылка",
+            "—" * 40,
+        ]
+        for c in chats[:80]:
+            pid = c.get("id", "—")
+            title = (c.get("title") or "—").replace("<", "").replace(">", "")[:35]
+            n = c.get("participants_count") or "—"
+            link = c.get("link", "")
+            lines.append(f"{pid} | {title} | {n} | {link}")
+        if len(chats) > 80:
+            lines.append(f"... и ещё {len(chats) - 80}")
+        text = "\n".join(lines)
+        if len(text) > 4000:
+            from aiogram.types import BufferedInputFile
+            file = BufferedInputFile(text.encode("utf-8"), filename="scan_chats.txt")
+            await message.answer_document(file, caption=f"📋 Всего чатов/диалогов: {len(chats)}")
+        else:
+            await message.answer(text, parse_mode="HTML")
+    except Exception as e:
+        logger.exception("scan_chats")
         await message.answer(f"❌ Ошибка: {e}")
 
 
@@ -571,3 +623,71 @@ async def admin_back(callback: CallbackQuery, state: FSMContext):
     await state.clear()
     await cmd_admin(callback.message, state)
     await callback.answer()
+
+
+# === ОТВЕТ ЛИДУ ОТ ИМЕНИ АНТОНА (кнопка на карточке лида) ===
+@router.callback_query(F.data.startswith("lead_reply_"))
+async def lead_reply_start(callback: CallbackQuery, state: FSMContext):
+    """По нажатию «🤖 Ответить от имени Антона» — запрашиваем текст ответа."""
+    if not check_admin(callback.from_user.id):
+        await callback.answer("⛔ Нет доступа", show_alert=True)
+        return
+    try:
+        lead_id = int(callback.data.replace("lead_reply_", ""))
+    except ValueError:
+        await callback.answer("❌ Неверный ID лида")
+        return
+    lead = await db.get_spy_lead(lead_id)
+    if not lead:
+        await callback.answer("❌ Лид не найден")
+        return
+    await state.set_state(AdminStates.wait_lead_reply)
+    await state.update_data(lead_reply_id=lead_id)
+    await callback.message.answer(
+        f"🤖 <b>Ответ лиду #{lead_id}</b>\n\n"
+        f"📄 Текст лида: {(lead.get('text') or '')[:200]}…\n\n"
+        "Введите текст ответа от имени Антона (будет отправлен в ЛС, если лид уже писал боту). Или /cancel для отмены.",
+        parse_mode="HTML",
+    )
+    await callback.answer()
+
+
+@router.message(AdminStates.wait_lead_reply, F.text)
+async def lead_reply_text(message: Message, state: FSMContext):
+    """Отправка введённого текста лиду (Telegram)."""
+    if not check_admin(message.from_user.id):
+        return
+    if message.text and message.text.strip().lower() == "/cancel":
+        await state.clear()
+        await message.answer("Отменено.")
+        return
+    data = await state.get_data()
+    lead_id = data.get("lead_reply_id")
+    if not lead_id:
+        await state.clear()
+        return
+    lead = await db.get_spy_lead(lead_id)
+    if not lead:
+        await state.clear()
+        await message.answer("Лид не найден.")
+        return
+    author_id = lead.get("author_id")
+    source_type = lead.get("source_type", "telegram")
+    text = (message.text or "").strip()
+    if not text:
+        await message.answer("Текст не должен быть пустым. Введите снова или /cancel.")
+        return
+    await state.clear()
+    if source_type != "telegram" or not author_id:
+        await message.answer(
+            f"❌ Отправить в ЛС можно только по Telegram (author_id есть у лида). У этого лида source_type={source_type}, author_id={author_id}. "
+            "Скопируйте текст и ответьте вручную."
+        )
+        return
+    try:
+        await message.bot.send_message(int(author_id), text)
+        await message.answer("✅ Сообщение отправлено лиду в ЛС.")
+    except Exception as e:
+        await message.answer(
+            f"❌ Не удалось отправить: {e}. Возможно, лид ещё не писал боту — тогда напишите ему вручную (профиль в карточке)."
+        )

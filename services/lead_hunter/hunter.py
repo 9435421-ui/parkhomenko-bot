@@ -4,7 +4,7 @@ import os
 from datetime import datetime
 from aiogram import Bot
 from aiogram.client.default import DefaultBotProperties
-from aiogram.types import BufferedInputFile
+from aiogram.types import BufferedInputFile, InlineKeyboardMarkup, InlineKeyboardButton
 
 from .discovery import Discovery
 from .analyzer import LeadAnalyzer
@@ -26,34 +26,57 @@ class LeadHunter:
         self.outreach = Outreach()
         self.parser = scout_parser  # общий экземпляр: отчёт последнего скана доступен и для /spy_report
 
-    def _format_lead_card(self, lead: dict) -> str:
-        """Форматирует одну карточку лида для отправки в группу."""
+    def _format_lead_card(self, lead: dict, profile_url: str = "", card_header: str = "") -> str:
+        """Форматирует одну карточку лида. card_header — гео-привязка (ЖК, корпус) из текста сообщения."""
         content = (lead.get("content") or lead.get("intent") or "")[:600]
         if len(lead.get("content") or "") > 600:
             content += "…"
-        return (
-            "🕵️ <b>Карточка лида (шпион)</b>\n\n"
-            f"📄 {content}\n\n"
-            f"🎯 <b>Интент:</b> {lead.get('intent', '—')}\n"
-            f"⭐ <b>Горячность:</b> {lead.get('hotness', 0)}/10\n"
-            f"📍 <b>Гео:</b> {lead.get('geo', '—')}\n"
-            f"💡 <b>Контекст:</b> {lead.get('context_summary', '—')}\n\n"
-            f"🔗 {lead.get('url', '')}"
-        )
+        lines = []
+        if card_header:
+            lines.append(f"🏢 <b>{card_header}</b>")
+            lines.append("")
+        lines.extend([
+            "🕵️ <b>Карточка лида</b>",
+            "",
+            f"📄 {content}",
+            "",
+            f"🎯 <b>Интент:</b> {lead.get('intent', '—')}",
+            f"⭐ <b>Горячность:</b> {lead.get('hotness', 0)}/10",
+            f"📍 <b>Гео:</b> {lead.get('geo', '—')}",
+            f"💡 <b>Контекст:</b> {lead.get('context_summary', '—')}",
+        ])
+        if profile_url and profile_url.startswith("tg://"):
+            lines.append(f"\n👤 <b>Профиль:</b> <code>{profile_url}</code>")
+        lines.append(f"\n🔗 Пост: {lead.get('url', '')}")
+        return "\n".join(lines)
 
-    async def _send_lead_card_to_group(self, lead: dict) -> bool:
-        """Отправляет карточку лида в рабочую группу (топик «Горячие лиды»)."""
+    async def _send_lead_card_to_group(
+        self,
+        lead: dict,
+        lead_id: int,
+        profile_url: str,
+        post_url: str,
+        card_header: str = "",
+    ) -> bool:
+        """Отправляет карточку лида в рабочую группу (топик «Горячие лиды») отдельным сообщением с кнопками."""
         from config import BOT_TOKEN, LEADS_GROUP_CHAT_ID, THREAD_ID_HOT_LEADS
         if not BOT_TOKEN or not LEADS_GROUP_CHAT_ID:
             logger.warning("⚠️ BOT_TOKEN или LEADS_GROUP_CHAT_ID не заданы — карточка в группу не отправлена")
             return False
-        text = self._format_lead_card(lead)
+        text = self._format_lead_card(lead, profile_url, card_header)
+        buttons = []
+        if profile_url and profile_url.startswith("http"):
+            buttons.append(InlineKeyboardButton(text="👤 Профиль", url=profile_url))
+        buttons.append(InlineKeyboardButton(text="🔗 Пост", url=post_url[:500]))
+        buttons.append(InlineKeyboardButton(text="🤖 Ответить от имени Антона", callback_data=f"lead_reply_{lead_id}"))
+        keyboard = InlineKeyboardMarkup(inline_keyboard=[buttons])
         try:
             bot = Bot(token=BOT_TOKEN, default=DefaultBotProperties(parse_mode="HTML"))
             thread_id = THREAD_ID_HOT_LEADS if THREAD_ID_HOT_LEADS else None
             await bot.send_message(
                 LEADS_GROUP_CHAT_ID,
                 text,
+                reply_markup=keyboard,
                 message_thread_id=thread_id,
             )
             await bot.session.close()
@@ -160,7 +183,8 @@ class LeadHunter:
         self.parser.last_scan_report = []
         self.parser.last_scan_at = datetime.now()
 
-        tg_posts = await self.parser.parse_telegram()
+        from database import db as main_db
+        tg_posts = await self.parser.parse_telegram(db=main_db)
         vk_posts = await self.parser.parse_vk()
         all_posts = tg_posts + vk_posts
 
@@ -207,25 +231,29 @@ class LeadHunter:
                     if lead.get("hotness", 0) > 4:
                         logger.info(f"🔥 Горячий лид (Жюль, hotness={lead.get('hotness')}) → пересылка админу")
                         await self._send_hot_lead_to_admin(lead)
-                    # Сохраняем лид в spy_leads (user_id, username, ссылка на профиль)
+                    # Сопоставляем с постом для author_id / username
                     post = find_post_by_url(lead.get("url", ""))
                     author_id = getattr(post, "author_id", None) if post else None
                     author_name = getattr(post, "author_name", None) if post else None
                     source_name = getattr(post, "source_name", "") if post else "—"
                     source_type = getattr(post, "source_type", "telegram") if post else "telegram"
+                    post_text = getattr(post, "text", "") if post else ""
+                    card_header = self.parser.extract_geo_header(post_text, source_name) if post else source_name
+                    # Лидогенерация: если нет username — вытягиваем ID для прямой ссылки tg://user?id=...
                     profile_url = ""
                     if author_id is not None and source_type == "vk":
                         aid = int(author_id) if isinstance(author_id, (int, str)) and str(author_id).lstrip("-").isdigit() else 0
-                        if aid > 0:  # пользователь, не группа
+                        if aid > 0:
                             profile_url = f"https://vk.com/id{aid}"
                     elif author_id is not None and source_type == "telegram":
                         profile_url = f"tg://user?id={author_id}"
+                    post_url = lead.get("url", "") or ""
                     try:
                         from database import db as main_db
-                        await main_db.add_spy_lead(
+                        lead_id = await main_db.add_spy_lead(
                             source_type=source_type,
                             source_name=source_name,
-                            url=lead.get("url", ""),
+                            url=post_url,
                             text=(lead.get("content") or lead.get("intent") or "")[:2000],
                             author_id=str(author_id) if author_id else None,
                             username=author_name,
@@ -233,17 +261,20 @@ class LeadHunter:
                         )
                     except Exception as e:
                         logger.warning("Не удалось сохранить spy_lead: %s", e)
-                    # Уведомление в личку админу (Юлия) при каждом лиде (если включено в пульте)
+                        lead_id = 0
+                    if not lead_id:
+                        lead_id = 0
+                    # Уведомление в личку админу при каждом лиде (если включено в пульте)
                     try:
                         from database import db as main_db
                         notify_enabled = await main_db.get_setting("spy_notify_enabled", "1")
                         if notify_enabled == "1":
-                            await self._send_lead_notify_to_admin(lead, source_name, profile_url or lead.get("url", ""))
+                            await self._send_lead_notify_to_admin(lead, source_name, profile_url or post_url)
                     except Exception:
                         pass
-                    # Карточка лида в рабочую группу (топик «Горячие лиды»)
+                    # Карточка лида в рабочую группу (с гео-заголовком ЖК/корпус при наличии)
                     if cards_sent < MAX_CARDS_PER_RUN:
-                        if await self._send_lead_card_to_group(lead):
+                        if await self._send_lead_card_to_group(lead, lead_id, profile_url, post_url, card_header):
                             cards_sent += 1
                 if cards_sent:
                     logger.info("📋 В рабочую группу отправлено карточек лидов: %s", cards_sent)

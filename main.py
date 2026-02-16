@@ -170,6 +170,7 @@ async def main():
     publisher.bot = main_bot
     dp_main = Dispatcher(storage=MemoryStorage())
     dp_main.callback_query.middleware(UnhandledCallbackMiddleware())
+    # Системные команды (admin) — приоритет, первыми в списке роутеров
     dp_main.include_router(admin_router)
     dp_main.include_router(creator_router)
     dp_main.include_router(quiz_router)   # раньше start: квиз по ссылке из поста обрабатывается первым
@@ -205,6 +206,7 @@ async def main():
                 BotCommand(command="hunt", description="Охота за лидами"),
                 BotCommand(command="spy_status", description="Статус шпиона: чаты и лиды за 24 ч"),
                 BotCommand(command="leads_review", description="Ревизия лидов за 12 ч: кто попался, какие боли"),
+                BotCommand(command="scan_chats", description="Сканер чатов: ID, название, участники (для добычи ID)"),
             ],
             scope=BotCommandScopeChat(chat_id=LEADS_GROUP_CHAT_ID),
         )

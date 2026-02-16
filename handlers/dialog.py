@@ -7,7 +7,7 @@ Fallback: YandexGPT (персональные данные, РФ акты — с
 from aiogram import Router, F
 from aiogram.types import Message, CallbackQuery
 from aiogram.fsm.context import FSMContext
-from aiogram.fsm.filter import StateFilter
+from aiogram.filters import StateFilter
 from database import db
 from utils import router_ai, yandex_gpt, kb
 from handlers.quiz import QuizStates
