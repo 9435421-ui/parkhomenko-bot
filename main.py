@@ -271,8 +271,11 @@ async def main():
         """Закрыть сессии ботов и снять lock."""
         for name, bot in [("main_bot", main_bot), ("content_bot", content_bot)]:
             try:
-                if bot.session and not bot.session.closed:
-                    await bot.session.close()
+                session = getattr(bot, "session", None)
+                if session is None:
+                    continue
+                if getattr(session, "_connector", None) is not None:
+                    await session.close()
                     logger.info("Сессия %s закрыта", name)
             except Exception as e:
                 logger.warning("Ошибка закрытия сессии %s: %s", name, e)
@@ -282,8 +285,9 @@ async def main():
         """Удалить webhook (drop_pending_updates), затем закрыть сессию если открыта."""
         await bot_instance.delete_webhook(drop_pending_updates=True)
         try:
-            if getattr(bot_instance, "session", None) and not bot_instance.session.closed:
-                await bot_instance.session.close()
+            session = getattr(bot_instance, "session", None)
+            if session is not None and getattr(session, "_connector", None) is not None:
+                await session.close()
         except Exception:
             pass
 
@@ -303,17 +307,18 @@ async def main():
     except Exception:
         pass
 
+    async def start_bots():
+        await asyncio.gather(
+            dp_main.start_polling(main_bot, skip_updates=True),
+            dp_content.start_polling(content_bot, skip_updates=True),
+        )
+
     for attempt in range(CONFLICT_RETRY_COUNT):
         try:
             logger.info("🚀 Очистка webhook и запуск polling (попытка %s/%s)...", attempt + 1, CONFLICT_RETRY_COUNT)
             await ensure_webhook_cleared(main_bot)
             await ensure_webhook_cleared(content_bot)
-            _polling_task = asyncio.create_task(
-                asyncio.gather(
-                    dp_main.start_polling(main_bot),
-                    dp_content.start_polling(content_bot),
-                )
-            )
+            _polling_task = asyncio.create_task(start_bots())
             await _polling_task
             break
         except asyncio.CancelledError:
