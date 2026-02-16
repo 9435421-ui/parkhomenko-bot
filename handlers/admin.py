@@ -491,6 +491,80 @@ async def _do_add_target(message: Message, link: str, state: FSMContext):
         await message.answer(f"❌ Ошибка: {e}", reply_markup=get_back_to_admin())
 
 
+# === КОМАНДА /SET_GEO ===
+@router.message(Command("set_geo"))
+async def cmd_set_geo(message: Message):
+    """Установить «человеческое» название ЖК для чата: /set_geo [id или ссылка] [Название ЖК]."""
+    if not check_admin(message.from_user.id):
+        await message.answer("⛔ У вас нет доступа")
+        return
+    parts = (message.text or "").strip().split(maxsplit=2)
+    if len(parts) < 3:
+        await message.answer(
+            "Использование: /set_geo [id или ссылка] [Название ЖК]\n"
+            "Примеры:\n• /set_geo 5 ЖК Зиларт\n• /set_geo https://t.me/c/123 ЖК Сердце Столицы"
+        )
+        return
+    link_or_id = parts[1].strip()
+    geo_tag = parts[2].strip()
+    resource_id = None
+    link = None
+    if link_or_id.isdigit():
+        resource_id = int(link_or_id)
+    else:
+        link = link_or_id
+    try:
+        await db.connect()
+        ok = await db.set_target_geo(resource_id=resource_id, link=link, geo_tag=geo_tag)
+        if ok:
+            await message.answer(f"✅ Для ресурса установлено название: <b>{geo_tag}</b>", parse_mode="HTML")
+        else:
+            await message.answer("❌ Ресурс не найден по указанному id или ссылке.")
+    except Exception as e:
+        logger.exception("set_geo")
+        await message.answer(f"❌ Ошибка: {e}")
+
+
+# === КОМАНДА /SET_PRIORITY (приоритетный ЖК — высотка) ===
+@router.message(Command("set_priority"))
+async def cmd_set_priority(message: Message):
+    """Пометить чат как приоритетный ЖК (высотка): /set_priority [id или ссылка] [1|0]."""
+    if not check_admin(message.from_user.id):
+        await message.answer("⛔ У вас нет доступа")
+        return
+    parts = (message.text or "").strip().split(maxsplit=2)
+    if len(parts) < 3:
+        await message.answer(
+            "Использование: /set_priority [id или ссылка] [1|0]\n"
+            "1 — приоритетный ЖК (высотка), 0 — снять пометку.\n"
+            "Пример: /set_priority 5 1"
+        )
+        return
+    link_or_id = parts[1].strip()
+    try:
+        is_high = int(parts[2].strip()) != 0
+    except ValueError:
+        await message.answer("❌ Третий аргумент: 1 или 0.")
+        return
+    resource_id = None
+    link = None
+    if link_or_id.isdigit():
+        resource_id = int(link_or_id)
+    else:
+        link = link_or_id
+    try:
+        await db.connect()
+        ok = await db.set_target_high_priority(resource_id=resource_id, link=link, is_high=is_high)
+        if ok:
+            label = "приоритетный ЖК (Высотка)" if is_high else "снята пометка «Высотка»"
+            await message.answer(f"✅ Ресурс: <b>{label}</b>", parse_mode="HTML")
+        else:
+            await message.answer("❌ Ресурс не найден по указанному id или ссылке.")
+    except Exception as e:
+        logger.exception("set_priority")
+        await message.answer(f"❌ Ошибка: {e}")
+
+
 # === КОМАНДА /SPY_REPORT ===
 @router.message(Command("spy_report"))
 async def cmd_spy_report(message: Message):

@@ -244,6 +244,31 @@ class Database:
                 await self.conn.commit()
             except Exception:
                 pass
+            # Снайпер v3.0: приоритетные ЖК (высотки)
+            try:
+                await cursor.execute("ALTER TABLE target_resources ADD COLUMN is_high_priority INTEGER DEFAULT 0")
+                await self.conn.commit()
+            except Exception:
+                pass
+            # Модуль «Ассистент Продаж»: скрипты подсказок для карточки лида
+            await cursor.execute("""
+                CREATE TABLE IF NOT EXISTS sales_templates (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    key TEXT NOT NULL UNIQUE,
+                    body TEXT NOT NULL,
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+            await self.conn.commit()
+            for key, body in [
+                ("mji_prescription", "Срочный выезд и аудит документов"),
+                ("keys_design", "Проверка проекта на реализуемость"),
+            ]:
+                await cursor.execute(
+                    "INSERT OR IGNORE INTO sales_templates (key, body) VALUES (?, ?)",
+                    (key, body),
+                )
+            await self.conn.commit()
 
     async def get_or_create_user(self, user_id: int, username: Optional[str] = None,
                                 first_name: Optional[str] = None, last_name: Optional[str] = None) -> Dict:
@@ -537,6 +562,25 @@ class Database:
             )
             await self.conn.commit()
 
+    async def get_sales_template(self, key: str) -> Optional[str]:
+        """Получить скрипт подсказки по ключу (модуль Ассистент Продаж)."""
+        async with self.conn.cursor() as cursor:
+            try:
+                await cursor.execute("SELECT body FROM sales_templates WHERE key = ?", (key,))
+                row = await cursor.fetchone()
+                return row[0] if row else None
+            except Exception:
+                return None
+
+    async def set_sales_template(self, key: str, body: str) -> None:
+        """Обновить скрипт подсказки."""
+        async with self.conn.cursor() as cursor:
+            await cursor.execute(
+                "INSERT OR REPLACE INTO sales_templates (key, body, updated_at) VALUES (?, ?, ?)",
+                (key, body, datetime.now()),
+            )
+            await self.conn.commit()
+
     async def save_post(self, post_type: str, title: str, body: str, cta: str, publish_date: datetime,
                        channel: str = 'terion', theme: Optional[str] = None, 
                        image_url: Optional[str] = None, admin_id: Optional[int] = None,
@@ -721,14 +765,24 @@ class Database:
             return dict(row) if row else None
 
     async def get_active_targets_for_scout(self) -> List[Dict]:
-        """Список целей для парсера/хантера: active + telegram. Поля: link, title, geo_tag, id."""
+        """Список целей для парсера/хантера: active + telegram. Поля: link, title, geo_tag, id, is_high_priority."""
         async with self.conn.cursor() as cursor:
-            await cursor.execute(
-                """SELECT id, link, title, COALESCE(geo_tag, '') AS geo_tag FROM target_resources
-                   WHERE (status = 'active' OR (is_active = 1 AND (status IS NULL OR status = '')))
-                     AND (platform = 'telegram' OR type = 'telegram')"""
-            )
-            return [dict(row) for row in await cursor.fetchall()]
+            try:
+                await cursor.execute(
+                    """SELECT id, link, title, COALESCE(geo_tag, '') AS geo_tag,
+                          COALESCE(is_high_priority, 0) AS is_high_priority
+                       FROM target_resources
+                       WHERE (status = 'active' OR (is_active = 1 AND (status IS NULL OR status = '')))
+                         AND (platform = 'telegram' OR type = 'telegram')"""
+                )
+            except Exception:
+                await cursor.execute(
+                    """SELECT id, link, title, COALESCE(geo_tag, '') AS geo_tag FROM target_resources
+                       WHERE (status = 'active' OR (is_active = 1 AND (status IS NULL OR status = '')))
+                         AND (platform = 'telegram' OR type = 'telegram')"""
+                )
+            rows = await cursor.fetchall()
+            return [dict(row) for row in rows]
 
     async def get_pending_targets(self) -> List[Dict]:
         """Список ресурсов со статусом pending для /approve_targets. Поля: id, title, link, participants_count."""
@@ -749,6 +803,47 @@ class Database:
                 (status, is_active, datetime.now(), resource_id),
             )
             await self.conn.commit()
+
+    async def set_target_geo(self, resource_id: int = None, link: str = None, geo_tag: str = "") -> bool:
+        """Установить geo_tag для ресурса по id или по link. Возвращает True если обновлено."""
+        if not geo_tag and resource_id is None and not link:
+            return False
+        async with self.conn.cursor() as cursor:
+            if resource_id is not None:
+                await cursor.execute(
+                    "UPDATE target_resources SET geo_tag = ?, updated_at = ? WHERE id = ?",
+                    (geo_tag.strip(), datetime.now(), resource_id),
+                )
+            elif link:
+                link_clean = (link or "").strip().rstrip("/")
+                await cursor.execute(
+                    "UPDATE target_resources SET geo_tag = ?, updated_at = ? WHERE link = ? OR link = ?",
+                    (geo_tag.strip(), datetime.now(), link_clean, link_clean + "/"),
+                )
+            else:
+                return False
+            await self.conn.commit()
+            return cursor.rowcount > 0
+
+    async def set_target_high_priority(self, resource_id: int = None, link: str = None, is_high: bool = True) -> bool:
+        """Пометить ресурс как приоритетный ЖК (высотка). По id или по link."""
+        async with self.conn.cursor() as cursor:
+            val = 1 if is_high else 0
+            if resource_id is not None:
+                await cursor.execute(
+                    "UPDATE target_resources SET is_high_priority = ?, updated_at = ? WHERE id = ?",
+                    (val, datetime.now(), resource_id),
+                )
+            elif link:
+                link_clean = (link or "").strip().rstrip("/")
+                await cursor.execute(
+                    "UPDATE target_resources SET is_high_priority = ?, updated_at = ? WHERE link = ? OR link = ?",
+                    (val, datetime.now(), link_clean, link_clean + "/"),
+                )
+            else:
+                return False
+            await self.conn.commit()
+            return cursor.rowcount > 0
 
     async def import_scan_to_target_resources(
         self, chats: List[Dict], min_participants: int = 500

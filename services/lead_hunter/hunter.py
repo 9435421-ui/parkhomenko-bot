@@ -26,8 +26,14 @@ class LeadHunter:
         self.outreach = Outreach()
         self.parser = scout_parser  # общий экземпляр: отчёт последнего скана доступен и для /spy_report
 
-    def _format_lead_card(self, lead: dict, profile_url: str = "", card_header: str = "") -> str:
-        """Форматирует одну карточку лида. card_header — гео-привязка (ЖК, корпус) из текста сообщения."""
+    def _format_lead_card(
+        self,
+        lead: dict,
+        profile_url: str = "",
+        card_header: str = "",
+        anton_recommendation: str = "",
+    ) -> str:
+        """Форматирует одну карточку лида. card_header — гео/высотка; anton_recommendation — подсказка Ассистента Продаж."""
         content = (lead.get("content") or lead.get("intent") or "")[:600]
         if len(lead.get("content") or "") > 600:
             content += "…"
@@ -45,6 +51,8 @@ class LeadHunter:
             f"📍 <b>Гео:</b> {lead.get('geo', '—')}",
             f"💡 <b>Контекст:</b> {lead.get('context_summary', '—')}",
         ])
+        if anton_recommendation:
+            lines.append(f"💡 <b>Рекомендация Антона:</b> {anton_recommendation}")
         if profile_url and profile_url.startswith("tg://"):
             lines.append(f"\n👤 <b>Профиль:</b> <code>{profile_url}</code>")
         lines.append(f"\n🔗 Пост: {lead.get('url', '')}")
@@ -57,13 +65,14 @@ class LeadHunter:
         profile_url: str,
         post_url: str,
         card_header: str = "",
+        anton_recommendation: str = "",
     ) -> bool:
         """Отправляет карточку лида в рабочую группу (топик «Горячие лиды») отдельным сообщением с кнопками."""
         from config import BOT_TOKEN, LEADS_GROUP_CHAT_ID, THREAD_ID_HOT_LEADS
         if not BOT_TOKEN or not LEADS_GROUP_CHAT_ID:
             logger.warning("⚠️ BOT_TOKEN или LEADS_GROUP_CHAT_ID не заданы — карточка в группу не отправлена")
             return False
-        text = self._format_lead_card(lead, profile_url, card_header)
+        text = self._format_lead_card(lead, profile_url, card_header, anton_recommendation)
         buttons = []
         if profile_url and profile_url.startswith("http"):
             buttons.append(InlineKeyboardButton(text="👤 Профиль", url=profile_url))
@@ -84,6 +93,19 @@ class LeadHunter:
         except Exception as e:
             logger.error("❌ Не удалось отправить карточку лида в группу: %s", e)
             return False
+
+    async def _get_anton_recommendation(self, post_text: str, db) -> str:
+        """Подсказка для карточки лида: МЖИ/предписание → срочный выезд; ключи/дизайн → проверка проекта (sales_templates)."""
+        if not post_text:
+            return ""
+        t = post_text.lower()
+        if "мжи" in t or "предписание" in t:
+            body = await db.get_sales_template("mji_prescription")
+            return body or "Срочный выезд и аудит документов"
+        if "ключ" in t or "дизайн" in t:
+            body = await db.get_sales_template("keys_design")
+            return body or "Проверка проекта на реализуемость"
+        return ""
 
     def _build_raw_leads_file(self, all_posts: list, max_entries: int = 1000) -> bytes:
         """Собирает текстовый файл со списком лидов: источник | превью текста | ссылка."""
@@ -238,16 +260,22 @@ class LeadHunter:
                     source_name = getattr(post, "source_name", "") if post else "—"
                     source_type = getattr(post, "source_type", "telegram") if post else "telegram"
                     post_text = getattr(post, "text", "") if post else ""
-                    # Заголовок карточки: geo_tag из target_resources (если чат из БД), иначе разбор по тексту
+                    # Заголовок карточки: приоритетный ЖК (Высотка) или geo_tag / title (Управление географией)
                     card_header = source_name
+                    res = None
                     if post:
                         source_link = getattr(post, "source_link", None)
                         if source_link:
                             try:
                                 from database import db as main_db
                                 res = await main_db.get_target_resource_by_link(source_link)
-                                if res and res.get("geo_tag"):
-                                    card_header = res["geo_tag"]
+                                if res:
+                                    is_high = res.get("is_high_priority") or 0
+                                    name_part = (res.get("geo_tag") or "").strip() or res.get("title") or self.parser.extract_geo_header(post_text, source_name) or source_name
+                                    if is_high:
+                                        card_header = f"🏙 ПРИОРИТЕТНЫЙ ЖК (Высотка)\n{name_part}" if name_part else "🏙 ПРИОРИТЕТНЫЙ ЖК (Высотка)"
+                                    else:
+                                        card_header = name_part
                                 else:
                                     card_header = self.parser.extract_geo_header(post_text, source_name)
                             except Exception:
@@ -287,9 +315,16 @@ class LeadHunter:
                             await self._send_lead_notify_to_admin(lead, source_name, profile_url or post_url)
                     except Exception:
                         pass
-                    # Карточка лида в рабочую группу (с гео-заголовком ЖК/корпус при наличии)
+                    # Рекомендация Антона (Ассистент Продаж): по тексту подбираем скрипт из sales_templates
+                    anton_recommendation = ""
+                    try:
+                        from database import db as main_db
+                        anton_recommendation = await self._get_anton_recommendation(post_text, main_db)
+                    except Exception:
+                        pass
+                    # Карточка лида в рабочую группу (с гео/высоткой и рекомендацией)
                     if cards_sent < MAX_CARDS_PER_RUN:
-                        if await self._send_lead_card_to_group(lead, lead_id, profile_url, post_url, card_header):
+                        if await self._send_lead_card_to_group(lead, lead_id, profile_url, post_url, card_header, anton_recommendation):
                             cards_sent += 1
                 if cards_sent:
                     logger.info("📋 В рабочую группу отправлено карточек лидов: %s", cards_sent)

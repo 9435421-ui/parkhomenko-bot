@@ -11,6 +11,7 @@ import asyncio
 import logging
 import os
 import re
+import time
 from datetime import datetime, timedelta
 from typing import List, Dict, Optional
 from dataclasses import dataclass
@@ -115,6 +116,40 @@ class ScoutParser:
         r"план\s+(квартир|помещен)",
     ]
 
+    # === МАРКЕРЫ ДЕЙСТВИЯ (Intent v3.0: живой лид = вопрос + термин + маркер) ===
+    COMMERCIAL_MARKERS = [
+        r"стоимость",
+        r"сколько\s+стоит",
+        r"сроки",
+        r"цена",
+        r"кто\s+делал",
+        r"к\s+кому\s+обратиться",
+        r"к\s+кому\s+обращались",
+        r"предписание",
+        r"предписание\s+МЖИ",
+        r"МЖИ",
+        r"акт",
+        r"инспектор",
+        r"нужен\s+проект",
+        r"заказать\s+проект",
+        r"оформить\s+перепланировку",
+        r"согласовал\w*",
+        r"узаконил\w*",
+    ]
+
+    # === МУСОР: отсекаем рекламу и объявления без прямого вопроса к эксперту ===
+    JUNK_PHRASES = [
+        r"продам",
+        r"аренда",
+        r"услуги\s+сантехника",
+        r"услуги\s+ремонта",
+        r"ремонт\s+под\s+ключ",
+        r"ремонт\s+квартир\s+под\s+ключ",
+        r"вызов\s+сантехника",
+        r"вывоз\s+мусора",
+        r"мастер\s+на\s+час",
+    ]
+
     # === ПАТТЕРНЫ ВОПРОСА (Intent: считаем лидом только вопрос + термин) ===
     QUESTION_PATTERNS = [
         r"кто\s+(согласовывал|оформлял|делал|заказывал)",
@@ -193,6 +228,10 @@ class ScoutParser:
         self.last_scan_report = []  # list of {"type", "name", "id", "status": "ok"|"error", "posts": N, "error": str|None}
         self.last_scan_at: Optional[datetime] = None
         self.last_scan_chats_list: List[Dict] = []  # результат scan_all_chats() для импорта в target_resources
+
+        # Anti-Flood: не более одного get_entity в 60 секунд (защита сессии от бана)
+        self._get_entity_interval = 60.0
+        self._last_get_entity_at = 0.0
 
         logger.info(f"🔍 ScoutParser инициализирован. Включен: {'✅' if self.enabled else '❌'}. TG каналов: {len(self.tg_channels)}, VK групп: {len(self.vk_groups)}")
 
@@ -283,15 +322,38 @@ class ScoutParser:
                 return True
         return False
 
+    def _has_commercial_marker(self, text: str) -> bool:
+        """Есть ли коммерческий маркер (стоимость, сроки, кто делал, к кому обратиться, предписание)."""
+        if not text:
+            return False
+        text_lower = text.lower()
+        for pat in self.COMMERCIAL_MARKERS:
+            if re.search(pat, text_lower):
+                return True
+        return False
+
+    def _has_junk_phrase(self, text: str) -> bool:
+        """Сообщение с рекламой/объявлениями без прямого запроса от клиента — отсекаем."""
+        if not text:
+            return False
+        text_lower = text.lower()
+        for pat in self.JUNK_PHRASES:
+            if re.search(pat, text_lower):
+                return True
+        return False
+
     def detect_lead(self, text: str) -> bool:
         """
-        Интеллектуальный фильтр (Intent): лид только если есть вопрос + технический термин.
-        Пример мусора: «Посоветуйте рабочих» — игнорируем.
-        Пример лида: «Соседи, кто согласовывал снос подоконного блока в нашем корпусе?» — берём.
+        Интеллектуальный фильтр (Intent v2.1): лид = вопрос + технический термин + коммерческий маркер.
+        Отсекаем мусор: «продам», «услуги сантехника», «ремонт под ключ» и т.п.
         """
         if not self._is_relevant_post(text):
             return False
+        if self._has_junk_phrase(text):
+            return False
         if not self._has_question(text) or not self._has_technical_term(text):
+            return False
+        if not self._has_commercial_marker(text):
             return False
         text_lower = text.lower()
         for trigger in self.LEAD_TRIGGERS:
@@ -363,6 +425,22 @@ class ScoutParser:
             return f"https://t.me/c/{sid.replace('-100', '')}"
         return f"https://t.me/{sid}"
 
+    async def _wait_get_entity_throttle(self) -> None:
+        """Ждать до истечения интервала с последнего get_entity (Anti-Flood: 1 запрос / 60 сек)."""
+        now = time.monotonic()
+        elapsed = now - self._last_get_entity_at
+        if elapsed < self._get_entity_interval and self._last_get_entity_at > 0:
+            wait = self._get_entity_interval - elapsed
+            logger.info("[SCOUT] Пауза %.0f сек до следующей проверки ссылки (anti-flood).", wait)
+            await asyncio.sleep(wait)
+
+    async def _throttled_get_entity(self, client, peer):
+        """Вызов get_entity с лимитом не чаще 1 раз в 60 секунд."""
+        await self._wait_get_entity_throttle()
+        entity = await client.get_entity(peer)
+        self._last_get_entity_at = time.monotonic()
+        return entity
+
     @staticmethod
     def _extract_tme_links(text: str) -> List[str]:
         """Извлечь из текста ссылки на чаты: t.me/joinchat/..., t.me/name, t.me/c/123."""
@@ -403,6 +481,7 @@ class ScoutParser:
 
         tg_limit = int(os.getenv("SCOUT_TG_MESSAGES_LIMIT", "50"))
         existing_links = set()
+        new_links_queue: List[str] = []  # очередь ссылок для проверки по одной (anti-flood)
         if db:
             try:
                 resources = await db.get_target_resources(resource_type="telegram", active_only=False)
@@ -420,7 +499,7 @@ class ScoutParser:
                     if not link:
                         continue
                     try:
-                        entity = await client.get_entity(link)
+                        entity = await self._throttled_get_entity(client, link)
                         cid = getattr(entity, "id", None)
                         if cid is None:
                             continue
@@ -451,37 +530,16 @@ class ScoutParser:
                     if not message.text:
                         continue
                     scanned += 1
-                    # Ловля ссылок: если в сообщении есть ссылка на другой чат ЖК — простукать и добавить в ресурсы
+                    # Ловля ссылок: ставим в очередь, обрабатываем по одной с паузой 60 сек (anti-flood)
                     if db:
                         for url in self._extract_tme_links(message.text):
                             url_norm = url.rstrip("/")
                             if url_norm in existing_links:
                                 continue
-                            try:
-                                entity = await client.get_entity(url)
-                                if isinstance(entity, (Channel, Chat)):
-                                    title = getattr(entity, "title", None) or getattr(entity, "username", None) or str(entity.id)
-                                    if entity.id:
-                                        link_to_store = self._channel_id_to_link(entity.id)
-                                    else:
-                                        link_to_store = url_norm
-                                    if link_to_store.rstrip("/") not in existing_links:
-                                        participants = getattr(entity, "participants_count", None)
-                                        if participants is None:
-                                            try:
-                                                full = await client.get_entity(entity)
-                                                participants = getattr(full, "participants_count", None)
-                                            except Exception:
-                                                pass
-                                        await db.add_target_resource(
-                                            "telegram", link_to_store, title=title,
-                                            notes="Обнаружен автоматически (ссылка в чате)",
-                                            status="pending", participants_count=participants,
-                                        )
-                                        existing_links.add(link_to_store.rstrip("/"))
-                                        logger.info("🔗 Добавлен ресурс по ссылке из сообщения: %s", link_to_store)
-                            except Exception as e:
-                                logger.debug("Не удалось разрешить ссылку %s: %s", url, e)
+                            if url_norm not in {u.rstrip("/") for u in new_links_queue}:
+                                new_links_queue.append(url_norm)
+                                print("[SCOUT] Найдена новая ссылка, поставлена в очередь на проверку через 60 сек.", flush=True)
+                                logger.info("[SCOUT] Найдена новая ссылка %s, поставлена в очередь на проверку через 60 сек.", url_norm)
                     if self.detect_lead(message.text):
                         author_id = getattr(message, "sender_id", None)
                         author_name = None
@@ -520,7 +578,7 @@ class ScoutParser:
                         try:
                             participants = None
                             try:
-                                ent = await client.get_entity(cid)
+                                ent = await self._throttled_get_entity(client, cid)
                                 participants = getattr(ent, "participants_count", None)
                             except Exception:
                                 pass
@@ -543,6 +601,39 @@ class ScoutParser:
                     "scanned": 0,
                     "error": str(e)[:200],
                 })
+
+        # Режим «Тишины»: перед проверкой новых ссылок — пауза 60 сек (защита сессии)
+        if new_links_queue:
+            logger.info("[SCOUT] Режим тишины: пауза 60 сек перед проверкой %s новых ссылок.", len(new_links_queue))
+            print("[SCOUT] Режим тишины: пауза 60 сек перед проверкой новых ссылок.", flush=True)
+            await asyncio.sleep(60)
+        # Обработка очереди: строго по одной с паузой 60 сек между запросами (anti-flood)
+        for url in new_links_queue:
+            try:
+                entity = await self._throttled_get_entity(client, url)
+                if isinstance(entity, (Channel, Chat)):
+                    title = getattr(entity, "title", None) or getattr(entity, "username", None) or str(entity.id)
+                    if entity.id:
+                        link_to_store = self._channel_id_to_link(entity.id)
+                    else:
+                        link_to_store = url.rstrip("/")
+                    if link_to_store.rstrip("/") not in existing_links:
+                        participants = getattr(entity, "participants_count", None)
+                        if participants is None:
+                            try:
+                                full = await self._throttled_get_entity(client, entity)
+                                participants = getattr(full, "participants_count", None)
+                            except Exception:
+                                pass
+                        await db.add_target_resource(
+                            "telegram", link_to_store, title=title,
+                            notes="Обнаружен автоматически (ссылка в чате)",
+                            status="pending", participants_count=participants,
+                        )
+                        existing_links.add(link_to_store.rstrip("/"))
+                        logger.info("🔗 Добавлен ресурс по ссылке из сообщения: %s", link_to_store)
+            except Exception as e:
+                logger.debug("Не удалось разрешить ссылку %s: %s", url, e)
 
         await client.disconnect()
         return posts
@@ -609,13 +700,17 @@ class ScoutParser:
             await client.disconnect()
             return None
         try:
+            await self._wait_get_entity_throttle()
             entity = await client.get_entity(link)
+            self._last_get_entity_at = time.monotonic()
             cid = getattr(entity, "id", None)
             title = getattr(entity, "title", None) or getattr(entity, "username", None) or (str(cid) if cid else link)
             participants = getattr(entity, "participants_count", None)
             if participants is None and isinstance(entity, (Channel, Chat)):
                 try:
+                    await self._wait_get_entity_throttle()
                     full = await client.get_entity(entity)
+                    self._last_get_entity_at = time.monotonic()
                     participants = getattr(full, "participants_count", None)
                 except Exception:
                     pass
