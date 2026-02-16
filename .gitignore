@@ -25,6 +25,9 @@ pip-log.txt
 *.sqlite3
 *.db-journal
 
+# === Lock процесса (Неубивайка) ===
+bot.lock
+
 # === ЛОГИ ===
 *.log
 logs/

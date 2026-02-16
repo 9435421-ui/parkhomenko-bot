@@ -3,9 +3,17 @@
 Запуск ДВУХ ботов с РАЗДЕЛЬНЫМИ Dispatchers:
 - main_bot (АНТОН): консультант по перепланировкам
 - content_bot (ДОМ ГРАНД): контент и посты
+
+Механизм «Неубивайка»: lock-файл (bot.lock), принудительная очистка webhook,
+обработка TelegramConflictError (retry 3x), корректное завершение по SIGTERM/SIGINT.
 """
 import asyncio
 import logging
+import os
+import signal
+import sys
+from pathlib import Path
+
 from aiogram import Bot, Dispatcher
 from aiogram.fsm.storage.memory import MemoryStorage
 from aiogram.client.default import DefaultBotProperties
@@ -28,10 +36,54 @@ from services.image_generator import image_generator
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
+LOCK_FILE = Path(__file__).resolve().parent / "bot.lock"
+CONFLICT_RETRY_DELAY = 5
+CONFLICT_RETRY_COUNT = 3
+
+
+def _acquire_lock() -> None:
+    """Если lock-файл существует — завершить старый процесс по PID, затем записать текущий PID."""
+    if LOCK_FILE.exists():
+        try:
+            raw = LOCK_FILE.read_text().strip()
+            old_pid = int(raw)
+        except (ValueError, OSError):
+            old_pid = None
+        if old_pid and old_pid != os.getpid():
+            try:
+                os.kill(old_pid, signal.SIGTERM)
+                logger.warning("Завершён предыдущий процесс main.py (PID %s)", old_pid)
+            except ProcessLookupError:
+                pass
+            except Exception as e:
+                logger.warning("Не удалось завершить старый процесс %s: %s", old_pid, e)
+        try:
+            LOCK_FILE.unlink()
+        except OSError:
+            pass
+    LOCK_FILE.write_text(str(os.getpid()))
+
+
+def _release_lock() -> None:
+    """Удалить lock-файл при корректном выходе."""
+    try:
+        if LOCK_FILE.exists():
+            LOCK_FILE.unlink()
+            logger.info("Lock bot.lock снят")
+    except OSError as e:
+        logger.warning("Не удалось удалить bot.lock: %s", e)
+
+
+def _is_conflict_error(exc: BaseException) -> bool:
+    """Проверка: конфликт getUpdates (409 или текст 'conflict')."""
+    msg = (getattr(exc, "message", None) or str(exc)).lower()
+    return "409" in str(exc) or "conflict" in msg
+
 
 async def main():
     logger.info("🎯 Запуск ЭКОСИСТЕМЫ TERION...")
-    
+    _acquire_lock()
+
     # 1. Единая инициализация ресурсов
     await db.connect()
     await kb.index_documents()
@@ -214,16 +266,73 @@ async def main():
     except Exception as e:
         logger.warning("set_my_commands для группы: %s", e)
 
-    # 5. Параллельный запуск
-    logger.info("🚀 Очистка соединений и запуск polling...")
-    await main_bot.delete_webhook(drop_pending_updates=True)
-    await content_bot.delete_webhook(drop_pending_updates=True)
+    # 5. Параллельный запуск (Force Webhook Clear + Conflict Retry + Graceful Shutdown)
+    async def close_bot_sessions():
+        """Закрыть сессии ботов и снять lock."""
+        for name, bot in [("main_bot", main_bot), ("content_bot", content_bot)]:
+            try:
+                if bot.session and not bot.session.closed:
+                    await bot.session.close()
+                    logger.info("Сессия %s закрыта", name)
+            except Exception as e:
+                logger.warning("Ошибка закрытия сессии %s: %s", name, e)
+        _release_lock()
 
-    await asyncio.gather(
-        dp_main.start_polling(main_bot),
-        dp_content.start_polling(content_bot)
-    )
+    async def ensure_webhook_cleared(bot_instance: Bot) -> None:
+        """Удалить webhook (drop_pending_updates), затем закрыть сессию если открыта."""
+        await bot_instance.delete_webhook(drop_pending_updates=True)
+        try:
+            if getattr(bot_instance, "session", None) and not bot_instance.session.closed:
+                await bot_instance.session.close()
+        except Exception:
+            pass
+
+    _polling_task = None
+
+    def _on_shutdown():
+        if _polling_task and not _polling_task.done():
+            _polling_task.cancel()
+        logger.info("Получен сигнал завершения (SIGTERM/SIGINT)")
+
+    try:
+        for sig in (signal.SIGTERM, signal.SIGINT):
+            try:
+                asyncio.get_running_loop().add_signal_handler(sig, _on_shutdown)
+            except (NotImplementedError, OSError):
+                pass  # Windows или недоступные сигналы
+    except Exception:
+        pass
+
+    for attempt in range(CONFLICT_RETRY_COUNT):
+        try:
+            logger.info("🚀 Очистка webhook и запуск polling (попытка %s/%s)...", attempt + 1, CONFLICT_RETRY_COUNT)
+            await ensure_webhook_cleared(main_bot)
+            await ensure_webhook_cleared(content_bot)
+            _polling_task = asyncio.create_task(
+                asyncio.gather(
+                    dp_main.start_polling(main_bot),
+                    dp_content.start_polling(content_bot),
+                )
+            )
+            await _polling_task
+            break
+        except asyncio.CancelledError:
+            logger.info("Polling отменён (корректное завершение)")
+            break
+        except Exception as e:
+            if _is_conflict_error(e) and attempt < CONFLICT_RETRY_COUNT - 1:
+                logger.warning("Конфликт getUpdates (409): ждём %s с и повторяем... Ошибка: %s", CONFLICT_RETRY_DELAY, e)
+                await asyncio.sleep(CONFLICT_RETRY_DELAY)
+            else:
+                logger.exception("Ошибка polling: %s", e)
+                await close_bot_sessions()
+                raise
+
+    await close_bot_sessions()
 
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    try:
+        asyncio.run(main())
+    except KeyboardInterrupt:
+        sys.exit(0)
