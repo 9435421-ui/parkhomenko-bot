@@ -2,10 +2,21 @@
 """
 Wrapper script to run both main bot and chat parser.
 Run as: python run_all.py
+
+ВНИМАНИЕ: Не запускайте run_all.py одновременно с main.py — один и тот же BOT_TOKEN
+будет использоваться в двух процессах → TelegramConflictError (409).
+Для продакшена используйте только main.py.
 """
 import asyncio
 import logging
 import sys
+from pathlib import Path
+
+# Не запускать, если уже работает main.py (bot.lock)
+_lock = Path(__file__).resolve().parent / "bot.lock"
+if _lock.exists():
+    print("ERROR: main.py уже запущен (найден bot.lock). Не запускайте run_all.py одновременно.")
+    sys.exit(1)
 
 # Настройка логирования
 logging.basicConfig(

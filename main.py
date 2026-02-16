@@ -4,8 +4,9 @@
 - main_bot (АНТОН): консультант по перепланировкам
 - content_bot (ДОМ ГРАНД): контент и посты
 
-Механизм «Неубивайка»: lock-файл (bot.lock), принудительная очистка webhook,
-обработка TelegramConflictError (retry 3x), корректное завершение по SIGTERM/SIGINT.
+Единый источник истины: Bot и Dispatcher создаются только здесь.
+Остальные модули получают бота через utils.bot_config.get_main_bot() или из контекста (message.bot, callback.bot).
+Неубивайка: lock bot.lock, один процесс на инстанс.
 """
 import asyncio
 import logging
@@ -35,6 +36,9 @@ from services.image_generator import image_generator
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
+
+# Аудит: видим PID, чтобы убедиться, что процесс не запускается дважды
+print(f"DEBUG: Started process with PID {os.getpid()}")
 
 LOCK_FILE = Path(__file__).resolve().parent / "bot.lock"
 
@@ -75,6 +79,7 @@ def _release_lock() -> None:
 async def main():
     logger.info("🎯 Запуск ЭКОСИСТЕМЫ TERION...")
     _acquire_lock()
+    # Один Dispatcher на токен, один start_polling на токен — только здесь
 
     # 1. Единая инициализация ресурсов
     await db.connect()
@@ -188,10 +193,11 @@ async def main():
     scheduler.add_job(creative_agent.scout_topics, 'interval', hours=6)
     
     scheduler.start()
-
+    # Задачи планировщика получают main_bot/content_bot аргументом, своих Bot() не создают
     from services.birthday_greetings import send_birthday_greetings
     scheduler.add_job(send_birthday_greetings, 'cron', hour=9, minute=0, args=[main_bot])
 
+    # Единственные экземпляры Dispatcher в проекте; start_polling вызывается только ниже, по одному разу на каждый
     dp_main = Dispatcher(storage=MemoryStorage())
     dp_main.callback_query.middleware(UnhandledCallbackMiddleware())
     # Системные команды (admin) — приоритет, первыми в списке роутеров

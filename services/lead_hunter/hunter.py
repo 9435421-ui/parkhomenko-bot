@@ -16,7 +16,7 @@ logger = logging.getLogger(__name__)
 
 
 def _bot_for_send():
-    """Общий экземпляр бота из main.py (bot_config); при отсутствии — временный экземпляр (создать и закрыть после отправки)."""
+    """Единый источник: бот из main.py через utils.bot_config.get_main_bot(). Fallback Bot(token=...) только при запуске hunt вне main (например run_hunt_once) — иначе возможен TelegramConflictError."""
     try:
         from utils.bot_config import get_main_bot
         return get_main_bot()
