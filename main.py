@@ -87,42 +87,34 @@ async def main():
     # 1. Единая инициализация ресурсов
     await db.connect()
     await kb.index_documents()
-    
-    # 2. Проверка связей
+
+    # 2. Один раз создаём экземпляры ботов (далее используем их везде, включая проверку связей)
+    main_bot = Bot(token=BOT_TOKEN or "", default=DefaultBotProperties(parse_mode="HTML"))
+    content_bot = Bot(token=CONTENT_BOT_TOKEN or "", default=DefaultBotProperties(parse_mode="HTML"))
+    from utils.bot_config import set_main_bot
+    set_main_bot(main_bot)
+    publisher.bot = main_bot
+
+    # 3. Проверка связей (те же экземпляры main_bot, content_bot — сессии не закрываем)
     logger.info("🔍 Проверка связей...")
     try:
-        # Проверка каналов
         from config import CHANNEL_ID_TERION, CHANNEL_ID_DOM_GRAD, LEADS_GROUP_CHAT_ID
         from config import THREAD_ID_DRAFTS, THREAD_ID_CONTENT_PLAN, THREAD_ID_TRENDS_SEASON, THREAD_ID_LOGS
-        
-        # Проверка доступности каналов (пробуем получить информацию)
-        from aiogram import Bot
-        from config import BOT_TOKEN, CONTENT_BOT_TOKEN
-        
-        main_bot = Bot(token=BOT_TOKEN or "")
-        content_bot = Bot(token=CONTENT_BOT_TOKEN or "")
-        
-        # Проверка каналов
         try:
             await main_bot.get_chat(CHANNEL_ID_TERION)
             logger.info("✅ Канал TG: OK")
         except Exception as e:
             logger.error(f"❌ Канал TG: {e}")
-        
         try:
             await content_bot.get_chat(CHANNEL_ID_DOM_GRAD)
             logger.info("✅ Канал ДОМ ГРАНД: OK")
         except Exception as e:
             logger.error(f"❌ Канал ДОМ ГРАНД: {e}")
-        
-        # Проверка рабочей группы
         try:
             await main_bot.get_chat(LEADS_GROUP_CHAT_ID)
             logger.info("✅ Рабочая группа: OK")
         except Exception as e:
             logger.error(f"❌ Рабочая группа: {e}")
-        
-        # Проверка VK
         from config import VK_TOKEN, VK_GROUP_ID
         if VK_TOKEN and VK_GROUP_ID:
             try:
@@ -142,8 +134,6 @@ async def main():
                 logger.warning(f"⚠️ Интеграция VK: {e}")
         else:
             logger.warning("⚠️ Интеграция VK: токен или group_id не настроены")
-        
-        # Проверка топиков (пробуем отправить тестовое сообщение и удалить)
         for thread_id, name in [
             (THREAD_ID_DRAFTS, "Черновики"),
             (THREAD_ID_CONTENT_PLAN, "Контент-план"),
@@ -151,19 +141,13 @@ async def main():
             (THREAD_ID_LOGS, "Логи")
         ]:
             try:
-                # Проверка существования топика через get_chat
                 await main_bot.get_chat(LEADS_GROUP_CHAT_ID)
                 logger.info(f"✅ Топик {name}: OK")
             except Exception as e:
                 logger.error(f"❌ Топик {name}: {e}")
-        
-        # Закрываем сессии проверочных ботов внутри блока проверки
-        await main_bot.session.close()
-        await content_bot.session.close()
-        
     except Exception as e:
         logger.error(f"Ошибка проверки связей: {e}")
-    
+
     scheduler = AsyncIOScheduler()
 
     async def check_and_publish_scheduled_posts():
@@ -212,16 +196,10 @@ async def main():
     scheduler.add_job(creative_agent.scout_topics, 'interval', hours=6)
     
     scheduler.start()
-    
-    # 2. Настройка АНТОНА (один экземпляр main_bot — один start_polling на этот токен)
-    main_bot = Bot(token=BOT_TOKEN or "", default=DefaultBotProperties(parse_mode="HTML"))
-    from utils.bot_config import set_main_bot
-    set_main_bot(main_bot)
+
     from services.birthday_greetings import send_birthday_greetings
     scheduler.add_job(send_birthday_greetings, 'cron', hour=9, minute=0, args=[main_bot])
 
-    # Инициализация сервисов
-    publisher.bot = main_bot
     dp_main = Dispatcher(storage=MemoryStorage())
     dp_main.callback_query.middleware(UnhandledCallbackMiddleware())
     # Системные команды (admin) — приоритет, первыми в списке роутеров
@@ -230,9 +208,7 @@ async def main():
     dp_main.include_router(quiz_router)   # раньше start: квиз по ссылке из поста обрабатывается первым
     dp_main.include_router(start_router)
     dp_main.include_router(dialog_router)
-    
-    # 3. Настройка ДОМ ГРАНД
-    content_bot = Bot(token=CONTENT_BOT_TOKEN or "", default=DefaultBotProperties(parse_mode="HTML"))
+
     # Темы от креативщика в рабочую группу (топик Тренды/Сезон) раз в 6 ч
     async def post_creative_topics_to_group(bot):
         from config import LEADS_GROUP_CHAT_ID, THREAD_ID_TRENDS_SEASON
@@ -284,14 +260,8 @@ async def main():
         _release_lock()
 
     async def ensure_webhook_cleared(bot_instance: Bot) -> None:
-        """Удалить webhook (drop_pending_updates), затем закрыть сессию если открыта."""
+        """Удалить webhook (drop_pending_updates). НЕ ЗАКРЫВАТЬ сессию здесь — только при полном выключении бота."""
         await bot_instance.delete_webhook(drop_pending_updates=True)
-        try:
-            session = getattr(bot_instance, "session", None)
-            if session is not None and getattr(session, "_connector", None) is not None:
-                await session.close()
-        except Exception:
-            pass
 
     _polling_task = None
 
