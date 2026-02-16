@@ -213,8 +213,10 @@ async def main():
     
     scheduler.start()
     
-    # 2. Настройка АНТОНА
+    # 2. Настройка АНТОНА (один экземпляр main_bot — один start_polling на этот токен)
     main_bot = Bot(token=BOT_TOKEN or "", default=DefaultBotProperties(parse_mode="HTML"))
+    from utils.bot_config import set_main_bot
+    set_main_bot(main_bot)
     from services.birthday_greetings import send_birthday_greetings
     scheduler.add_job(send_birthday_greetings, 'cron', hour=9, minute=0, args=[main_bot])
 
@@ -307,6 +309,8 @@ async def main():
     except Exception:
         pass
 
+    # Один start_polling на каждый токен (main_bot и content_bot). Хендлеры не создают Bot() —
+    # получают экземпляр из события (message.bot, callback.bot). Сервисы используют get_main_bot() из utils.bot_config.
     async def start_bots():
         await asyncio.gather(
             dp_main.start_polling(main_bot, skip_updates=True),

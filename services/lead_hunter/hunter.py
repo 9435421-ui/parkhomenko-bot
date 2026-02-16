@@ -14,6 +14,15 @@ from hunter_standalone import HunterDatabase, LeadHunter as StandaloneLeadHunter
 
 logger = logging.getLogger(__name__)
 
+
+def _bot_for_send():
+    """Общий экземпляр бота из main.py (bot_config); при отсутствии — временный экземпляр (создать и закрыть после отправки)."""
+    try:
+        from utils.bot_config import get_main_bot
+        return get_main_bot()
+    except Exception:
+        return None
+
 POTENTIAL_LEADS_DB = os.path.join(os.path.dirname(__file__), "..", "..", "database", "potential_leads.db")
 
 
@@ -120,16 +129,24 @@ class LeadHunter:
         buttons.append(InlineKeyboardButton(text="🛠 Взять в работу", callback_data=f"lead_take_work_{lead_id}"))
         keyboard = InlineKeyboardMarkup(inline_keyboard=[buttons])
         try:
-            bot = Bot(token=BOT_TOKEN, default=DefaultBotProperties(parse_mode="HTML"))
-            thread_id = THREAD_ID_HOT_LEADS if THREAD_ID_HOT_LEADS else None
-            await bot.send_message(
-                LEADS_GROUP_CHAT_ID,
-                text,
-                reply_markup=keyboard,
-                message_thread_id=thread_id,
-            )
-            await bot.session.close()
-            return True
+            bot = _bot_for_send()
+            if bot is None:
+                bot = Bot(token=BOT_TOKEN, default=DefaultBotProperties(parse_mode="HTML"))
+            try:
+                thread_id = THREAD_ID_HOT_LEADS if THREAD_ID_HOT_LEADS else None
+                await bot.send_message(
+                    LEADS_GROUP_CHAT_ID,
+                    text,
+                    reply_markup=keyboard,
+                    message_thread_id=thread_id,
+                )
+                return True
+            finally:
+                if _bot_for_send() is None and getattr(bot, "session", None):
+                    try:
+                        await bot.session.close()
+                    except Exception:
+                        pass
         except Exception as e:
             logger.error("❌ Не удалось отправить карточку лида в группу: %s", e)
             return False
@@ -178,16 +195,24 @@ class LeadHunter:
             file_bytes = self._build_raw_leads_file(all_posts)
             filename = f"scout_leads_{datetime.now().strftime('%Y-%m-%d_%H-%M')}.txt"
             doc = BufferedInputFile(file_bytes, filename=filename)
-            bot = Bot(token=BOT_TOKEN, default=DefaultBotProperties(parse_mode="HTML"))
-            await bot.send_document(
-                LEADS_GROUP_CHAT_ID,
-                doc,
-                caption=f"📎 Список лидов по скану ({len(all_posts)} постов с ключевыми словами). Источник, превью текста, ссылка.",
-                message_thread_id=THREAD_ID_LOGS,
-            )
-            await bot.session.close()
-            logger.info("📎 Файл со списком лидов отправлен в группу (топик Логи)")
-            return True
+            bot = _bot_for_send()
+            if bot is None:
+                bot = Bot(token=BOT_TOKEN, default=DefaultBotProperties(parse_mode="HTML"))
+            try:
+                await bot.send_document(
+                    LEADS_GROUP_CHAT_ID,
+                    doc,
+                    caption=f"📎 Список лидов по скану ({len(all_posts)} постов с ключевыми словами). Источник, превью текста, ссылка.",
+                    message_thread_id=THREAD_ID_LOGS,
+                )
+                logger.info("📎 Файл со списком лидов отправлен в группу (топик Логи)")
+                return True
+            finally:
+                if _bot_for_send() is None and getattr(bot, "session", None):
+                    try:
+                        await bot.session.close()
+                    except Exception:
+                        pass
         except Exception as e:
             logger.warning("Не удалось отправить файл лидов в группу: %s", e)
             return False
@@ -209,9 +234,17 @@ class LeadHunter:
         else:
             text += f"🔗 {lead.get('url', '')}\n"
         try:
-            bot = Bot(token=BOT_TOKEN, default=DefaultBotProperties(parse_mode="HTML"))
-            await bot.send_message(ADMIN_ID, text)
-            await bot.session.close()
+            bot = _bot_for_send()
+            if bot is None:
+                bot = Bot(token=BOT_TOKEN, default=DefaultBotProperties(parse_mode="HTML"))
+            try:
+                await bot.send_message(ADMIN_ID, text)
+            finally:
+                if _bot_for_send() is None and getattr(bot, "session", None):
+                    try:
+                        await bot.session.close()
+                    except Exception:
+                        pass
         except Exception as e:
             logger.debug("Уведомление админу о лиде: %s", e)
 
@@ -232,9 +265,17 @@ class LeadHunter:
             f"🔗 {lead.get('url', '')}"
         )
         try:
-            bot = Bot(token=BOT_TOKEN, default=DefaultBotProperties(parse_mode="HTML"))
-            await bot.send_message(ADMIN_ID, text)
-            await bot.session.close()
+            bot = _bot_for_send()
+            if bot is None:
+                bot = Bot(token=BOT_TOKEN, default=DefaultBotProperties(parse_mode="HTML"))
+            try:
+                await bot.send_message(ADMIN_ID, text)
+            finally:
+                if _bot_for_send() is None and getattr(bot, "session", None):
+                    try:
+                        await bot.session.close()
+                    except Exception:
+                        pass
         except Exception as e:
             logger.error(f"❌ Не удалось отправить горячий лид админу: {e}")
 
@@ -375,20 +416,28 @@ class LeadHunter:
                     from config import BOT_TOKEN, LEADS_GROUP_CHAT_ID, THREAD_ID_LOGS
                     if BOT_TOKEN and LEADS_GROUP_CHAT_ID:
                         try:
-                            bot = Bot(token=BOT_TOKEN, default=DefaultBotProperties(parse_mode="HTML"))
-                            summary = f"🕵️ <b>Охота: в potential_leads сохранено {len(hot_leads)} лидов</b>"
-                            if cards_sent:
-                                summary += f", в топик «Горячие лиды» отправлено карточек: {cards_sent}"
-                            summary += "\n\n"
-                            for i, lead in enumerate(hot_leads[:3], 1):
-                                content = (lead.get("content") or lead.get("intent") or "")[:80]
-                                summary += f"{i}. {content}…\n"
-                            await bot.send_message(
-                                LEADS_GROUP_CHAT_ID,
-                                summary,
-                                message_thread_id=THREAD_ID_LOGS,
-                            )
-                            await bot.session.close()
+                            bot = _bot_for_send()
+                            if bot is None:
+                                bot = Bot(token=BOT_TOKEN, default=DefaultBotProperties(parse_mode="HTML"))
+                            try:
+                                summary = f"🕵️ <b>Охота: в potential_leads сохранено {len(hot_leads)} лидов</b>"
+                                if cards_sent:
+                                    summary += f", в топик «Горячие лиды» отправлено карточек: {cards_sent}"
+                                summary += "\n\n"
+                                for i, lead in enumerate(hot_leads[:3], 1):
+                                    content = (lead.get("content") or lead.get("intent") or "")[:80]
+                                    summary += f"{i}. {content}…\n"
+                                await bot.send_message(
+                                    LEADS_GROUP_CHAT_ID,
+                                    summary,
+                                    message_thread_id=THREAD_ID_LOGS,
+                                )
+                            finally:
+                                if _bot_for_send() is None and getattr(bot, "session", None):
+                                    try:
+                                        await bot.session.close()
+                                    except Exception:
+                                        pass
                         except Exception as e:
                             logger.warning("Не удалось отправить сводку лидов в группу: %s", e)
             except Exception as e:
@@ -399,13 +448,21 @@ class LeadHunter:
             from config import BOT_TOKEN, LEADS_GROUP_CHAT_ID, THREAD_ID_LOGS
             report = self.parser.get_last_scan_report()
             if BOT_TOKEN and LEADS_GROUP_CHAT_ID and report and "Отчёта ещё нет" not in report:
-                bot = Bot(token=BOT_TOKEN, default=DefaultBotProperties(parse_mode="HTML"))
-                await bot.send_message(
-                    LEADS_GROUP_CHAT_ID,
-                    report,
-                    message_thread_id=THREAD_ID_LOGS,
-                )
-                await bot.session.close()
+                bot = _bot_for_send()
+                if bot is None:
+                    bot = Bot(token=BOT_TOKEN, default=DefaultBotProperties(parse_mode="HTML"))
+                try:
+                    await bot.send_message(
+                        LEADS_GROUP_CHAT_ID,
+                        report,
+                        message_thread_id=THREAD_ID_LOGS,
+                    )
+                finally:
+                    if _bot_for_send() is None and getattr(bot, "session", None):
+                        try:
+                            await bot.session.close()
+                        except Exception:
+                            pass
         except Exception as e:
             logger.warning("Не удалось отправить отчёт шпиона в группу: %s", e)
 
