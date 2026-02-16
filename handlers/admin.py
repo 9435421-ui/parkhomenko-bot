@@ -22,6 +22,7 @@ class AdminStates(StatesGroup):
     wait_resource_link = State()
     wait_keyword = State()
     wait_lead_reply = State()  # текст ответа лиду от имени Антона
+    wait_add_target_link = State()  # /add_target: ожидание ссылки, если не передана в команде
 
 
 def check_admin(user_id: int) -> bool:
@@ -336,9 +337,158 @@ async def cmd_scan_chats(message: Message):
             await message.answer_document(file, caption=f"📋 Всего чатов/диалогов: {len(chats)}")
         else:
             await message.answer(text, parse_mode="HTML")
+        # Кнопка импорта чатов с >500 участников в цели (pending)
+        from aiogram.utils.keyboard import InlineKeyboardBuilder
+        builder = InlineKeyboardBuilder()
+        builder.button(text="📥 Импортировать в pending (чаты >500 уч.)", callback_data="import_scan_pending")
+        await message.answer(
+            "Добавить чаты с числом участников >500 в очередь на утверждение?",
+            reply_markup=builder.as_markup(),
+        )
     except Exception as e:
         logger.exception("scan_chats")
         await message.answer(f"❌ Ошибка: {e}")
+
+
+# === КОЛБЭК: ИМПОРТ СКАНА В PENDING ===
+@router.callback_query(F.data == "import_scan_pending")
+async def cb_import_scan_pending(callback: CallbackQuery):
+    """Импорт последнего результата scan_chats (участников >500) в target_resources со статусом pending."""
+    if not check_admin(callback.from_user.id):
+        await callback.answer("⛔ Нет доступа")
+        return
+    chats = getattr(scout_parser, "last_scan_chats_list", None) or []
+    if not chats:
+        await callback.answer("Нет данных последнего скана. Сначала выполните /scan_chats.")
+        return
+    try:
+        await db.connect()
+        n = await db.import_scan_to_target_resources(chats, min_participants=500)
+        await callback.message.answer(f"✅ Импортировано целей в pending: {n}. Проверьте /approve_targets.")
+    except Exception as e:
+        logger.exception("import_scan_pending")
+        await callback.message.answer(f"❌ Ошибка импорта: {e}")
+    await callback.answer()
+
+
+# === КОМАНДА /APPROVE_TARGETS ===
+@router.message(Command("approve_targets"))
+async def cmd_approve_targets(message: Message):
+    """Список ресурсов со статусом pending: Название | Участники, кнопки «В работу» / «В архив»."""
+    if not check_admin(message.from_user.id):
+        await message.answer("⛔ У вас нет доступа")
+        return
+    try:
+        await db.connect()
+        pending = await db.get_pending_targets()
+        if not pending:
+            await message.answer("📋 Нет ресурсов в очереди (pending). Добавьте через /add_target или импорт после /scan_chats.")
+            return
+        lines = ["📋 <b>Ресурсы на утверждение</b> (Название | Участников)\n"]
+        builder = InlineKeyboardBuilder()
+        for r in pending[:30]:
+            title = (r.get("title") or r.get("link") or "—")[:40].replace("<", "").replace(">", "")
+            pc = r.get("participants_count")
+            pc_str = str(pc) if pc is not None else "—"
+            lines.append(f"• {title} | {pc_str} уч.")
+            builder.row(
+                InlineKeyboardButton(text="✅ В работу", callback_data=f"approve_target:{r['id']}:active"),
+                InlineKeyboardButton(text="❌ В архив", callback_data=f"approve_target:{r['id']}:archived"),
+            )
+        builder.row(InlineKeyboardButton(text="◀️ Закрыть", callback_data="admin_menu"))
+        await message.answer("\n".join(lines), reply_markup=builder.as_markup(), parse_mode="HTML")
+    except Exception as e:
+        logger.exception("approve_targets")
+        await message.answer(f"❌ Ошибка: {e}")
+
+
+@router.callback_query(F.data.startswith("approve_target:"))
+async def cb_approve_target(callback: CallbackQuery):
+    """Установить статус ресурса: active или archived."""
+    if not check_admin(callback.from_user.id):
+        await callback.answer("⛔ Нет доступа")
+        return
+    parts = callback.data.split(":")
+    if len(parts) != 3:
+        await callback.answer("Неверный формат")
+        return
+    try:
+        rid = int(parts[1])
+        status = parts[2]  # active | archived
+        if status not in ("active", "archived"):
+            await callback.answer("Неверный статус")
+            return
+        await db.set_target_status(rid, status)
+        label = "в работу" if status == "active" else "в архив"
+        await callback.answer(f"✅ Ресурс #{rid} переведён {label}")
+        # Обновить сообщение: убрать эту строку или обновить список
+        await callback.message.edit_text(
+            callback.message.text + f"\n\n✅ #{rid} → {label}",
+            reply_markup=callback.message.reply_markup,
+        )
+    except Exception as e:
+        logger.exception("approve_target")
+        await callback.answer(f"Ошибка: {e}")
+
+
+# === КОМАНДА /ADD_TARGET [ссылка] ===
+@router.message(Command("add_target"))
+async def cmd_add_target(message: Message, state: FSMContext):
+    """Вручную добавить ЖК/чат по ссылке. Бот определит ID и сохранит в БД со статусом pending."""
+    if not check_admin(message.from_user.id):
+        await message.answer("⛔ У вас нет доступа")
+        return
+    text = (message.text or "").strip()
+    parts = text.split(maxsplit=1)
+    link = parts[1].strip() if len(parts) > 1 else None
+    if link and "t.me" in link:
+        await _do_add_target(message, link, state)
+        return
+    await state.set_state(AdminStates.wait_add_target_link)
+    await message.answer(
+        "📎 Отправьте ссылку на Telegram-чат/канал (t.me/...):",
+        reply_markup=get_back_to_admin(),
+    )
+
+
+@router.message(AdminStates.wait_add_target_link, F.text)
+async def msg_add_target_link(message: Message, state: FSMContext):
+    """Обработка ссылки для /add_target."""
+    link = (message.text or "").strip()
+    if "t.me" not in link:
+        await message.answer("❌ Нужна ссылка вида t.me/...", reply_markup=get_back_to_admin())
+        return
+    await _do_add_target(message, link, state)
+
+
+async def _do_add_target(message: Message, link: str, state: FSMContext):
+    """Разрешить ссылку через Telethon и сохранить в target_resources со статусом pending."""
+    await state.clear()
+    await message.answer("⏳ Проверяю ссылку...")
+    try:
+        info = await scout_parser.resolve_telegram_link(link)
+        if not info:
+            await message.answer("❌ Не удалось определить чат по ссылке. Проверьте ссылку и доступ Антона.", reply_markup=get_back_to_admin())
+            return
+        await db.connect()
+        rid = await db.add_target_resource(
+            "telegram",
+            info["link"],
+            title=info.get("title") or info["link"],
+            notes="Добавлено вручную (/add_target)",
+            status="pending",
+            participants_count=info.get("participants_count"),
+        )
+        pc = info.get("participants_count")
+        pc_str = f", участников: {pc}" if pc is not None else ""
+        await message.answer(
+            f"✅ Ресурс добавлен в очередь (pending). ID: {rid}{pc_str}\n"
+            f"Утвердите через /approve_targets.",
+            reply_markup=get_back_to_admin(),
+        )
+    except Exception as e:
+        logger.exception("add_target")
+        await message.answer(f"❌ Ошибка: {e}", reply_markup=get_back_to_admin())
 
 
 # === КОМАНДА /SPY_REPORT ===

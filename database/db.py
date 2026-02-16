@@ -215,6 +215,35 @@ class Database:
                 await self.conn.commit()
             except Exception:
                 pass
+            # Data-Driven Scout: status (pending/active/archived), platform, geo_tag, participants_count
+            try:
+                await cursor.execute("ALTER TABLE target_resources ADD COLUMN status TEXT DEFAULT 'pending'")
+                await self.conn.commit()
+            except Exception:
+                pass
+            try:
+                await cursor.execute("ALTER TABLE target_resources ADD COLUMN platform TEXT NULL")
+                await self.conn.commit()
+            except Exception:
+                pass
+            try:
+                await cursor.execute("ALTER TABLE target_resources ADD COLUMN geo_tag TEXT NULL")
+                await self.conn.commit()
+            except Exception:
+                pass
+            try:
+                await cursor.execute("ALTER TABLE target_resources ADD COLUMN participants_count INTEGER NULL")
+                await self.conn.commit()
+            except Exception:
+                pass
+            # Привести старые записи: status='active' где is_active=1
+            try:
+                await cursor.execute("UPDATE target_resources SET status = 'active' WHERE is_active = 1 AND (status IS NULL OR status = '')")
+                await cursor.execute("UPDATE target_resources SET status = 'archived' WHERE (is_active = 0 OR is_active IS NULL) AND (status IS NULL OR status = '')")
+                await cursor.execute("UPDATE target_resources SET platform = type WHERE platform IS NULL OR platform = ''")
+                await self.conn.commit()
+            except Exception:
+                pass
 
     async def get_or_create_user(self, user_id: int, username: Optional[str] = None,
                                 first_name: Optional[str] = None, last_name: Optional[str] = None) -> Dict:
@@ -636,20 +665,45 @@ class Database:
             await self.conn.commit()
 
 
-    # === ЦЕЛЕВЫЕ РЕСУРСЫ (TG чаты + VK группы) ===
+    # === ЦЕЛЕВЫЕ РЕСУРСЫ (Data-Driven Scout) ===
     async def add_target_resource(
         self,
         resource_type: str,
         link: str,
         title: str = None,
         notes: str = None,
+        status: str = "pending",
+        participants_count: int = None,
+        geo_tag: str = None,
     ) -> int:
-        """Добавить ресурс для мониторинга. notes: например «Обнаружен автоматически»."""
+        """Добавить ресурс. status: pending|active|archived. При дубликате link — обновить participants_count и notes."""
+        link = (link or "").strip().rstrip("/")
+        title = title or link
+        platform = resource_type  # telegram | vk
         async with self.conn.cursor() as cursor:
             await cursor.execute(
-                "INSERT INTO target_resources (type, link, title, notes) VALUES (?, ?, ?, ?)",
-                (resource_type, link, title or link, notes),
+                """SELECT id FROM target_resources WHERE REPLACE(REPLACE(link, 'https://', ''), 'http://', '') = REPLACE(REPLACE(?, 'https://', ''), 'http://', '') OR link = ? OR link = ?""",
+                (link, link, link + "/"),
             )
+            row = await cursor.fetchone()
+            if row:
+                rid = row[0]
+                await cursor.execute(
+                    "UPDATE target_resources SET title = ?, notes = COALESCE(?, notes), participants_count = COALESCE(?, participants_count), platform = ?, updated_at = ? WHERE id = ?",
+                    (title, notes, participants_count, platform, datetime.now(), rid),
+                )
+                await self.conn.commit()
+                return rid
+            try:
+                await cursor.execute(
+                    """INSERT INTO target_resources (type, link, title, notes, status, participants_count, geo_tag, platform) VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+                    (resource_type, link, title, notes, status, participants_count, geo_tag, platform),
+                )
+            except Exception:
+                await cursor.execute(
+                    "INSERT INTO target_resources (type, link, title, notes) VALUES (?, ?, ?, ?)",
+                    (resource_type, link, title, notes),
+                )
             await self.conn.commit()
             return cursor.lastrowid
 
@@ -657,13 +711,77 @@ class Database:
         """Проверить, есть ли ресурс с такой ссылкой (для режима «Разведка» и ловли ссылок)."""
         if not link or not link.strip():
             return None
+        link_clean = link.strip().rstrip("/")
         async with self.conn.cursor() as cursor:
             await cursor.execute(
                 "SELECT * FROM target_resources WHERE link = ? OR link = ?",
-                (link.strip(), link.strip().rstrip("/")),
+                (link_clean, link_clean + "/"),
             )
             row = await cursor.fetchone()
             return dict(row) if row else None
+
+    async def get_active_targets_for_scout(self) -> List[Dict]:
+        """Список целей для парсера/хантера: active + telegram. Поля: link, title, geo_tag, id."""
+        async with self.conn.cursor() as cursor:
+            await cursor.execute(
+                """SELECT id, link, title, COALESCE(geo_tag, '') AS geo_tag FROM target_resources
+                   WHERE (status = 'active' OR (is_active = 1 AND (status IS NULL OR status = '')))
+                     AND (platform = 'telegram' OR type = 'telegram')"""
+            )
+            return [dict(row) for row in await cursor.fetchall()]
+
+    async def get_pending_targets(self) -> List[Dict]:
+        """Список ресурсов со статусом pending для /approve_targets. Поля: id, title, link, participants_count."""
+        async with self.conn.cursor() as cursor:
+            await cursor.execute(
+                """SELECT id, link, title, participants_count FROM target_resources
+                   WHERE status = 'pending'
+                   ORDER BY COALESCE(participants_count, 0) DESC, id"""
+            )
+            return [dict(row) for row in await cursor.fetchall()]
+
+    async def set_target_status(self, resource_id: int, status: str):
+        """Установить статус: active | archived | pending. Синхронизирует is_active с status."""
+        is_active = 1 if status == "active" else 0
+        async with self.conn.cursor() as cursor:
+            await cursor.execute(
+                "UPDATE target_resources SET status = ?, is_active = ?, updated_at = ? WHERE id = ?",
+                (status, is_active, datetime.now(), resource_id),
+            )
+            await self.conn.commit()
+
+    async def import_scan_to_target_resources(
+        self, chats: List[Dict], min_participants: int = 500
+    ) -> int:
+        """
+        Импорт результата scan_all_chats: чаты с participants_count > min_participants
+        добавляются в target_resources со статусом pending (без дубликатов по link).
+        Возвращает количество добавленных/обновлённых записей.
+        """
+        count = 0
+        for ch in chats:
+            link = (ch.get("link") or "").strip().rstrip("/")
+            if not link:
+                continue
+            participants = ch.get("participants_count")
+            if participants is not None and participants < min_participants:
+                continue
+            title = ch.get("title") or link
+            existing = await self.get_target_resource_by_link(link)
+            if existing:
+                if participants is not None and existing.get("participants_count") != participants:
+                    async with self.conn.cursor() as cursor:
+                        await cursor.execute(
+                            "UPDATE target_resources SET participants_count = ?, updated_at = ? WHERE id = ?",
+                            (participants, datetime.now(), existing["id"]),
+                        )
+                        await self.conn.commit()
+                continue
+            await self.add_target_resource(
+                "telegram", link, title=title, notes="Импорт из /scan_chats", status="pending", participants_count=participants
+            )
+            count += 1
+        return count
 
     async def get_target_resources(self, resource_type: str = None, active_only: bool = True) -> List[Dict]:
         """Получить список ресурсов"""

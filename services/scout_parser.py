@@ -36,6 +36,7 @@ class ScoutPost:
     published_at: Optional[datetime] = None
     likes: int = 0
     comments: int = 0
+    source_link: Optional[str] = None  # ссылка на чат (для geo_tag из target_resources)
 
 
 class ScoutParser:
@@ -191,6 +192,7 @@ class ScoutParser:
         # Отчёт последнего скана: где был шпион, куда удалось попасть
         self.last_scan_report = []  # list of {"type", "name", "id", "status": "ok"|"error", "posts": N, "error": str|None}
         self.last_scan_at: Optional[datetime] = None
+        self.last_scan_chats_list: List[Dict] = []  # результат scan_all_chats() для импорта в target_resources
 
         logger.info(f"🔍 ScoutParser инициализирован. Включен: {'✅' if self.enabled else '❌'}. TG каналов: {len(self.tg_channels)}, VK групп: {len(self.vk_groups)}")
 
@@ -383,8 +385,9 @@ class ScoutParser:
     async def parse_telegram(self, db=None) -> List[ScoutPost]:
         """
         Парсинг Telegram. Если передан db:
-        - Режим «Разведка»: чаты, в которых увидели сообщения и которых нет в target_resources, добавляются с пометкой «Обнаружен автоматически».
-        - Ловля ссылок: из текста сообщений извлекаются t.me/joinchat... и t.me/name, простукиваются и при успехе добавляются в target_resources.
+        - Список чатов берётся из БД: get_active_targets_for_scout() (status='active', platform='telegram').
+        - Режим «Разведка»: чаты, в которых увидели сообщения и которых нет в target_resources, добавляются со статусом pending.
+        - Ловля ссылок: из текста извлекаются t.me/..., простукиваются и при успехе добавляются в target_resources со статусом pending и participants_count.
         """
         from telethon import TelegramClient
         from telethon.tl.types import Channel, Chat
@@ -403,13 +406,43 @@ class ScoutParser:
         if db:
             try:
                 resources = await db.get_target_resources(resource_type="telegram", active_only=False)
-                existing_links = {r.get("link", "").rstrip("/") for r in resources if r.get("link")}
+                existing_links = {(r.get("link") or "").strip().rstrip("/") for r in resources if r.get("link")}
             except Exception as e:
                 logger.warning("Не удалось загрузить target_resources для разведки: %s", e)
 
-        for channel in self.tg_channels:
-            cid = channel.get("id") or ""
-            if not str(cid).strip():
+        # Список чатов: из БД (data-driven) или из конфига
+        channels_to_scan = []
+        if db:
+            try:
+                targets = await db.get_active_targets_for_scout()
+                for t in targets:
+                    link = (t.get("link") or "").strip().rstrip("/")
+                    if not link:
+                        continue
+                    try:
+                        entity = await client.get_entity(link)
+                        cid = getattr(entity, "id", None)
+                        if cid is None:
+                            continue
+                        channels_to_scan.append({
+                            "id": cid,
+                            "name": t.get("title") or link,
+                            "geo": t.get("geo_tag") or "",
+                            "link": link,
+                        })
+                    except Exception as e:
+                        logger.warning("Не удалось разрешить чат %s: %s", link, e)
+            except Exception as e:
+                logger.warning("Не удалось загрузить активные цели из БД: %s", e)
+        if not channels_to_scan:
+            channels_to_scan = [
+                {"id": ch.get("id"), "name": ch.get("name"), "geo": ch.get("geo", ""), "link": ""}
+                for ch in self.tg_channels if str(ch.get("id") or "").strip()
+            ]
+
+        for channel in channels_to_scan:
+            cid = channel.get("id")
+            if cid is None:
                 continue
             count = 0
             scanned = 0
@@ -433,7 +466,18 @@ class ScoutParser:
                                     else:
                                         link_to_store = url_norm
                                     if link_to_store.rstrip("/") not in existing_links:
-                                        await db.add_target_resource("telegram", link_to_store, title=title, notes="Обнаружен автоматически (ссылка в чате)")
+                                        participants = getattr(entity, "participants_count", None)
+                                        if participants is None:
+                                            try:
+                                                full = await client.get_entity(entity)
+                                                participants = getattr(full, "participants_count", None)
+                                            except Exception:
+                                                pass
+                                        await db.add_target_resource(
+                                            "telegram", link_to_store, title=title,
+                                            notes="Обнаружен автоматически (ссылка в чате)",
+                                            status="pending", participants_count=participants,
+                                        )
                                         existing_links.add(link_to_store.rstrip("/"))
                                         logger.info("🔗 Добавлен ресурс по ссылке из сообщения: %s", link_to_store)
                             except Exception as e:
@@ -455,6 +499,7 @@ class ScoutParser:
                             author_id=author_id,
                             author_name=author_name,
                             url=self._tg_post_url(cid, message.id),
+                            source_link=channel.get("link") or "",
                         )
                         posts.append(post)
                         count += 1
@@ -467,13 +512,22 @@ class ScoutParser:
                     "scanned": scanned,
                     "error": None,
                 })
-                # Режим «Разведка»: чат, в котором увидели сообщения и которого нет в базе — добавляем
+                # Режим «Разведка»: чат, в котором увидели сообщения и которого нет в базе — добавляем со статусом pending
                 if db and cid:
-                    link = self._channel_id_to_link(cid)
+                    link = channel.get("link") or self._channel_id_to_link(cid)
                     link_norm = link.rstrip("/")
                     if link_norm not in existing_links:
                         try:
-                            await db.add_target_resource("telegram", link, title=channel.get("name") or str(cid), notes="Обнаружен автоматически")
+                            participants = None
+                            try:
+                                ent = await client.get_entity(cid)
+                                participants = getattr(ent, "participants_count", None)
+                            except Exception:
+                                pass
+                            await db.add_target_resource(
+                                "telegram", link, title=channel.get("name") or str(cid),
+                                notes="Обнаружен автоматически", status="pending", participants_count=participants,
+                            )
                             existing_links.add(link_norm)
                             logger.info("🏢 Режим Разведка: добавлен чат %s", link)
                         except Exception as e:
@@ -510,7 +564,7 @@ class ScoutParser:
 
         result = []
         try:
-            async for dialog in client.iter_dialogs():
+            async for dialog in client.iter_dialogs(limit=500):
                 e = dialog.entity
                 chat_id = getattr(e, "id", None)
                 if chat_id is None:
@@ -534,7 +588,44 @@ class ScoutParser:
                 })
         finally:
             await client.disconnect()
+        self.last_scan_chats_list = result
         return result
+
+    async def resolve_telegram_link(self, link: str) -> Optional[Dict]:
+        """
+        По ссылке t.me/... получить сущность, название и кол-во участников.
+        Для /add_target: сохранить в БД со статусом pending.
+        """
+        from telethon import TelegramClient
+        from telethon.tl.types import Channel, Chat
+        from config import API_ID, API_HASH
+
+        link = (link or "").strip().rstrip("/")
+        if "t.me" not in link:
+            return None
+        client = TelegramClient('anton_parser', API_ID, API_HASH)
+        await client.connect()
+        if not await client.is_user_authorized():
+            await client.disconnect()
+            return None
+        try:
+            entity = await client.get_entity(link)
+            cid = getattr(entity, "id", None)
+            title = getattr(entity, "title", None) or getattr(entity, "username", None) or (str(cid) if cid else link)
+            participants = getattr(entity, "participants_count", None)
+            if participants is None and isinstance(entity, (Channel, Chat)):
+                try:
+                    full = await client.get_entity(entity)
+                    participants = getattr(full, "participants_count", None)
+                except Exception:
+                    pass
+            stored_link = self._channel_id_to_link(cid) if cid else link
+            return {"id": cid, "title": title, "link": stored_link, "participants_count": participants}
+        except Exception as e:
+            logger.warning("resolve_telegram_link %s: %s", link, e)
+            return None
+        finally:
+            await client.disconnect()
 
     async def _send_telegram_comment(self, channel_id: str, message_id: int, text: str):
         """Отправка комментария в Telegram канал"""

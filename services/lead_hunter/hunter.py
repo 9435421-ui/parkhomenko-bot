@@ -238,7 +238,22 @@ class LeadHunter:
                     source_name = getattr(post, "source_name", "") if post else "—"
                     source_type = getattr(post, "source_type", "telegram") if post else "telegram"
                     post_text = getattr(post, "text", "") if post else ""
-                    card_header = self.parser.extract_geo_header(post_text, source_name) if post else source_name
+                    # Заголовок карточки: geo_tag из target_resources (если чат из БД), иначе разбор по тексту
+                    card_header = source_name
+                    if post:
+                        source_link = getattr(post, "source_link", None)
+                        if source_link:
+                            try:
+                                from database import db as main_db
+                                res = await main_db.get_target_resource_by_link(source_link)
+                                if res and res.get("geo_tag"):
+                                    card_header = res["geo_tag"]
+                                else:
+                                    card_header = self.parser.extract_geo_header(post_text, source_name)
+                            except Exception:
+                                card_header = self.parser.extract_geo_header(post_text, source_name)
+                        else:
+                            card_header = self.parser.extract_geo_header(post_text, source_name)
                     # Лидогенерация: если нет username — вытягиваем ID для прямой ссылки tg://user?id=...
                     profile_url = ""
                     if author_id is not None and source_type == "vk":
