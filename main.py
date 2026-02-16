@@ -37,8 +37,6 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(level
 logger = logging.getLogger(__name__)
 
 LOCK_FILE = Path(__file__).resolve().parent / "bot.lock"
-CONFLICT_RETRY_DELAY = 5
-CONFLICT_RETRY_COUNT = 3
 
 
 def _acquire_lock() -> None:
@@ -72,12 +70,6 @@ def _release_lock() -> None:
             logger.info("Lock bot.lock снят")
     except OSError as e:
         logger.warning("Не удалось удалить bot.lock: %s", e)
-
-
-def _is_conflict_error(exc: BaseException) -> bool:
-    """Проверка: конфликт getUpdates (409 или текст 'conflict')."""
-    msg = (getattr(exc, "message", None) or str(exc)).lower()
-    return "409" in str(exc) or "conflict" in msg
 
 
 async def main():
@@ -259,55 +251,19 @@ async def main():
                 logger.warning("Ошибка закрытия сессии %s: %s", name, e)
         _release_lock()
 
-    async def ensure_webhook_cleared(bot_instance: Bot) -> None:
-        """Удалить webhook (drop_pending_updates). НЕ ЗАКРЫВАТЬ сессию здесь — только при полном выключении бота."""
-        await bot_instance.delete_webhook(drop_pending_updates=True)
-
-    _polling_task = None
-
-    def _on_shutdown():
-        if _polling_task and not _polling_task.done():
-            _polling_task.cancel()
-        logger.info("Получен сигнал завершения (SIGTERM/SIGINT)")
+    logger.info("🚀 Очистка webhook и запуск polling...")
+    await main_bot.delete_webhook(drop_pending_updates=True)
+    await content_bot.delete_webhook(drop_pending_updates=True)
 
     try:
-        for sig in (signal.SIGTERM, signal.SIGINT):
-            try:
-                asyncio.get_running_loop().add_signal_handler(sig, _on_shutdown)
-            except (NotImplementedError, OSError):
-                pass  # Windows или недоступные сигналы
-    except Exception:
-        pass
-
-    # Один start_polling на каждый токен (main_bot и content_bot). Хендлеры не создают Bot() —
-    # получают экземпляр из события (message.bot, callback.bot). Сервисы используют get_main_bot() из utils.bot_config.
-    async def start_bots():
         await asyncio.gather(
             dp_main.start_polling(main_bot, skip_updates=True),
             dp_content.start_polling(content_bot, skip_updates=True),
         )
-
-    for attempt in range(CONFLICT_RETRY_COUNT):
-        try:
-            logger.info("🚀 Очистка webhook и запуск polling (попытка %s/%s)...", attempt + 1, CONFLICT_RETRY_COUNT)
-            await ensure_webhook_cleared(main_bot)
-            await ensure_webhook_cleared(content_bot)
-            _polling_task = asyncio.create_task(start_bots())
-            await _polling_task
-            break
-        except asyncio.CancelledError:
-            logger.info("Polling отменён (корректное завершение)")
-            break
-        except Exception as e:
-            if _is_conflict_error(e) and attempt < CONFLICT_RETRY_COUNT - 1:
-                logger.warning("Конфликт getUpdates (409): ждём %s с и повторяем... Ошибка: %s", CONFLICT_RETRY_DELAY, e)
-                await asyncio.sleep(CONFLICT_RETRY_DELAY)
-            else:
-                logger.exception("Ошибка polling: %s", e)
-                await close_bot_sessions()
-                raise
-
-    await close_bot_sessions()
+    except asyncio.CancelledError:
+        logger.info("Polling остановлен")
+    finally:
+        await close_bot_sessions()
 
 
 if __name__ == "__main__":
