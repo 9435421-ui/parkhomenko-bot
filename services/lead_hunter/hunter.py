@@ -288,7 +288,7 @@ class LeadHunter:
 
         from database import db as main_db
         tg_posts = await self.parser.parse_telegram(db=main_db)
-        vk_posts = await self.parser.parse_vk(db=main_db)
+        vk_posts = await self.parser.parse_vk()
         all_posts = tg_posts + vk_posts
 
         tg_ok = [r for r in (self.parser.last_scan_report or []) if r.get("type") == "telegram" and r.get("status") == "ok"]
