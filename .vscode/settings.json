@@ -1,4 +1,4 @@
-﻿{
+{
     "python.defaultInterpreterPath": "./venv/Scripts/python.exe",
     "python.analysis.typeCheckingMode": "basic",
     "editor.formatOnSave": true,
@@ -10,5 +10,6 @@
         "**/*.pyc": true,
         "**/.git": true,
         "**/venv": true
-    }
+    },
+    "cursorpyright.analysis.typeCheckingMode": "basic"
 }
