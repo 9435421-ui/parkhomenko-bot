@@ -110,33 +110,56 @@ class LeadHunter:
         """Анализ намерения через Yandex GPT агент — возвращает структуру:
         {is_lead: bool, intent: str, hotness: int(1-5), context_summary: str, recommendation: str, pain_level: int}
         """
-        from utils.yandex_gpt import generate
+        import os
         if not text or not (text or "").strip():
             return {"is_lead": False, "intent": "", "hotness": 0, "context_summary": "", "recommendation": "", "pain_level": 0}
 
+        use_agent = os.getenv("USE_YANDEX_AGENT", "true").lower() == "true"
+        # Allow explicit folder env var name from .env: YANDEX_FOLDER_ID
+        if os.getenv("YANDEX_FOLDER_ID"):
+            os.environ.setdefault("FOLDER_ID", os.getenv("YANDEX_FOLDER_ID"))
+        # Ensure API key env is present for client (utils/yandex_gpt reads env on import)
+        if os.getenv("YANDEX_API_KEY"):
+            os.environ.setdefault("YANDEX_API_KEY", os.getenv("YANDEX_API_KEY"))
+
         system_prompt = (
-            "Ты — технический руководитель TERION. Анализируй сообщения из чатов ЖК Москвы. "
-            "Игнорируй рекламу услуг. Выделяй только живых клиентов, которые спрашивают про: "
-            "перепланировку, снос стен, объединение санузла, мокрые зоны и БТИ. "
+            "Ты — ведущий эксперт компании TERION. Твоя цель — найти клиентов, которым нужно согласование перепланировки или проект БТИ в Москве. "
+            "Игнорируй предложения услуг от конкурентов. Выделяй только тех, кто описывает свою проблему или ищет специалиста. "
             "Отвечай ТОЛЬКО JSON-объектом с полями: is_lead (true/false), intent (короткая строка), "
             "hotness (число 1-5), context_summary (краткое резюме 1-3 предложения), recommendation (короткая рекомендация), pain_level (1-5)."
         )
-        user_prompt = f"Проанализируй сообщение:\n\n\"{text}\"\n\nВерни JSON."
+        user_prompt = f"Проанализируй сообщение и верни JSON:\n\n\"{text}\""
+
+        if not use_agent:
+            # Fallback: простая эвристика / mock
+            import re
+            text_l = (text or "").lower()
+            if any(k in text_l for k in ["перепланиров", "снос", "объединен", "мокр", "бти", "узакон"]):
+                return {"is_lead": True, "intent": "Запрос по перепланировке/БТИ", "hotness": 3, "context_summary": text[:200], "recommendation": "", "pain_level": 3}
+            return {"is_lead": False, "intent": "", "hotness": 0, "context_summary": "", "recommendation": "", "pain_level": 0}
+
+        # Use Yandex agent
         try:
-            resp = await generate(system_prompt=system_prompt, user_message=user_prompt, max_tokens=300)
-            # Попытаемся извлечь JSON из ответа
+            from utils.yandex_gpt import generate
+            resp = await generate(system_prompt=system_prompt, user_message=user_prompt, max_tokens=400)
             import json, re
-            m = re.search(r'\\{[\\s\\S]*\\}', resp)
+            m = re.search(r'\{[\s\S]*\}', resp or "")
             if not m:
+                logger.debug("Yandex returned no JSON: %s", resp)
                 return {"is_lead": False, "intent": "", "hotness": 0, "context_summary": "", "recommendation": "", "pain_level": 0}
             out = json.loads(m.group(0))
-            # Нормализуем поля
             out.setdefault("is_lead", bool(out.get("is_lead")))
-            out.setdefault("intent", out.get("intent", ""))
-            out.setdefault("hotness", int(out.get("hotness", 0)) if out.get("hotness") is not None else 0)
+            out.setdefault("intent", out.get("intent", "") or "")
+            try:
+                out["hotness"] = int(out.get("hotness", 0))
+            except Exception:
+                out["hotness"] = 0
             out.setdefault("context_summary", out.get("context_summary", "") or "")
             out.setdefault("recommendation", out.get("recommendation", "") or "")
-            out.setdefault("pain_level", int(out.get("pain_level", min(out.get("hotness", 0), 5)) if out.get("pain_level") is not None else min(out.get("hotness", 0), 5)))
+            try:
+                out["pain_level"] = int(out.get("pain_level", min(out.get("hotness", 0), 5)))
+            except Exception:
+                out["pain_level"] = min(out.get("hotness", 0), 5)
             return out
         except Exception as e:
             logger.exception("Ошибка Yandex intent анализатора: %s", e)
@@ -326,6 +349,25 @@ class LeadHunter:
         tg_posts = await self.parser.parse_telegram(db=main_db)
         vk_posts = await self.parser.parse_vk()
         all_posts = tg_posts + vk_posts
+
+        # Сброс старого кеша: игнорируем первые N сообщений (старые)
+        try:
+            skip_count = int(os.getenv("SPY_SKIP_OLD_MESSAGES", "78"))
+        except Exception:
+            skip_count = 78
+        if len(all_posts) > skip_count:
+            remaining = all_posts[skip_count:]
+        else:
+            remaining = []
+
+        # Переключиться на приоритетные чаты (ЖК Династия, Зиларт) — перемещаем их в начало
+        preferred_names = [n.lower() for n in os.getenv("SPY_PREFERRED_CHATS", "Династия,Зиларт").split(",") if n.strip()]
+        def is_preferred(p):
+            name = (getattr(p, "source_name", "") or "").lower()
+            return any(pref in name for pref in preferred_names)
+        preferred = [p for p in remaining if is_preferred(p)]
+        others = [p for p in remaining if not is_preferred(p)]
+        all_posts = preferred + others
 
         tg_ok = [r for r in (self.parser.last_scan_report or []) if r.get("type") == "telegram" and r.get("status") == "ok"]
         vk_ok = [r for r in (self.parser.last_scan_report or []) if r.get("type") == "vk" and r.get("status") == "ok"]
