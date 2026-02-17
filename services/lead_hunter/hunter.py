@@ -106,6 +106,42 @@ class LeadHunter:
         ]
         return "\n".join(lines)
 
+    async def _analyze_intent(self, text: str) -> dict:
+        """Анализ намерения через Yandex GPT агент — возвращает структуру:
+        {is_lead: bool, intent: str, hotness: int(1-5), context_summary: str, recommendation: str, pain_level: int}
+        """
+        from utils.yandex_gpt import generate
+        if not text or not (text or "").strip():
+            return {"is_lead": False, "intent": "", "hotness": 0, "context_summary": "", "recommendation": "", "pain_level": 0}
+
+        system_prompt = (
+            "Ты — технический руководитель TERION. Анализируй сообщения из чатов ЖК Москвы. "
+            "Игнорируй рекламу услуг. Выделяй только живых клиентов, которые спрашивают про: "
+            "перепланировку, снос стен, объединение санузла, мокрые зоны и БТИ. "
+            "Отвечай ТОЛЬКО JSON-объектом с полями: is_lead (true/false), intent (короткая строка), "
+            "hotness (число 1-5), context_summary (краткое резюме 1-3 предложения), recommendation (короткая рекомендация), pain_level (1-5)."
+        )
+        user_prompt = f"Проанализируй сообщение:\n\n\"{text}\"\n\nВерни JSON."
+        try:
+            resp = await generate(system_prompt=system_prompt, user_message=user_prompt, max_tokens=300)
+            # Попытаемся извлечь JSON из ответа
+            import json, re
+            m = re.search(r'\\{[\\s\\S]*\\}', resp)
+            if not m:
+                return {"is_lead": False, "intent": "", "hotness": 0, "context_summary": "", "recommendation": "", "pain_level": 0}
+            out = json.loads(m.group(0))
+            # Нормализуем поля
+            out.setdefault("is_lead", bool(out.get("is_lead")))
+            out.setdefault("intent", out.get("intent", ""))
+            out.setdefault("hotness", int(out.get("hotness", 0)) if out.get("hotness") is not None else 0)
+            out.setdefault("context_summary", out.get("context_summary", "") or "")
+            out.setdefault("recommendation", out.get("recommendation", "") or "")
+            out.setdefault("pain_level", int(out.get("pain_level", min(out.get("hotness", 0), 5)) if out.get("pain_level") is not None else min(out.get("hotness", 0), 5)))
+            return out
+        except Exception as e:
+            logger.exception("Ошибка Yandex intent анализатора: %s", e)
+            return {"is_lead": False, "intent": "", "hotness": 0, "context_summary": "", "recommendation": "", "pain_level": 0}
+
     async def _send_lead_card_to_group(
         self,
         lead: dict,
@@ -298,8 +334,65 @@ class LeadHunter:
             len(tg_ok), len(vk_ok), len(all_posts)
         )
 
+        from hunter_standalone.database import HunterDatabase as LocalHunterDatabase
         for post in all_posts:
+            # Быстрая оценка через LeadAnalyzer (существующая ранняя логика)
             score = await self.analyzer.analyze_post(post.text)
+            # Глубокий анализ намерения через Yandex GPT агент (новая логика)
+            try:
+                analysis = await self._analyze_intent(post.text)
+            except Exception as e:
+                logger.debug("🔎 Анализ намерения не удался: %s", e)
+                analysis = {"is_lead": False, "intent": "", "hotness": 0, "context_summary": ""}
+
+            # Если модель пометила как лид — сохраняем в локальную HunterDatabase, чтобы избежать дублей
+            if analysis.get("is_lead"):
+                try:
+                    db_path = os.path.abspath(POTENTIAL_LEADS_DB)
+                    hd = LocalHunterDatabase(db_path)
+                    await hd.connect()
+                    lead_data = {
+                        "url": getattr(post, "url", "") or f"{getattr(post, 'source_type', '')}/{getattr(post, 'source_id', '')}/{getattr(post, 'post_id', '')}",
+                        "content": (getattr(post, "text", "") or "")[:2000],
+                        "intent": analysis.get("intent", "") or "",
+                        "hotness": analysis.get("hotness", 3),
+                        "geo": analysis.get("geo", "Не указано"),
+                        "context_summary": analysis.get("context_summary", "") or "",
+                    }
+                    saved = await hd.save_lead(lead_data)
+                    try:
+                        if hd.conn:
+                            await hd.conn.close()
+                    except Exception:
+                        pass
+                except Exception as e:
+                    logger.debug("Ошибка сохранения в HunterDatabase: %s", e)
+                    saved = False
+                # Если новый лид (сохранён) — немедленно уведомляем Юлию (Anton -> Julia)
+                if saved:
+                    try:
+                        from config import JULIA_USER_ID, BOT_TOKEN
+                        bot = _bot_for_send()
+                        if bot is None:
+                            bot = Bot(token=BOT_TOKEN, default=DefaultBotProperties(parse_mode="HTML"))
+                        text = (
+                            f"🔥 Новый лид: {analysis.get('intent','—')}\n\n"
+                            f"📍 ЖК/Гео: {analysis.get('geo','—')}\n"
+                            f"📝 Суть: {analysis.get('context_summary','—')}\n"
+                            f"🔗 Ссылка: {lead_data.get('url','—')}"
+                        )
+                        try:
+                            await bot.send_message(int(JULIA_USER_ID), text, parse_mode="HTML")
+                        finally:
+                            if _bot_for_send() is None and getattr(bot, "session", None):
+                                try:
+                                    await bot.session.close()
+                                except Exception:
+                                    pass
+                    except Exception as e:
+                        logger.debug("Не удалось отправить уведомление Юлии: %s", e)
+
+            # Существующая логика исходящих сообщений (контент-бот / outreach)
             if score > 0.7:
                 logger.info(f"🎯 Найден горячий лид! Score: {score}")
                 message = self.parser.generate_outreach_message(post.source_type)
