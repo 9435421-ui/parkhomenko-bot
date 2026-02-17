@@ -605,6 +605,38 @@ async def cmd_hunt(message: Message):
         await message.answer(f"❌ Ошибка охоты: {e}")
 
 
+# === КОМАНДА /SPY_DISCOVER (ручная разведка / добавление новых целей) ===
+@router.message(Command("spy_discover"))
+async def cmd_spy_discover(message: Message):
+    """Запустить автоматическую разведку новых чатов/групп (использует services.lead_hunter.Discovery)."""
+    if not check_admin(message.from_user.id):
+        await message.answer("⛔ У вас нет доступа")
+        return
+    await message.answer("🔎 Запускаю разведку новых источников...")
+    try:
+        from services.lead_hunter import Discovery
+        disc = Discovery()
+        keywords = disc.get_keywords()
+        results = await disc.find_new_sources()
+        if not results:
+            await message.answer("📭 Ничего не найдено.")
+            return
+        await db.connect()
+        added = 0
+        for r in results:
+            link = (r.get("link") or "").strip()
+            if not link:
+                continue
+            title = r.get("title") or link
+            participants = r.get("participants_count")
+            # Сохраняем как active — админство может откорректировать статус позже
+            await db.add_target_resource("telegram", link, title=title, participants_count=participants, status="active")
+            added += 1
+        await message.answer(f"✅ Разведка завершена. Добавлено/обновлено ресурсов: {added}")
+    except Exception as e:
+        logger.exception("spy_discover")
+        await message.answer(f"❌ Ошибка разведки: {e}")
+
 # === КОМАНДА /ADMIN ===
 @router.message(Command("admin"))
 async def cmd_admin(message: Message, state: FSMContext):
