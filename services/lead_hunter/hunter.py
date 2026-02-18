@@ -357,15 +357,33 @@ class LeadHunter:
         vk_posts = await self.parser.parse_vk()
         all_posts = tg_posts + vk_posts
 
-        # Сброс старого кеша: игнорируем первые N сообщений (старые)
+        # Если лидов не найдено, пробуем найти новые источники через Discovery
+        if not all_posts:
+            logger.info("🔎 Лидов не найдено. Запуск Discovery для поиска новых источников...")
+            new_sources = await self.discovery.find_new_sources()
+            for source in new_sources:
+                try:
+                    await main_db.add_target_resource(
+                        resource_type="telegram",
+                        link=source["link"],
+                        title=source["title"],
+                        notes="Найден через LeadHunter Discovery",
+                        status="pending",
+                        participants_count=source.get("participants_count")
+                    )
+                except Exception as e:
+                    logger.debug(f"Ошибка добавления ресурса из Discovery: {e}")
+
+        # Сброс старого кеша: игнорируем первые N сообщений (старые) — по умолчанию 0
         try:
-            skip_count = int(os.getenv("SPY_SKIP_OLD_MESSAGES", "78"))
+            skip_count = int(os.getenv("SPY_SKIP_OLD_MESSAGES", "0"))
         except Exception:
-            skip_count = 78
-        if len(all_posts) > skip_count:
+            skip_count = 0
+
+        if skip_count > 0 and len(all_posts) > skip_count:
             remaining = all_posts[skip_count:]
         else:
-            remaining = []
+            remaining = all_posts
 
         # Переключиться на приоритетные чаты (ЖК Династия, Зиларт) — перемещаем их в начало
         preferred_names = [n.lower() for n in os.getenv("SPY_PREFERRED_CHATS", "Династия,Зиларт").split(",") if n.strip()]

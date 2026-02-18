@@ -765,12 +765,12 @@ class Database:
             return dict(row) if row else None
 
     async def get_active_targets_for_scout(self) -> List[Dict]:
-        """Список целей для парсера/хантера: active + telegram. Поля: link, title, geo_tag, id, is_high_priority, last_lead_at."""
+        """Список целей для парсера/хантера: active + telegram. Поля: link, title, geo_tag, id, is_high_priority, last_lead_at, last_post_id."""
         async with self.conn.cursor() as cursor:
             try:
                 await cursor.execute(
                     """SELECT id, link, title, COALESCE(geo_tag, '') AS geo_tag,
-                          COALESCE(is_high_priority, 0) AS is_high_priority, last_lead_at
+                          COALESCE(is_high_priority, 0) AS is_high_priority, last_lead_at, last_post_id
                        FROM target_resources
                        WHERE (status = 'active' OR (is_active = 1 AND (status IS NULL OR status = '')))
                          AND (platform = 'telegram' OR type = 'telegram')"""
@@ -778,7 +778,7 @@ class Database:
             except Exception:
                 await cursor.execute(
                     """SELECT id, link, title, COALESCE(geo_tag, '') AS geo_tag,
-                          COALESCE(is_high_priority, 0) AS is_high_priority
+                          COALESCE(is_high_priority, 0) AS is_high_priority, last_post_id
                        FROM target_resources
                        WHERE (status = 'active' OR (is_active = 1 AND (status IS NULL OR status = '')))
                          AND (platform = 'telegram' OR type = 'telegram')"""
