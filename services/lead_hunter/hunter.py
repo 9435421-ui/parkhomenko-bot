@@ -317,13 +317,16 @@ class LeadHunter:
             logger.warning("⚠️ BOT_TOKEN или LEADS_GROUP_CHAT_ID не заданы — карточка в группу не отправлена")
             return False
         text = self._format_lead_card(lead, profile_url, card_header, anton_recommendation)
-        buttons = []
+        url_buttons = []
         if profile_url and profile_url.startswith("http"):
-            buttons.append(InlineKeyboardButton(text="👤 Профиль", url=profile_url))
-        buttons.append(InlineKeyboardButton(text="🔗 Пост", url=post_url[:500]))
-        buttons.append(InlineKeyboardButton(text="🛠 Ответить экспертно", callback_data=f"lead_expert_reply_{lead_id}"))
-        buttons.append(InlineKeyboardButton(text="🛠 Взять в работу", callback_data=f"lead_take_work_{lead_id}"))
-        keyboard = InlineKeyboardMarkup(inline_keyboard=[buttons])
+            url_buttons.append(InlineKeyboardButton(text="👤 Профиль", url=profile_url))
+        url_buttons.append(InlineKeyboardButton(text="🔗 Пост", url=post_url[:500]))
+        action_buttons = [
+            InlineKeyboardButton(text="✍️ На эту тему пост", callback_data=f"lead_to_content:{lead_id}"),
+            InlineKeyboardButton(text="🛠 Ответить экспертно", callback_data=f"lead_expert_reply_{lead_id}"),
+            InlineKeyboardButton(text="✅ Взять в работу", callback_data=f"lead_take_work_{lead_id}"),
+        ]
+        keyboard = InlineKeyboardMarkup(inline_keyboard=[url_buttons, action_buttons])
         try:
             bot = _bot_for_send()
             if bot is None:

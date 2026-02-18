@@ -11,7 +11,10 @@ from aiogram.utils.keyboard import InlineKeyboardBuilder
 import logging
 
 from database import db
-from config import ADMIN_ID, JULIA_USER_ID, NOTIFICATIONS_CHANNEL_ID, THREAD_ID_LOGS
+from config import (
+    ADMIN_ID, JULIA_USER_ID, NOTIFICATIONS_CHANNEL_ID, THREAD_ID_LOGS,
+    LEADS_GROUP_CHAT_ID, THREAD_ID_DRAFTS,
+)
 from services.scout_parser import scout_parser
 
 logger = logging.getLogger(__name__)
@@ -21,8 +24,9 @@ router = Router()
 class AdminStates(StatesGroup):
     wait_resource_link = State()
     wait_keyword = State()
-    wait_lead_reply = State()  # текст ответа лиду от имени Антона
-    wait_add_target_link = State()  # /add_target: ожидание ссылки, если не передана в команде
+    wait_lead_reply = State()
+    wait_add_target_link = State()
+    wait_draft_edit_text = State()  # редактирование черновика из рабочей группы
 
 
 def check_admin(user_id: int) -> bool:
@@ -80,6 +84,332 @@ async def get_spy_panel_keyboard() -> InlineKeyboardMarkup:
     builder.button(text="◀️ В админ-меню", callback_data="admin_menu")
     builder.adjust(1, 1, 1, 1, 1)
     return builder.as_markup()
+
+
+# ============================================================
+# === ЧЕРНОВИКИ → РАБОЧАЯ ГРУППА (полный цикл публикации) ===
+# ============================================================
+
+_DRAFT_POST_SYSTEM = (
+    "Ты — контент-редактор компании TERION (перепланировки квартир в Москве).\n"
+    "Напиши экспертный пост для Telegram-канала по заданной теме.\n"
+    "Структура: яркий заголовок → суть → польза для читателя → лёгкий призыв к действию.\n"
+    "Объём: 150–200 слов. Тон: уверенный, живой, без канцелярита.\n"
+    "ЗАПРЕЩЕНО добавлять хештеги и ссылки — они добавятся автоматически при публикации."
+)
+
+
+def get_draft_card_keyboard(post_id: int) -> InlineKeyboardMarkup:
+    """Кнопки карточки новой темы в рабочей группе."""
+    builder = InlineKeyboardBuilder()
+    builder.button(text="✍️ Написать пост", callback_data=f"draft_gen:{post_id}")
+    builder.button(text="❌ Удалить тему", callback_data=f"draft_del:{post_id}")
+    builder.adjust(1)
+    return builder.as_markup()
+
+
+def get_draft_preview_keyboard(post_id: int) -> InlineKeyboardMarkup:
+    """Кнопки превью поста: публикация, редактура, удаление."""
+    builder = InlineKeyboardBuilder()
+    builder.button(text="✅ Опубликовать", callback_data=f"draft_pub:{post_id}")
+    builder.button(text="✏️ Редактировать", callback_data=f"draft_edit:{post_id}")
+    builder.button(text="❌ Удалить", callback_data=f"draft_del:{post_id}")
+    builder.adjust(2, 1)
+    return builder.as_markup()
+
+
+async def send_draft_to_group(bot, post_id: int, title: str, insight: str) -> None:
+    """Отправляет карточку новой темы в топик «Черновики» рабочей группы."""
+    text = (
+        f"📋 <b>Новая тема в контент-плане</b>\n\n"
+        f"<b>{title}</b>\n\n"
+        f"💡 {insight}\n\n"
+        f"<i>Нажмите «Написать пост», чтобы AI создал текст и обложку</i>"
+    )
+    try:
+        await bot.send_message(
+            LEADS_GROUP_CHAT_ID,
+            text,
+            message_thread_id=THREAD_ID_DRAFTS,
+            reply_markup=get_draft_card_keyboard(post_id),
+            parse_mode="HTML",
+        )
+    except Exception as e:
+        logger.warning("send_draft_to_group: %s", e)
+
+
+@router.callback_query(F.data.startswith("draft_gen:"))
+async def draft_gen_post_handler(callback: CallbackQuery):
+    """Генерация поста из темы черновика: AI текст + автообложка → превью в группе."""
+    if not check_admin(callback.from_user.id):
+        await callback.answer("⛔ Нет доступа")
+        return
+    try:
+        post_id = int(callback.data.split(":")[1])
+    except (ValueError, IndexError):
+        await callback.answer("❌ Неверный ID")
+        return
+
+    post = await db.get_content_post(post_id)
+    if not post:
+        await callback.answer("❌ Черновик не найден в базе")
+        return
+
+    await callback.answer("⏳ Генерирую...")
+    await callback.message.edit_text(
+        f"⏳ <b>Пишу пост...</b>\n\n<i>{(post.get('title') or '')[:120]}</i>",
+        parse_mode="HTML",
+    )
+
+    title = (post.get("title") or "").strip()
+    body = (post.get("body") or title).strip()
+
+    try:
+        from services.router_ai import RouterAIClient
+        router_ai = RouterAIClient()
+        post_text = await router_ai.generate(
+            f"Напиши экспертный пост для Telegram-канала TERION на тему:\n«{title}»\n\nКонтекст: {body[:400]}",
+            system_prompt=_DRAFT_POST_SYSTEM,
+        )
+    except Exception as e:
+        logger.error("draft_gen: router_ai error: %s", e)
+        post_text = None
+
+    if not post_text:
+        await callback.message.edit_text(
+            "❌ Не удалось сгенерировать текст. Попробуйте ещё раз.",
+            reply_markup=get_draft_card_keyboard(post_id),
+        )
+        return
+
+    await db.update_content_plan_entry(post_id, body=post_text)
+
+    # Генерация обложки
+    status_msg = await callback.message.answer("🎨 <b>Генерирую обложку...</b>", parse_mode="HTML")
+    image_file_id = None
+    try:
+        import base64
+        from aiogram.types import BufferedInputFile
+        from handlers.content import _build_cover_prompt, _auto_generate_image
+
+        img_prompt = _build_cover_prompt(post_text)
+        image_b64 = await _auto_generate_image(img_prompt)
+        await status_msg.delete()
+
+        if image_b64:
+            image_bytes = base64.b64decode(image_b64)
+            photo = BufferedInputFile(image_bytes, filename="draft_preview.jpg")
+            sent = await callback.message.answer_photo(
+                photo=photo,
+                caption=f"📝 <b>Превью поста</b>\n\n{post_text[:900]}",
+                parse_mode="HTML",
+                reply_markup=get_draft_preview_keyboard(post_id),
+            )
+            image_file_id = sent.photo[-1].file_id
+            await db.update_content_plan_entry(post_id, image_url=image_file_id)
+            await callback.message.delete()
+            return
+    except Exception as e:
+        logger.warning("draft_gen: image error: %s", e)
+        try:
+            await status_msg.delete()
+        except Exception:
+            pass
+
+    await callback.message.edit_text(
+        f"📝 <b>Превью поста</b>\n\n{post_text[:1200]}",
+        parse_mode="HTML",
+        reply_markup=get_draft_preview_keyboard(post_id),
+    )
+
+
+@router.callback_query(F.data.startswith("draft_pub:"))
+async def draft_pub_handler(callback: CallbackQuery):
+    """Публикация черновика во все каналы (TG + VK + MAX)."""
+    if not check_admin(callback.from_user.id):
+        await callback.answer("⛔ Нет доступа")
+        return
+    try:
+        post_id = int(callback.data.split(":")[1])
+    except (ValueError, IndexError):
+        await callback.answer("❌ Неверный ID")
+        return
+
+    post = await db.get_content_post(post_id)
+    if not post:
+        await callback.answer("❌ Черновик не найден")
+        return
+
+    await callback.answer("📤 Публикую...")
+
+    body = (post.get("body") or "").strip()
+    title = (post.get("title") or "").strip()
+    text = f"<b>{title}</b>\n\n{body}" if title and title not in body else body
+
+    # Добавляем квиз и хештеги
+    try:
+        from handlers.content import ensure_quiz_and_hashtags
+        text = ensure_quiz_and_hashtags(text)
+    except Exception:
+        from config import VK_QUIZ_LINK, CONTENT_HASHTAGS
+        if VK_QUIZ_LINK not in text:
+            text += f"\n\n📍 <a href='{VK_QUIZ_LINK}'>Пройти квиз</a>\n{CONTENT_HASHTAGS}"
+
+    # Загружаем изображение, если оно есть
+    image_bytes = None
+    image_url = post.get("image_url")
+    if image_url:
+        if not image_url.startswith("http"):
+            # Telegram file_id — скачиваем через бот
+            try:
+                file = await callback.bot.get_file(image_url)
+                file_path = file.file_path
+                file_url = f"https://api.telegram.org/file/bot{callback.bot.token}/{file_path}"
+                import aiohttp
+                async with aiohttp.ClientSession() as session:
+                    async with session.get(file_url) as resp:
+                        if resp.status == 200:
+                            image_bytes = await resp.read()
+            except Exception as e:
+                logger.warning("draft_pub: tg file download: %s", e)
+        else:
+            try:
+                import aiohttp
+                async with aiohttp.ClientSession() as session:
+                    async with session.get(image_url) as resp:
+                        if resp.status == 200:
+                            image_bytes = await resp.read()
+            except Exception as e:
+                logger.warning("draft_pub: url download: %s", e)
+
+    from services.publisher import publisher
+    results = await publisher.publish_all(text, image_bytes)
+    await db.mark_as_published(post_id)
+
+    success = sum(1 for r in results.values() if r)
+    channels_str = ", ".join(k for k, v in results.items() if v)
+    result_text = (
+        f"✅ <b>Опубликовано!</b>\n\n"
+        f"Каналы: {channels_str or '—'}\n"
+        f"Успешно: {success}/{len(results)}"
+    )
+    try:
+        if callback.message.photo:
+            await callback.message.edit_caption(result_text, parse_mode="HTML")
+        else:
+            await callback.message.edit_text(result_text, parse_mode="HTML")
+    except Exception:
+        await callback.message.answer(result_text, parse_mode="HTML")
+
+
+@router.callback_query(F.data.startswith("draft_edit:"))
+async def draft_edit_handler(callback: CallbackQuery, state: FSMContext):
+    """Запрашивает новый текст для черновика."""
+    if not check_admin(callback.from_user.id):
+        await callback.answer("⛔ Нет доступа")
+        return
+    try:
+        post_id = int(callback.data.split(":")[1])
+    except (ValueError, IndexError):
+        await callback.answer("❌ Неверный ID")
+        return
+
+    await state.set_state(AdminStates.wait_draft_edit_text)
+    await state.update_data(draft_edit_post_id=post_id)
+    await callback.answer()
+    await callback.message.answer(
+        f"✏️ <b>Редактирование поста #{post_id}</b>\n\n"
+        "Отправьте новый текст одним сообщением — он заменит текущий.\n"
+        "/cancel для отмены.",
+        parse_mode="HTML",
+    )
+
+
+@router.message(AdminStates.wait_draft_edit_text, F.text)
+async def draft_edit_text_handler(message: Message, state: FSMContext):
+    """Сохраняет отредактированный текст и показывает кнопки действий."""
+    if not check_admin(message.from_user.id):
+        return
+    if (message.text or "").strip().lower() == "/cancel":
+        await state.clear()
+        await message.answer("Отменено.")
+        return
+    data = await state.get_data()
+    post_id = data.get("draft_edit_post_id")
+    if not post_id:
+        await state.clear()
+        return
+    text = (message.text or "").strip()
+    if not text:
+        await message.answer("Текст не может быть пустым. Введите снова или /cancel.")
+        return
+    await db.update_content_plan_entry(post_id, body=text)
+    await state.clear()
+    await message.answer(
+        f"✅ <b>Текст обновлён (пост #{post_id})</b>",
+        parse_mode="HTML",
+        reply_markup=get_draft_preview_keyboard(post_id),
+    )
+
+
+@router.callback_query(F.data.startswith("draft_del:"))
+async def draft_del_handler(callback: CallbackQuery):
+    """Удаляет (отклоняет) черновик."""
+    if not check_admin(callback.from_user.id):
+        await callback.answer("⛔ Нет доступа")
+        return
+    try:
+        post_id = int(callback.data.split(":")[1])
+    except (ValueError, IndexError):
+        await callback.answer("❌ Неверный ID")
+        return
+    try:
+        await db.update_content_post(post_id, status="rejected")
+        await callback.answer("🗑 Черновик удалён")
+        deleted_text = "🗑 <i>Тема удалена из плана</i>"
+        if callback.message.photo:
+            await callback.message.edit_caption(deleted_text, parse_mode="HTML")
+        else:
+            await callback.message.edit_text(deleted_text, parse_mode="HTML")
+    except Exception as e:
+        await callback.answer(f"❌ {e}")
+
+
+@router.callback_query(F.data.startswith("lead_to_content:"))
+async def lead_to_content_handler(callback: CallbackQuery):
+    """Создаёт черновик контент-темы из карточки лида и уведомляет в THREAD_ID_DRAFTS."""
+    if not check_admin(callback.from_user.id):
+        await callback.answer("⛔ Нет доступа")
+        return
+    try:
+        lead_id = int(callback.data.split(":")[1])
+    except (ValueError, IndexError):
+        await callback.answer("❌ Неверный ID")
+        return
+
+    lead = await db.get_spy_lead(lead_id)
+    if not lead:
+        await callback.answer("❌ Лид не найден")
+        return
+
+    # Формируем тему из боли лида
+    pain = (lead.get("text") or "").strip()[:300]
+    intent = (lead.get("intent") or "").strip()
+    geo = (lead.get("geo") or "").strip()
+    title = f"Экспертный разбор: {intent or 'перепланировка'}"
+    if geo:
+        title += f" ({geo})"
+    body = f"Боль клиента: {pain}" if pain else title
+
+    post_id = await db.add_content_post(
+        title=title,
+        body=body,
+        cta="Записаться на консультацию",
+        channel="terion",
+        status="draft",
+    )
+    await callback.answer(f"📋 Тема сохранена в черновики #{post_id}")
+    await send_draft_to_group(callback.bot, post_id, title, intent or pain[:150])
 
 
 # === ПУЛЬТ УПРАВЛЕНИЯ ШПИОНОМ (инлайн) ===

@@ -15,7 +15,7 @@ from handlers.quiz import QuizStates
 
 class QueueStates(StatesGroup):
     editing = State()
-from config import ADMIN_ID, is_admin
+from config import ADMIN_ID, is_admin, LEADS_GROUP_CHAT_ID, THREAD_ID_DRAFTS
 from database import db
 from agents.creative_agent import creative_agent
 
@@ -213,7 +213,7 @@ async def create_post_from_topic_handler(callback: CallbackQuery, state: FSMCont
 
 @router.callback_query(F.data.startswith("to_draft_"))
 async def topic_to_draft_handler(callback: CallbackQuery, state: FSMContext):
-    """Сохранить тему в черновики (контент-план)."""
+    """Сохранить тему в черновики → карточка в рабочей группе (THREAD_ID_DRAFTS)."""
     topic_idx = int(callback.data.split("_")[-1]) - 1
     data = await state.get_data()
     topics = data.get("scout_topics", [])
@@ -222,8 +222,8 @@ async def topic_to_draft_handler(callback: CallbackQuery, state: FSMContext):
         return
     topic = topics[topic_idx]
     title = _normalize_display_title(topic.get("title", ""), max_len=200)
-    body = (topic.get("insight") or "").strip() or title
-    from datetime import datetime
+    insight = (topic.get("insight") or "").strip()
+    body = insight or title
     post_id = await db.add_content_post(
         title=title,
         body=body,
@@ -231,11 +231,25 @@ async def topic_to_draft_handler(callback: CallbackQuery, state: FSMContext):
         channel="terion",
         status="draft",
     )
-    await callback.answer(f"📋 В черновики (#{post_id})")
-    await callback.message.answer(
-        f"✅ Тема сохранена в черновики (пост #{post_id}). Откройте <b>📅 Очередь постов</b>, чтобы отредактировать или опубликовать.",
-        parse_mode="HTML"
-    )
+    await callback.answer(f"📋 Сохранено #{post_id}")
+
+    # Карточка в рабочую группу → Юлия действует прямо там
+    try:
+        from handlers.admin import send_draft_to_group
+        await send_draft_to_group(callback.bot, post_id, title, insight or title[:150])
+        await callback.message.answer(
+            f"✅ <b>Тема #{post_id} сохранена</b>\n\n"
+            f"Карточка отправлена в рабочую группу — нажмите там «✍️ Написать пост», "
+            f"и AI создаст текст с обложкой.",
+            parse_mode="HTML",
+        )
+    except Exception as e:
+        logger.warning("to_draft_handler: send_draft_to_group failed: %s", e)
+        await callback.message.answer(
+            f"✅ <b>Тема #{post_id} сохранена в черновики.</b>\n\n"
+            f"<i>Уведомление в группу не отправлено: {e}</i>",
+            parse_mode="HTML",
+        )
 
 @router.callback_query(F.data.startswith("gen_img_"))
 async def generate_image_handler(callback: CallbackQuery, state: FSMContext):
