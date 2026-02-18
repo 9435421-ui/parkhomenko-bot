@@ -23,7 +23,7 @@ def _bot_for_send():
     except Exception:
         return None
 
-POTENTIAL_LEADS_DB = os.path.join(os.path.dirname(__file__), "..", "..", "database", "potential_leads.db")
+POTENTIAL_LEADS_DB = "/root/PARKHOMENKO_BOT/database/potential_leads.db"
 
 
 class LeadHunter:
@@ -359,9 +359,9 @@ class LeadHunter:
 
         # Сброс старого кеша: игнорируем первые N сообщений (старые)
         try:
-            skip_count = int(os.getenv("SPY_SKIP_OLD_MESSAGES", "78"))
+            skip_count = int(os.getenv("SPY_SKIP_OLD_MESSAGES", "0"))
         except Exception:
-            skip_count = 78
+            skip_count = 0
         if len(all_posts) > skip_count:
             remaining = all_posts[skip_count:]
         else:

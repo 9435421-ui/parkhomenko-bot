@@ -10,7 +10,7 @@ from datetime import datetime
 class Database:
     """Класс для работы с SQLite базой данных"""
     
-    def __init__(self, db_path: str = "database/bot.db"):
+    def __init__(self, db_path: str = "/root/PARKHOMENKO_BOT/database/bot.db"):
         self.db_path = db_path
         self.conn: Optional[aiosqlite.Connection] = None
     
@@ -768,9 +768,11 @@ class Database:
         """Список целей для парсера/хантера: active + telegram. Поля: link, title, geo_tag, id, is_high_priority, last_lead_at."""
         async with self.conn.cursor() as cursor:
             try:
-                await cursor.execute(
-                    """SELECT id, link, title, COALESCE(geo_tag, '') AS geo_tag,
-                          COALESCE(is_high_priority, 0) AS is_high_priority, last_lead_at
+            await cursor.execute(
+                """SELECT id, link, title, COALESCE(geo_tag, '') AS geo_tag,
+                          COALESCE(is_high_priority, 0) AS is_high_priority,
+                          COALESCE(last_post_id, 0) AS last_post_id,
+                          last_lead_at
                        FROM target_resources
                        WHERE (status = 'active' OR (is_active = 1 AND (status IS NULL OR status = '')))
                          AND (platform = 'telegram' OR type = 'telegram')"""

@@ -503,8 +503,11 @@ class ScoutParser:
                         cid = getattr(entity, "id", None)
                         if cid is None:
                             continue
+                        # include resource_id and last_post_id from DB target record (if present)
                         channels_to_scan.append({
                             "id": cid,
+                            "resource_id": t.get("id"),
+                            "last_post_id": t.get("last_post_id", 0),
                             "name": t.get("title") or link,
                             "geo": t.get("geo_tag") or "",
                             "link": link,
@@ -526,9 +529,20 @@ class ScoutParser:
             count = 0
             scanned = 0
             try:
+                max_seen_id = 0
                 async for message in client.iter_messages(cid, limit=tg_limit):
                     if not message.text:
                         continue
+                    try:
+                        mid = int(message.id)
+                    except Exception:
+                        mid = 0
+                    # Пропустить уже обработанные сообщения по last_post_id (если задано)
+                    channel_last_post = int(channel.get("last_post_id", 0)) if channel.get("last_post_id") is not None else 0
+                    if channel_last_post and mid and mid <= channel_last_post:
+                        continue
+                    if mid and mid > max_seen_id:
+                        max_seen_id = mid
                     scanned += 1
                     # Ловля ссылок: ставим в очередь, обрабатываем по одной с паузой 60 сек (anti-flood)
                     if db:
@@ -590,6 +604,13 @@ class ScoutParser:
                             logger.info("🏢 Режим Разведка: добавлен чат %s", link)
                         except Exception as e:
                             logger.debug("Не удалось добавить ресурс %s: %s", link, e)
+                # Обновить last_post_id в БД для этой цели, если подключена БД и ресурс_id известен
+                try:
+                    resource_id = channel.get("resource_id")
+                    if db and resource_id and max_seen_id:
+                        await db.update_target_last_post_id(resource_id, max_seen_id)
+                except Exception:
+                    pass
             except Exception as e:
                 logger.error(f"❌ Ошибка парсинга ТГ {channel['name']}: {e}")
                 self.last_scan_report.append({

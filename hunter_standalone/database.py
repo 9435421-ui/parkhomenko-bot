@@ -5,7 +5,7 @@ from datetime import datetime
 from typing import Optional, List, Dict
 
 class HunterDatabase:
-    def __init__(self, db_path: str = "potential_leads.db"):
+    def __init__(self, db_path: str = "/root/PARKHOMENKO_BOT/database/potential_leads.db"):
         self.db_path = db_path
         self.conn: Optional[aiosqlite.Connection] = None
 
