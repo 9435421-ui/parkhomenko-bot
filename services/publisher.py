@@ -129,7 +129,48 @@ class Publisher:
             logger.error(f"❌ Ошибка загрузки фото в VK: {e}")
             return None
     
-    async def publish_all(self, text: str, image: bytes = None) -> Dict[str, bool]:
+    async def publish_to_max(self, text: str, title: str = "") -> bool:
+        """Публикация в Max.ru"""
+        device_token = os.getenv("MAX_DEVICE_TOKEN", "").strip()
+        subsite_id = os.getenv("MAX_SUBSITE_ID", "").strip()
+
+        if not device_token or not subsite_id:
+            logger.warning("⚠️ MAX_DEVICE_TOKEN или MAX_SUBSITE_ID не настроены")
+            return False
+
+        url = f"https://api.max.ru/v1.9/subsite/{subsite_id}/content"
+        headers = {
+            "X-Device-Token": device_token,
+            "Content-Type": "application/json",
+            "Authorization": f"Bearer {device_token}",
+        }
+
+        import re
+        body_plain = re.sub(r"<[^>]+>", "", text)
+        body_plain = re.sub(r"&nbsp;", " ", body_plain).strip()
+
+        payload = {
+            "title": (title or "Новости TERION")[:200],
+            "body": body_plain[:5000],
+            "type": "post"
+        }
+
+        try:
+            connector = aiohttp.TCPConnector(verify_ssl=False)
+            async with aiohttp.ClientSession(connector=connector) as session:
+                async with session.post(url, headers=headers, json=payload, timeout=aiohttp.ClientTimeout(total=60)) as resp:
+                    if resp.status == 200:
+                        logger.info("✅ Опубликовано в Max.ru")
+                        return True
+                    else:
+                        error_text = await resp.text()
+                        logger.error(f"❌ Max.ru error {resp.status}: {error_text}")
+                        return False
+        except Exception as e:
+            logger.error(f"❌ Ошибка публикации в Max.ru: {e}")
+            return False
+
+    async def publish_all(self, text: str, image: bytes = None, title: str = "") -> Dict[str, bool]:
         """Публикация во все каналы"""
         results = {}
         
@@ -141,6 +182,10 @@ class Publisher:
         # VK
         if self.vk_token and self.vk_group:
             results['vk'] = await self.publish_to_vk(text, image)
+
+        # Max.ru
+        if os.getenv("MAX_DEVICE_TOKEN"):
+            results['max'] = await self.publish_to_max(text, title)
             
         return results
 

@@ -217,6 +217,12 @@ class Database:
                 await self.conn.commit()
             except Exception:
                 pass
+            # Миграция: колонка last_post_id в target_resources
+            try:
+                await cursor.execute("ALTER TABLE target_resources ADD COLUMN last_post_id INTEGER DEFAULT 0")
+                await self.conn.commit()
+            except Exception:
+                pass
             # Миграция spy_leads: pain_stage, priority_score
             for col, ctype in [("pain_stage", "TEXT"), ("priority_score", "INTEGER")]:
                 try:

@@ -147,29 +147,12 @@ async def main():
 
     scheduler = AsyncIOScheduler()
 
-    async def check_and_publish_scheduled_posts():
-        """Публикация постов из контент-плана (status=approved, publish_date <= сейчас)."""
-        try:
-            posts = await db.get_posts_to_publish()
-            if not posts:
-                return
-            for post in posts:
-                try:
-                    title = (post.get("title") or "").strip()
-                    body = (post.get("body") or "").strip()
-                    text = f"📌 <b>{title}</b>\n\n{body}\n\n#перепланировка #согласование #терион" if title else body + "\n\n#перепланировка #согласование #терион"
-                    image_bytes = None  # TODO: загрузка по image_url при наличии
-                    await publisher.publish_all(text, image_bytes)
-                    await db.mark_as_published(post["id"])
-                    logger.info("✅ Опубликован пост #%s из контент-плана", post["id"])
-                except Exception as e:
-                    logger.error("Ошибка публикации поста #%s: %s", post.get("id"), e)
-        except Exception as e:
-            logger.error("Ошибка check_and_publish_scheduled_posts: %s", e)
+    from auto_poster import AutoPoster
+    poster = AutoPoster(main_bot)
 
-    # Проверка и публикация по расписанию: каждый час (посты с publish_date в прошлом и status=approved)
-    scheduler.add_job(check_and_publish_scheduled_posts, "interval", hours=1)
-    scheduler.add_job(check_and_publish_scheduled_posts, "cron", hour=12, minute=0)  # явно в 12:00
+    # Проверка и публикация по расписанию
+    scheduler.add_job(poster.check_and_publish, "interval", minutes=10)
+    scheduler.add_job(poster.check_and_publish, "cron", hour=12, minute=0)  # явно в 12:00
 
     # Lead Hunter & Creative Agent Integration
     hunter = LeadHunter()

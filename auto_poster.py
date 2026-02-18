@@ -12,7 +12,8 @@ import logging
 import os
 from datetime import datetime
 from database.db import db
-from services.vk_service import vk_service
+from services.publisher import publisher
+import aiohttp
 
 logger = logging.getLogger(__name__)
 
@@ -22,6 +23,7 @@ class AutoPoster:
 
     def __init__(self, bot):
         self.bot = bot
+        publisher.bot = bot
         self.check_interval = 600  # 10 минут
 
     async def check_and_publish(self):
@@ -100,30 +102,30 @@ class AutoPoster:
         return configs.get(channel_key, configs['terion'])
 
     async def _publish_to_channel(self, post: dict, channel_config: dict) -> bool:
-        """Публикует пост в канал"""
+        """Публикует пост во все настроенные каналы через Publisher"""
         try:
             text = self._format_post_text(post)
+            title = post.get('title', '')
+            image_url = post.get('image_url')
+            image_bytes = None
 
-            if post.get('image_url'):
-                await self.bot.send_photo(
-                    chat_id=channel_config['chat_id'],
-                    photo=post['image_url'],
-                    caption=text,
-                    parse_mode='HTML'
-                )
-            else:
-                await self.bot.send_message(
-                    chat_id=channel_config['chat_id'],
-                    text=text,
-                    parse_mode='HTML'
-                )
+            # Если есть URL изображения, скачиваем его
+            if image_url and image_url.startswith('http'):
+                try:
+                    async with aiohttp.ClientSession() as session:
+                        async with session.get(image_url, timeout=30) as resp:
+                            if resp.status == 200:
+                                image_bytes = await resp.read()
+                                logger.info(f"✅ Изображение скачано ({len(image_bytes)} байт)")
+                except Exception as e:
+                    logger.error(f"⚠️ Не удалось скачать изображение по ссылке {image_url}: {e}")
 
-            # Если канал "both" - публикуем в VK
-            channel = post.get('channel', '').lower()
-            if channel == 'both':
-                await self._publish_to_vk(post)
+            # Публикуем через Publisher
+            results = await publisher.publish_all(text, image_bytes, title)
 
-            return True
+            # Проверяем успех хотя бы в одном канале
+            success = any(results.values())
+            return success
 
         except Exception as e:
             logger.error(f"❌ Ошибка публикации: {e}")

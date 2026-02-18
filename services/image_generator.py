@@ -145,12 +145,13 @@ class ImageGenerator:
     
     async def _generate_router(self, prompt: str) -> Optional[bytes]:
         """
-        Fallback генерация через Router AI (NaNa Banana / ChatGPT Mini)
+        Fallback генерация через Router AI (Flux / DALL-E)
         Используем модель для генерации изображений
         """
         try:
-            # OpenRouter / Router AI images endpoint
-            url = "https://openrouter.ai/api/v1/images/generations"
+            # Router AI images endpoint
+            url = os.getenv("ROUTER_IMAGE_URL", "https://routerai.ru/api/v1/images/generations")
+            model = os.getenv("FLUX_MODEL", "flux-1-dev")
             
             headers = {
                 "Authorization": f"Bearer {self.router_key}",
@@ -158,7 +159,7 @@ class ImageGenerator:
             }
             
             payload = {
-                "model": "openai/dall-e-3",
+                "model": model,
                 "prompt": prompt,
                 "n": 1,
                 "size": "1024x1024"

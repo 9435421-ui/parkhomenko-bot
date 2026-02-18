@@ -1,5 +1,7 @@
 import logging
 import os
+import json
+import re
 from utils import router_ai
 
 logger = logging.getLogger(__name__)
@@ -56,7 +58,6 @@ class LeadAnalyzer:
             if response is None or not (response and str(response).strip()):
                 raise ValueError("Router AI вернул пустой ответ")
 
-            import json, re
             match = re.search(r'\{.*\}', response, re.DOTALL)
             if not match:
                 raise ValueError(f"Не удалось найти JSON в ответе: {response}")

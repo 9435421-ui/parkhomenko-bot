@@ -488,7 +488,8 @@ class LeadHunter:
             # Существующая логика исходящих сообщений (контент-бот / outreach)
             if score > 0.7:
                 logger.info(f"🎯 Найден горячий лид! Score: {score}")
-                message = self.parser.generate_outreach_message(post.source_type)
+                # Используем AI для генерации персонализированного ответа
+                message = await self.parser.generate_ai_outreach(post.text, post.source_type)
                 await self.outreach.send_offer(post.source_type, post.source_id, message)
 
         if all_posts:

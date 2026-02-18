@@ -96,7 +96,7 @@ UPLOAD_DIR = os.getenv("UPLOAD_DIR", "uploads")
 MINI_APP_URL = os.getenv("MINI_APP_URL", "https://ternion.ru/mini_app/")
 
 # === FEATURES ===
-ENABLE_IMAGE_GENERATION = os.getenv("ENABLE_IMAGE_GENERATION", "false").lower() == "true"
+ENABLE_IMAGE_GENERATION = os.getenv("ENABLE_IMAGE_GENERATION", "true").lower() == "true"
 COMPETITOR_SPY_ENABLED = os.getenv("COMPETITOR_SPY_ENABLED", "false").lower() == "true"
 GEO_SPY_ENABLED = os.getenv("GEO_SPY_ENABLED", "true").lower() == "true"  # Шпион включен
 

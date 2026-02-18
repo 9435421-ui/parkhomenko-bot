@@ -24,20 +24,20 @@ async def generate(prompt: str) -> Optional[str]:
     Returns:
         URL изображения или None в случае ошибки
     """
-    ENABLE_IMAGE_GEN = os.getenv("ENABLE_IMAGE_GENERATION", "false").lower() == "true"
+    from config import ENABLE_IMAGE_GENERATION as ENABLE_IMAGE_GEN
     ROUTER_AI_IMAGE_KEY = (os.getenv("ROUTER_AI_IMAGE_KEY") or os.getenv("ROUTER_AI_KEY") or "").strip()
     FLUX_MODEL = os.getenv("FLUX_MODEL", "flux-1-dev")
 
     if not ENABLE_IMAGE_GEN:
-        logger.info("Генерация изображений отключена (ENABLE_IMAGE_GENERATION=false)")
+        logger.info("Генерация изображений отключена в конфиге")
         return None
 
     if not ROUTER_AI_IMAGE_KEY:
-        logger.error("ROUTER_AI_IMAGE_KEY / ROUTER_AI_KEY не настроен в переменных окружения")
+        logger.error("ROUTER_AI_IMAGE_KEY / ROUTER_AI_KEY не настроен")
         return None
 
-    # API Router AI для генерации изображений
-    url = os.getenv("ROUTER_IMAGE_URL", "https://api.router.ai/v1/image_generation")
+    # API Router AI для генерации изображений (стандарт OpenAI)
+    url = os.getenv("ROUTER_IMAGE_URL", "https://routerai.ru/api/v1/images/generations")
 
     headers = {
         "Authorization": f"Bearer {ROUTER_AI_IMAGE_KEY}",
@@ -47,9 +47,8 @@ async def generate(prompt: str) -> Optional[str]:
     payload = {
         "model": FLUX_MODEL,
         "prompt": prompt,
-        "width": 1024,
-        "height": 1024,
-        "num_images": 1
+        "size": "1024x1024",
+        "n": 1
     }
 
     try:
