@@ -5,7 +5,14 @@ from datetime import datetime
 from typing import Optional, List, Dict
 
 class HunterDatabase:
-    def __init__(self, db_path: str = "potential_leads.db"):
+    def __init__(self, db_path: str = None):
+        if db_path is None:
+            # Пытаемся взять путь из окружения или используем стандартный путь в папке database
+            db_path = os.getenv("POTENTIAL_LEADS_DB")
+            if not db_path:
+                base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+                db_path = os.path.join(base_dir, "database", "potential_leads.db")
+
         self.db_path = db_path
         self.conn: Optional[aiosqlite.Connection] = None
 
