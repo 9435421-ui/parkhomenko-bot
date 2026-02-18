@@ -334,6 +334,46 @@ yandex_art = YandexArtClient(YANDEX_API_KEY, FOLDER_ID)
 router_ai = RouterAIClient(ROUTER_AI_KEY)
 
 
+async def _auto_generate_image(prompt: str) -> Optional[str]:
+    """Автоматический выбор модели генерации изображения.
+
+    Приоритет по качеству и доступности:
+      1. Яндекс АРТ  — лучшее качество, 10-30 с
+      2. Router AI (Gemini Nano) — быстрее, ~5-10 с
+      3. ImageGenerator (DALL-E / OpenRouter) — запасной вариант
+    Возвращает base64-строку или None при полном отказе всех сервисов.
+    """
+    # 1. Яндекс АРТ
+    try:
+        image_b64 = await yandex_art.generate(prompt)
+        if image_b64:
+            logger.info("Image: Yandex ART OK")
+            return image_b64
+    except Exception as e:
+        logger.warning(f"Yandex ART failed: {e}")
+
+    # 2. Router AI (Gemini Nano)
+    try:
+        image_b64 = await router_ai.generate_image_gemini(prompt)
+        if image_b64:
+            logger.info("Image: Router AI (Gemini) OK")
+            return image_b64
+    except Exception as e:
+        logger.warning(f"Router AI image failed: {e}")
+
+    # 3. ImageGenerator (OpenRouter DALL-E)
+    try:
+        from services.image_generator import image_generator
+        image_bytes = await image_generator.generate_cover(prompt)
+        if image_bytes:
+            logger.info("Image: ImageGenerator fallback OK")
+            return base64.b64encode(image_bytes).decode()
+    except Exception as e:
+        logger.warning(f"ImageGenerator fallback failed: {e}")
+
+    return None
+
+
 # === VK PUBLISHER ===
 
 class VKPublisher:
@@ -710,35 +750,32 @@ async def process_photo(message: Message, state: FSMContext):
 # === 🎨 ИИ-ВИЗУАЛ ===
 
 async def visual_select_model(message: Message, state: FSMContext):
+    """Запускает генерацию изображения — сразу спрашивает промпт."""
     await message.answer(
         "🎨 <b>Генерация изображения</b>\n\n"
-        "Выберите модель:\n\n"
-        "<b>🟣 Яндекс АРТ</b> — качество, 10-30 сек\n"
-        "<b>🟡 Gemini Nano</b> — скорость, 5-10 сек",
-        reply_markup=InlineKeyboardBuilder()
-        .button(text="🟣 Яндекс АРТ", callback_data="visual_model:yandex")
-        .button(text="🟡 Gemini Nano", callback_data="visual_model:gemini")
-        .button(text="◀️ Назад", callback_data="back_menu")
-        .as_markup(),
+        "Введите описание сцены или интерьера:\n\n"
+        "Примеры:\n"
+        "• Скандинавская гостиная с панорамными окнами\n"
+        "• Современная кухня-студия, минимализм\n"
+        "• Перепланировка в сталинке, до/после\n\n"
+        "<i>Система автоматически выберет лучшую доступную модель.</i>",
+        reply_markup=get_back_btn(),
         parse_mode="HTML"
     )
+    await state.set_state(ContentStates.ai_visual_prompt)
 
 
 @content_router.callback_query(F.data.startswith("visual_model:"))
 async def visual_model_selected(callback: CallbackQuery, state: FSMContext):
-    model = callback.data.split(":")[1]
-    await state.update_data(visual_model=model)
-    
-    model_name = "Яндекс АРТ" if model == "yandex" else "Gemini Nano"
-    
-    await callback.answer(f"Выбрано: {model_name}")
+    """Совместимость со старыми кнопками — перенаправляет на авто-режим."""
+    await callback.answer()
     await callback.message.edit_text(
-        f"🎨 <b>{model_name}</b>\n\n"
-        f"Введите описание:\n\n"
-        f"Примеры:\n"
-        f"• Скандинавская гостиная с панорамными окнами\n"
-        f"• Современная кухня-студия, минимализм\n"
-        f"• Перепланировка в сталинке, до/после",
+        "🎨 <b>Генерация изображения</b>\n\n"
+        "Введите описание:\n\n"
+        "Примеры:\n"
+        "• Скандинавская гостиная с панорамными окнами\n"
+        "• Современная кухня-студия, минимализм\n"
+        "• Перепланировка в сталинке, до/после",
         parse_mode="HTML"
     )
     await state.set_state(ContentStates.ai_visual_prompt)
@@ -746,58 +783,45 @@ async def visual_model_selected(callback: CallbackQuery, state: FSMContext):
 
 @content_router.message(ContentStates.ai_visual_prompt)
 async def ai_visual_handler(message: Message, state: FSMContext):
-    data = await state.get_data()
-    model = data.get('visual_model', 'yandex')
-    user_prompt = message.text
-    
-    await message.answer(
-        f"⏳ <b>Генерация...</b>\n"
-        f"Модель: {'Яндекс АРТ' if model == 'yandex' else 'Gemini Nano'}",
-        parse_mode="HTML"
+    user_prompt = message.text or ""
+
+    await message.answer("⏳ <b>Генерирую изображение...</b>", parse_mode="HTML")
+
+    enhanced = (
+        f"{user_prompt}, professional architectural photography, interior design, "
+        "high quality, detailed. No text, no words, no letters, no captions, no watermarks — image only."
     )
-    
-    enhanced = f"{user_prompt}, professional architectural photography, interior design, high quality, detailed. No text, no words, no letters, no captions, no watermarks — image only."
-    
-    image_b64 = await yandex_art.generate(enhanced) if model == 'yandex' else await router_ai.generate_image_gemini(enhanced)
-    # Fallback: общий генератор (Yandex Async + OpenRouter DALL-E), если основная модель не сработала
-    if not image_b64:
-        try:
-            from services.image_generator import image_generator
-            image_bytes = await image_generator.generate_cover(enhanced)
-            if image_bytes:
-                image_b64 = base64.b64encode(image_bytes).decode()
-        except Exception as e:
-            logger.warning(f"Image generator fallback: {e}")
+
+    image_b64 = await _auto_generate_image(enhanced)
+
     if not image_b64:
         await message.answer(
-            "❌ Ошибка генерации. Попробуйте другую модель или описание.",
+            "❌ Все сервисы недоступны. Попробуйте позже или измените описание.",
             reply_markup=get_back_btn()
         )
         await state.clear()
         return
-    
+
     try:
         image_bytes = base64.b64decode(image_b64)
-        # Отправка файлом из памяти (io.BytesIO), без временного файла — устраняет «Ошибка отправки»
         photo = BufferedInputFile(image_bytes, filename="visual.jpg")
         await message.answer_photo(
             photo=photo,
             caption=(
                 f"✅ <b>Готово!</b>\n\n"
-                f"🎨 <b>Модель:</b> {'Яндекс АРТ' if model == 'yandex' else 'Gemini Nano'}\n"
-                f"📝 <b>Промпт:</b> <code>{user_prompt[:50]}...</code>"
+                f"📝 <b>Промпт:</b> <code>{user_prompt[:80]}</code>"
             ),
             reply_markup=InlineKeyboardBuilder()
             .button(text="📝 Создать пост", callback_data=f"art_to_post:{user_prompt[:28]}")
-            .button(text="🔄 Еще вариант", callback_data="visual_back")
+            .button(text="🔄 Ещё вариант", callback_data="visual_back")
             .button(text="◀️ Меню", callback_data="back_menu")
             .as_markup(),
             parse_mode="HTML"
         )
     except Exception as e:
-        logger.error(f"Send error: {e}")
-        await message.answer("❌ Ошибка отправки", reply_markup=get_back_btn())
-    
+        logger.error(f"Send visual error: {e}")
+        await message.answer("❌ Ошибка отправки изображения", reply_markup=get_back_btn())
+
     await state.clear()
 
 
@@ -887,8 +911,7 @@ async def ai_series_handler(message: Message, state: FSMContext):
         f"📊 {days} постов\n\n"
         f"<b>Сгенерировать обложки?</b>",
         reply_markup=InlineKeyboardBuilder()
-        .button(text="🟣 Яндекс АРТ", callback_data=f"gen_series_img:yandex:{topic}:{days}")
-        .button(text="🟡 Gemini Nano", callback_data=f"gen_series_img:gemini:{topic}:{days}")
+        .button(text="🎨 Сгенерировать обложки", callback_data=f"gen_series_img:{topic}:{days}")
         .button(text="❌ Нет", callback_data="back_menu")
         .as_markup(),
         parse_mode="HTML"
@@ -899,54 +922,39 @@ async def ai_series_handler(message: Message, state: FSMContext):
 @content_router.callback_query(F.data.startswith("gen_series_img:"))
 async def generate_series_images(callback: CallbackQuery, state: FSMContext):
     parts = callback.data.split(":")
-    model = parts[1]
-    topic = parts[2]
-    days = int(parts[3])
-    
+    # Формат: gen_series_img:{topic}:{days}
+    topic = parts[1]
+    days = int(parts[2])
+
     await callback.answer("🎨 Генерация...")
     await callback.message.edit_text(
         f"⏳ <b>Генерация {days} обложек...</b>",
         parse_mode="HTML"
     )
-    
+
     for i in range(1, days + 1):
-        art_prompt = f"{topic}, день {i}, перепланировка, professional interior, modern design. No text, no words, no letters, no captions — image only."
-        
+        art_prompt = (
+            f"{topic}, день {i}, перепланировка, professional interior, modern design. "
+            "No text, no words, no letters, no captions — image only."
+        )
         await callback.message.answer(f"🎨 <b>День {i}...</b>", parse_mode="HTML")
-        
-        image_b64 = await yandex_art.generate(art_prompt) if model == 'yandex' else await router_ai.generate_image_gemini(art_prompt)
-        if not image_b64:
-            try:
-                from services.image_generator import image_generator
-                image_bytes_fb = await image_generator.generate_cover(art_prompt)
-                if image_bytes_fb:
-                    image_b64 = base64.b64encode(image_bytes_fb).decode()
-            except Exception as e:
-                logger.warning(f"Series image fallback day {i}: {e}")
-        
-        tmp_path = None
+
+        image_b64 = await _auto_generate_image(art_prompt)
+
         if image_b64:
             try:
                 image_bytes = base64.b64decode(image_b64)
-                with tempfile.NamedTemporaryFile(suffix=".jpg", delete=False) as tmp:
-                    tmp.write(image_bytes)
-                    tmp_path = tmp.name
-                
+                photo = BufferedInputFile(image_bytes, filename=f"day_{i}.jpg")
                 await callback.message.answer_photo(
-                    photo=FSInputFile(tmp_path),
+                    photo=photo,
                     caption=f"🎨 <b>День {i}</b> — {topic}",
                     parse_mode="HTML"
                 )
             except Exception as e:
-                logger.error(f"Ошибка генерации обложки дня {i}: {e}")
-            finally:
-                # Всегда удаляем временный файл
-                if tmp_path and os.path.exists(tmp_path):
-                    try:
-                        os.unlink(tmp_path)
-                    except Exception:
-                        pass
-    
+                logger.error(f"Ошибка отправки обложки дня {i}: {e}")
+        else:
+            await callback.message.answer(f"⚠️ День {i}: не удалось сгенерировать")
+
     await callback.message.answer("✅ <b>Все обложки готовы!</b>", reply_markup=get_back_btn(), parse_mode="HTML")
 
 
@@ -1012,13 +1020,52 @@ async def ai_plan_handler(message: Message, state: FSMContext):
         f"✅ <b>План готов!</b>\n\n"
         f"<b>Сгенерировать арты?</b>",
         reply_markup=InlineKeyboardBuilder()
-        .button(text="🟣 Яндекс АРТ", callback_data=f"gen_plan_img:yandex:{topic}:{days}")
-        .button(text="🟡 Gemini Nano", callback_data=f"gen_plan_img:gemini:{topic}:{days}")
+        .button(text="🎨 Сгенерировать арты", callback_data=f"gen_plan_img:{topic}:{days}")
         .button(text="❌ Нет", callback_data="back_menu")
         .as_markup(),
         parse_mode="HTML"
     )
     await state.clear()
+
+
+@content_router.callback_query(F.data.startswith("gen_plan_img:"))
+async def generate_plan_images(callback: CallbackQuery, state: FSMContext):
+    """Генерирует обложки для плана."""
+    parts = callback.data.split(":")
+    # Формат: gen_plan_img:{topic}:{days}
+    topic = parts[1]
+    days = int(parts[2])
+
+    await callback.answer("🎨 Генерация...")
+    await callback.message.edit_text(
+        f"⏳ <b>Генерация {days} артов для плана...</b>",
+        parse_mode="HTML"
+    )
+
+    for i in range(1, days + 1):
+        art_prompt = (
+            f"{topic}, день {i}, перепланировка, professional architectural visualization, "
+            "modern design, technical drawing style. No text, no words, no letters — image only."
+        )
+        await callback.message.answer(f"🎨 <b>День {i}...</b>", parse_mode="HTML")
+
+        image_b64 = await _auto_generate_image(art_prompt)
+
+        if image_b64:
+            try:
+                image_bytes = base64.b64decode(image_b64)
+                photo = BufferedInputFile(image_bytes, filename=f"plan_day_{i}.jpg")
+                await callback.message.answer_photo(
+                    photo=photo,
+                    caption=f"🗓 <b>День {i}</b> — {topic}",
+                    parse_mode="HTML"
+                )
+            except Exception as e:
+                logger.error(f"Ошибка отправки арта дня {i}: {e}")
+        else:
+            await callback.message.answer(f"⚠️ День {i}: не удалось сгенерировать")
+
+    await callback.message.answer("✅ <b>Все арты готовы!</b>", reply_markup=get_back_btn(), parse_mode="HTML")
 
 
 # === 📰 НОВОСТЬ ===
