@@ -465,17 +465,61 @@ class LeadHunter:
                 if saved:
                     try:
                         from config import JULIA_USER_ID, BOT_TOKEN
+                        from services.lead_hunter.analyzer import _detect_priority_zhk_hot
+
+                        # Определяем ссылку на автора поста
+                        author_id = getattr(post, "author_id", None)
+                        author_name = getattr(post, "author_name", None)
+                        src_type = getattr(post, "source_type", "telegram")
+                        if src_type == "vk" and author_id:
+                            author_link = f"https://vk.com/id{author_id}"
+                        elif author_id:
+                            author_link = f"tg://user?id={author_id}"
+                        else:
+                            author_link = None
+
+                        # Проверяем, является ли лид приоритетным ЖК
+                        is_zhk_hot, zhk_name = _detect_priority_zhk_hot(post.text or "")
+                        zhk_name = zhk_name or analysis_data.get("zhk_name") or analysis.get("zhk_name") or ""
+
+                        # Строим текст уведомления
+                        if is_zhk_hot or zhk_name:
+                            header = f"🚨 <b>ГОРЯЧИЙ ЛИД — ЖК {zhk_name.title()}</b>"
+                        else:
+                            header = "🔥 <b>Новый лид</b>"
+
+                        pain_stage = analysis_data.get("pain_stage") or ""
+                        pain_label = {"ST-4": "⛔ Критично", "ST-3": "🔴 Активная боль",
+                                      "ST-2": "🟡 Планирование", "ST-1": "🟢 Интерес"}.get(pain_stage, "")
+
+                        lines = [
+                            header,
+                            "",
+                            f"🎯 {analysis.get('intent', '—')}",
+                            f"📍 ЖК/Гео: {analysis.get('geo', getattr(post, 'source_name', '—'))}",
+                            f"📝 Суть: {analysis.get('context_summary', '—')}",
+                        ]
+                        if pain_label:
+                            lines.append(f"🩺 Стадия: {pain_label}")
+                        if author_link:
+                            if src_type == "telegram":
+                                lines.append(f"👤 Автор: <code>{author_link}</code>")
+                            else:
+                                lines.append(f'👤 Автор: <a href="{author_link}">{author_name or "профиль"}</a>')
+                        elif author_name:
+                            lines.append(f"👤 Автор: @{author_name}")
+                        lines.append(f"🔗 Пост: {lead_data.get('url', '—')}")
+
+                        text = "\n".join(lines)
                         bot = _bot_for_send()
                         if bot is None:
                             bot = Bot(token=BOT_TOKEN, default=DefaultBotProperties(parse_mode="HTML"))
-                        text = (
-                            f"🔥 Новый лид: {analysis.get('intent','—')}\n\n"
-                            f"📍 ЖК/Гео: {analysis.get('geo','—')}\n"
-                            f"📝 Суть: {analysis.get('context_summary','—')}\n"
-                            f"🔗 Ссылка: {lead_data.get('url','—')}"
-                        )
                         try:
-                            await bot.send_message(int(JULIA_USER_ID), text, parse_mode="HTML")
+                            await bot.send_message(
+                                int(JULIA_USER_ID), text,
+                                parse_mode="HTML",
+                                disable_web_page_preview=True,
+                            )
                         finally:
                             if _bot_for_send() is None and getattr(bot, "session", None):
                                 try:
