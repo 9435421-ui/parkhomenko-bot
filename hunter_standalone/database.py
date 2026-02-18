@@ -32,9 +32,17 @@ class HunterDatabase:
                     hotness INTEGER,
                     geo TEXT,
                     context_summary TEXT,
+                    pain_stage TEXT,
+                    priority_score INTEGER,
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                 )
             """)
+            # Migration
+            for col, ctype in [("pain_stage", "TEXT"), ("priority_score", "INTEGER")]:
+                try:
+                    await cursor.execute(f"ALTER TABLE potential_leads ADD COLUMN {col} {ctype}")
+                except Exception:
+                    pass
             await self.conn.commit()
 
     async def save_lead(self, lead_data: Dict) -> bool:
@@ -42,11 +50,12 @@ class HunterDatabase:
             async with self.conn.cursor() as cursor:
                 await cursor.execute("""
                     INSERT INTO potential_leads 
-                    (message_url, content, intent, hotness, geo, context_summary)
-                    VALUES (?, ?, ?, ?, ?, ?)
+                    (message_url, content, intent, hotness, geo, context_summary, pain_stage, priority_score)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                 """, (
                     lead_data['url'], lead_data['content'], lead_data['intent'],
-                    lead_data['hotness'], lead_data['geo'], lead_data['context_summary']
+                    lead_data['hotness'], lead_data['geo'], lead_data['context_summary'],
+                    lead_data.get('pain_stage'), lead_data.get('priority_score')
                 ))
                 await self.conn.commit()
                 return True
