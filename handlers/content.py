@@ -130,7 +130,7 @@ async def global_menu_handler(message: Message, state: FSMContext):
         await photo_start(message, state)
     elif text == "🎨 ИИ-Визуал":
         await visual_select_model(message, state)
-    elif text == "✨ Креативный прогрев":
+    elif text == "✨ Креатив":
         await series_start(message, state)
     elif text == "📰 Новость":
         await news_start(message, state)
@@ -1056,12 +1056,30 @@ async def generate_series_images(callback: CallbackQuery, state: FSMContext):
 
 # === 📋 КОНТЕНТ-ПЛАН ===
 
+_PLAN_SYSTEM = (
+    "Ты — контент-стратег компании TERION (перепланировки квартир в Москве).\n"
+    "Создай редакционный контент-план для Telegram-канала. Требования:\n"
+    "— Для каждого дня: тип поста, заголовок/тема, ключевое сообщение (1 предложение), формат (текст / фото / карусель / видео)\n"
+    "— Чередуй форматы: экспертный пост, живая история клиента, интересный факт, вопрос аудитории, новость/тренд\n"
+    "— Темы должны логично вытекать одна из другой и прогревать аудиторию\n"
+    "— Тон: человечный, без казённого языка\n"
+    "— ЗАПРЕЩЕНО: жёсткие технические чек-листы, перечисление СНиПов, схемы согласования\n"
+    "— Формат вывода:\n"
+    "День N | [Тип] | Заголовок\n"
+    "Идея: ...\n"
+    "Формат: ...\n"
+)
+
+
 async def plan_start(message: Message, state: FSMContext):
     await message.answer(
-        "📋 <b>План (роль ГИП)</b>\n\n"
-        "Строго технический чек-лист. Введите: <code>дни, тема</code>\n\n"
-        "Пример: <code>5, объединение кухни и гостиной</code>\n\n"
-        "Чек-лист со ссылками на СНиП, МЖИ, трассировку.",
+        "📋 <b>Контент-план</b>\n\n"
+        "Укажите количество дней и тему (через запятую):\n\n"
+        "Примеры:\n"
+        "• <code>7, перепланировка квартиры</code>\n"
+        "• <code>14, ипотека и недвижимость</code>\n"
+        "• <code>5, дизайн маленьких квартир</code>\n\n"
+        "<i>Я составлю план с разнообразными форматами постов на каждый день</i>",
         reply_markup=get_back_btn(),
         parse_mode="HTML"
     )
@@ -1071,52 +1089,58 @@ async def plan_start(message: Message, state: FSMContext):
 @content_router.message(ContentStates.ai_plan)
 async def ai_plan_handler(message: Message, state: FSMContext):
     text = message.text.strip()
-    
+
     try:
         if ',' in text:
             parts = [p.strip() for p in text.split(',', 1)]
             days = int(parts[0])
             topic = parts[1]
         else:
-            await message.answer("❌ Введите: дни, тема")
+            await message.answer(
+                "❌ Укажите через запятую: <b>дни, тема</b>\n"
+                "Например: <code>7, перепланировка квартиры</code>",
+                parse_mode="HTML"
+            )
             return
     except Exception:
-        await message.answer("❌ Неверный формат")
+        await message.answer(
+            "❌ Неверный формат. Пример: <code>7, перепланировка</code>",
+            parse_mode="HTML"
+        )
         return
-    
+
     if days < 1 or days > 30:
-        await message.answer("❌ 1-30 дней")
+        await message.answer("❌ Укажите от 1 до 30 дней")
         return
-    
-    await message.answer(f"⏳ <b>Создаю технический чек-лист (ГИП) на {days} дней...</b>", parse_mode="HTML")
-    
-    cases_content = _load_content_template("expert_cases.txt", "МЖИ, несущие стены, трассировка, акты скрытых работ, СНиП.")
-    prompt = (
-        f"Роль: ГИП (главный инженер проекта). Строго технический чек-лист на {days} дней. Тема: «{topic}»\n\n"
-        f"Для каждого дня: заголовок, содержание (2-3 предложения), ссылки на СНиП, МЖИ, трассировку, формат (текст/фото).\n\n"
-        f"Термины:\n{cases_content}\n\n"
-        f"Тон: технический, без клише. Жилищная инспекция, проект, МНИИТЭП."
+
+    await message.answer(f"⏳ <b>Составляю контент-план на {days} дней...</b>", parse_mode="HTML")
+
+    user_prompt = (
+        f"Составь контент-план на {days} дней для Telegram-канала TERION.\n"
+        f"Тема: «{topic}»\n"
+        f"Аудитория: владельцы квартир в Москве, которые думают о перепланировке или уже начали её."
     )
-    
-    plan = await router_ai.generate(prompt, max_tokens=3000)
-    
+
+    plan = await router_ai.generate(user_prompt, system_prompt=_PLAN_SYSTEM, max_tokens=3000)
+
     if not plan:
-        await message.answer("❌ Ошибка", reply_markup=get_back_btn())
+        await message.answer("❌ Ошибка генерации", reply_markup=get_back_btn())
         await state.clear()
         return
-    
+
     await message.bot.send_message(
         chat_id=LEADS_GROUP_CHAT_ID,
         message_thread_id=THREAD_ID_CONTENT_PLAN,
-        text=f"📋 <b>План {days} дней</b>\n\n<b>Тема:</b> {topic}\n\n{plan}",
+        text=f"📋 <b>Контент-план: {topic}</b> ({days} дней)\n\n{plan}",
         parse_mode="HTML"
     )
-    
+
     await message.answer(
-        f"✅ <b>План готов!</b>\n\n"
-        f"<b>Сгенерировать арты?</b>",
+        f"✅ <b>Контент-план на {days} дней готов!</b>\n"
+        f"Отправил в топик «Контент-план».\n\n"
+        f"<b>Сгенерировать обложки для каждого дня?</b>",
         reply_markup=InlineKeyboardBuilder()
-        .button(text="🎨 Сгенерировать арты", callback_data=f"gen_plan_img:{topic}:{days}")
+        .button(text="🎨 Сгенерировать обложки", callback_data=f"gen_plan_img:{topic}:{days}")
         .button(text="❌ Нет", callback_data="back_menu")
         .as_markup(),
         parse_mode="HTML"
@@ -1166,109 +1190,95 @@ async def generate_plan_images(callback: CallbackQuery, state: FSMContext):
 
 # === 📰 НОВОСТЬ ===
 
-def _potential_leads_db_path() -> str:
-    return os.path.join(os.path.dirname(__file__), "..", "database", "potential_leads.db")
+# Категории новостей по нашей специфике
+_NEWS_CATEGORIES = {
+    "renovation": ("🔨 Перепланировка и согласование", "изменения в законодательстве о перепланировках, новые требования МЖИ, упрощение или ужесточение согласования"),
+    "construction": ("🏗 Строительство и материалы", "новые строительные технологии, современные материалы, тенденции в строительстве жилья в Москве"),
+    "mortgage": ("🏦 Ипотека и финансы", "ставки по ипотеке, государственные программы, решения ЦБ, льготная ипотека для москвичей"),
+    "realty": ("🏠 Недвижимость и рынок", "цены на квартиры в Москве, тренды рынка недвижимости, новостройки и вторичное жильё"),
+    "renovation_design": ("🎨 Дизайн и ремонт", "тренды в дизайне интерьеров, новые решения для небольших квартир, умный дом"),
+    "custom": ("✏️ Своя тема", ""),
+}
+
+_NEWS_SYSTEM = (
+    "Ты — контент-редактор компании TERION, специализирующейся на перепланировках квартир в Москве.\n"
+    "Пиши экспертный информационный пост на заданную тему. Требования:\n"
+    "— Структура: яркий заголовок → суть → что это значит для москвичей → лёгкий призыв к действию\n"
+    "— Объём: 150-200 слов\n"
+    "— Тон: уверенный, информативный, без официоза\n"
+    "— Эмодзи — умеренно, по смыслу\n"
+    "— Технические термины (МЖИ, СНиП, трассировка) — ТОЛЬКО если они органично вписываются в тему\n"
+    "— ЗАПРЕЩЕНО: выдумывать конкретные даты, номера законов, имена чиновников\n"
+    "— Если тема не связана с нашей сферой — вежливо уйди на смежную тему (недвижимость, жильё, ремонт)\n"
+    "— НЕ добавляй хештеги и ссылки — они добавятся автоматически"
+)
 
 
-async def _generate_news_by_topic(message_or_callback, state: FSMContext, topic: str, is_callback: bool = False):
-    """Общая генерация новости по теме (вызов после выбора темы или ввода текста)."""
+async def _generate_news_by_topic(message_or_callback, state: FSMContext, topic: str, hint: str = "", is_callback: bool = False):
+    """Генерация новостного поста по теме."""
     if is_callback:
         await message_or_callback.message.edit_text("🔍 <b>Пишу новость...</b>", parse_mode="HTML")
         target = message_or_callback.message
     else:
         await message_or_callback.answer("🔍 <b>Пишу новость...</b>", parse_mode="HTML")
         target = message_or_callback
-    cases_content = _load_content_template("expert_cases.txt", "МЖИ, несущие стены, трассировка, акты скрытых работ.")
-    prompt = (
-        f"Экспертная новость на тему «{topic}». "
-        f"Структура: заголовок, суть новости, комментарий эксперта, что значит для людей, призыв к консультации. "
-        f"200-250 слов. ОБЯЗАТЕЛЬНО используй термины: МЖИ, несущие стены, трассировка или акты скрытых работ — по смыслу. "
-        f"Реальные кейсы для опоры:\n{cases_content}\n\n"
-        f"ЗАПРЕЩЕНО: общие фразы без конкретики. Хештеги: #новость #недвижимость #TERION"
-    )
-    news = await router_ai.generate(prompt)
+
+    user_prompt = f"Напиши информационный пост для Telegram-канала TERION на тему: «{topic}»."
+    if hint:
+        user_prompt += f"\nАкцент: {hint}"
+
+    news = await router_ai.generate(user_prompt, system_prompt=_NEWS_SYSTEM)
     if not news:
+        err_msg = "❌ Не удалось сгенерировать новость. Попробуйте другую тему."
         if is_callback:
-            await message_or_callback.message.edit_text("❌ Ошибка генерации", reply_markup=get_back_btn())
+            await message_or_callback.message.edit_text(err_msg, reply_markup=get_back_btn())
         else:
-            await message_or_callback.answer("❌ Ошибка", reply_markup=get_back_btn())
+            await message_or_callback.answer(err_msg, reply_markup=get_back_btn())
         await state.clear()
         return
-    if VK_QUIZ_LINK not in news:
-        news += f"\n\n📍 <a href='{VK_QUIZ_LINK}'>Пройти квиз</a> @terion_bot\n#TERION #перепланировка #москва"
+
     post_id = await show_preview(target, news)
     await state.set_state(ContentStates.preview_mode)
     await state.update_data(post_id=post_id, text=news)
 
 
 async def news_start(message: Message, state: FSMContext):
-    db_path = os.path.abspath(_potential_leads_db_path())
-    leads: list = []
-    try:
-        if os.path.isfile(db_path):
-            hunter_db = HunterDatabase(db_path)
-            await hunter_db.connect()
-            leads = await hunter_db.get_latest_hot_leads(3)
-            if hunter_db.conn:
-                await hunter_db.conn.close()
-    except Exception as e:
-        logger.warning("potential_leads.db для новостей: %s", e)
-    if leads:
-        builder = InlineKeyboardBuilder()
-        topics = []
-        for i, row in enumerate(leads):
-            full = (row.get("content") or row.get("intent") or "Тема").strip()
-            topics.append(full)
-            label = full[:38] + "…" if len(full) > 40 else full
-            builder.button(text=f"🔥 {i + 1}. {label}", callback_data=f"topic_news:{i}")
-        builder.button(text="✏️ Своя тема", callback_data="topic_news:custom")
-        builder.adjust(1)
-        await state.update_data(hot_topics=topics)
-        await message.answer(
-            "📰 <b>Экспертная новость</b>\n\n"
-            "Выберите горячую тему или введите свою в чат:",
-            reply_markup=builder.as_markup(),
-            parse_mode="HTML"
-        )
-        await state.set_state(ContentStates.ai_news_choose)
-    else:
-        await message.answer(
-            "📰 <b>Экспертная новость</b>\n\n"
-            "Введите тему:\n"
-            "• Перепланировка — изменения в законе\n"
-            "• Ипотека — ставки, программы\n"
-            "• Строительство — новые технологии",
-            reply_markup=get_back_btn(),
-            parse_mode="HTML"
-        )
-        await state.set_state(ContentStates.ai_news)
+    builder = InlineKeyboardBuilder()
+    for key, (label, _) in _NEWS_CATEGORIES.items():
+        builder.button(text=label, callback_data=f"topic_news:{key}")
+    builder.adjust(1)
+    await message.answer(
+        "📰 <b>Экспертная новость</b>\n\n"
+        "Выберите тему — напишем актуальный пост по нашей специфике:\n"
+        "<i>Нет подходящего? Выберите «Своя тема»</i>",
+        reply_markup=builder.as_markup(),
+        parse_mode="HTML"
+    )
+    await state.set_state(ContentStates.ai_news_choose)
 
 
 @content_router.callback_query(F.data.startswith("topic_news:"), ContentStates.ai_news_choose)
 async def news_topic_selected(callback: CallbackQuery, state: FSMContext):
-    part = callback.data.split(":", 1)[1]
-    if part == "custom":
-        await callback.answer("Введите тему в чат")
+    key = callback.data.split(":", 1)[1]
+    if key == "custom":
+        await callback.answer()
         await callback.message.edit_text(
-            "📰 Введите тему новости (например: перепланировка, ипотека, новые материалы):",
+            "📰 Введите тему новости:\n\n"
+            "Например: <i>новые правила перепланировки, льготная ипотека, тренды ремонта 2025</i>",
             reply_markup=get_back_btn(),
             parse_mode="HTML"
         )
         await state.set_state(ContentStates.ai_news)
         return
-    try:
-        idx = int(part)
-    except ValueError:
-        await callback.answer("Ошибка выбора")
+
+    category = _NEWS_CATEGORIES.get(key)
+    if not category:
+        await callback.answer("Неизвестная категория")
         return
-    data = await state.get_data()
-    topics = data.get("hot_topics") or []
-    if idx < 0 or idx >= len(topics):
-        await callback.answer("Тема не найдена")
-        return
-    topic = topics[idx]
+
+    label, hint = category
     await callback.answer()
-    await _generate_news_by_topic(callback, state, topic, is_callback=True)
+    await _generate_news_by_topic(callback, state, label.split(" ", 1)[-1], hint=hint, is_callback=True)
 
 
 @content_router.message(ContentStates.ai_news)
@@ -1307,20 +1317,33 @@ async def holiday_rf_start(message: Message, state: FSMContext):
     await state.set_state(ContentStates.holiday_rf)
 
 
+_HOLIDAY_SYSTEM = (
+    "Ты — голос бренда TERION (перепланировки квартир в Москве).\n"
+    "Напиши тёплое праздничное поздравление для Telegram-канала. Требования:\n"
+    "— Начни с яркого поздравления, создай праздничное настроение\n"
+    "— Свяжи праздник с темой дома, уюта, семьи или пространства — органично, без натяжки\n"
+    "— Лёгкий юмор или трогательный момент — приветствуется\n"
+    "— Объём: 80-120 слов\n"
+    "— Эмодзи: уместно и щедро\n"
+    "— Тон: тёплый, человечный, не корпоративный\n"
+    "— ЗАПРЕЩЕНО: технические термины (МЖИ, СНиП), прямые продажи, шаблонные фразы «команда компании поздравляет»\n"
+    "— НЕ добавляй хештеги и ссылки — они добавятся автоматически"
+)
+
+
 @content_router.callback_query(F.data.startswith("holiday_rf:"), ContentStates.holiday_rf)
 async def holiday_rf_selected(callback: CallbackQuery, state: FSMContext):
     label = callback.data.split(":", 1)[1]
     occasion = next((occ for btn_label, occ in HOLIDAYS_RF if btn_label == label), label)
-    await callback.answer(f"Пишу поздравление: {label}...")
+    await callback.answer()
     await callback.message.edit_text(f"⏳ <b>Пишу поздравление с {label}...</b>", parse_mode="HTML")
     try:
-        agent = ContentAgent()
-        post = await agent.generate_greeting_post(person_name=None, occasion=occasion)
-        body = (post.get("title") or "") + "\n\n" + (post.get("body") or "")
-        if not body.strip():
-            body = f"🎉 С праздником — {label}! От имени TERION желаем мира, добра и уюта в вашем доме."
-        if VK_QUIZ_LINK not in body:
-            body += f"\n\n📍 <a href='{VK_QUIZ_LINK}'>Пройти квиз</a> @terion_bot\n#TERION #перепланировка #москва"
+        user_prompt = (
+            f"Напиши поздравление с праздником «{occasion}» для подписчиков Telegram-канала TERION."
+        )
+        body = await router_ai.generate(user_prompt, system_prompt=_HOLIDAY_SYSTEM)
+        if not body or not body.strip():
+            body = f"🎉 С праздником — {label}!\n\nПусть ваш дом всегда будет местом, где хочется возвращаться. Уюта, тепла и вдохновения!"
         post_id = await db.add_content_post(
             title=f"Праздник: {label}",
             body=body,
@@ -1328,7 +1351,7 @@ async def holiday_rf_selected(callback: CallbackQuery, state: FSMContext):
             channel="holiday",
             status="preview"
         )
-        await show_preview(callback.message, body, post_id=post_id)
+        post_id = await show_preview(callback.message, body, post_id=post_id)
         await state.set_state(ContentStates.preview_mode)
         await state.update_data(post_id=post_id, text=body)
     except Exception as e:
