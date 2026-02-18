@@ -629,9 +629,38 @@ async def compress_image(image_bytes: bytes, max_size: int = 1024, quality: int 
         return image_bytes
 
 
+def _build_cover_prompt(text: str) -> str:
+    """Строит промпт обложки по тексту поста: определяет тему и задаёт стиль."""
+    import re
+    clean = re.sub(r"<[^>]+>", "", text).lower()
+
+    parts: list[str] = []
+    if any(w in clean for w in ["перепланировк", "снос стен", "объединени", "проем", "демонтаж"]):
+        parts.append("apartment renovation, open space planning, modern interior design")
+    if any(w in clean for w in ["кухн", "гостин", "студи", "зонирован"]):
+        parts.append("kitchen living room studio, open plan layout")
+    if any(w in clean for w in ["ванн", "санузл", "bathroom"]):
+        parts.append("modern bathroom renovation, spa style")
+    if any(w in clean for w in ["загород", "коттедж", "дача", "строительств"]):
+        parts.append("country house exterior, suburban architecture")
+    if any(w in clean for w in ["мжи", "согласован", "документ", "законодательств", "штраф", "бти"]):
+        parts.append("architectural blueprints, technical documents, professional workspace")
+    if any(w in clean for w in ["дизайн", "интерьер", "минимализм"]):
+        parts.append("interior design, modern aesthetics, clean lines")
+    if any(w in clean for w in ["новостройк", "жк", "застройщик", "квартир"]):
+        parts.append("new apartment building facade, modern Moscow architecture")
+
+    base = ", ".join(parts) if parts else "modern Moscow apartment interior, minimalist style"
+    return (
+        f"Professional real estate photography, {base}, "
+        "high quality, realistic, 4K resolution, natural lighting. "
+        "No text, no words, no letters, no signs, no captions, no watermarks — image only."
+    )
+
+
 async def show_preview(message: Message, text: str, image_file_id: Optional[str] = None, post_id: Optional[int] = None):
+    """Показывает превью поста. Если изображение не передано — генерирует автоматически."""
     if not post_id:
-        # Сохраняем в БД
         post_id = await db.add_content_post(
             title="Preview",
             body=text,
@@ -640,10 +669,38 @@ async def show_preview(message: Message, text: str, image_file_id: Optional[str]
             channel="preview",
             status="preview"
         )
-    
-    kb = get_preview_keyboard(post_id, bool(image_file_id))
+
     caption = f"👁 <b>Предпросмотр</b>\n\n{text[:700]}{'...' if len(text) > 700 else ''}"
-    
+
+    if not image_file_id:
+        # Авто-генерация обложки по теме поста
+        status_msg = await message.answer("🎨 <b>Генерирую обложку...</b>", parse_mode="HTML")
+        prompt = _build_cover_prompt(text)
+        image_b64 = await _auto_generate_image(prompt)
+        try:
+            await status_msg.delete()
+        except Exception:
+            pass
+
+        if image_b64:
+            try:
+                image_bytes = base64.b64decode(image_b64)
+                photo_input = BufferedInputFile(image_bytes, filename="cover.jpg")
+                sent = await message.answer_photo(
+                    photo=photo_input,
+                    caption=caption,
+                    reply_markup=get_preview_keyboard(post_id, True),
+                    parse_mode="HTML"
+                )
+                # Сохраняем file_id в БД, чтобы использовать при публикации
+                if sent.photo:
+                    await db.update_content_plan_entry(post_id, image_url=sent.photo[-1].file_id)
+                return post_id
+            except Exception as e:
+                logger.warning(f"Auto-image preview failed: {e}")
+
+    # Fallback — превью без картинки (или с переданным изображением)
+    kb = get_preview_keyboard(post_id, bool(image_file_id))
     if image_file_id:
         await message.answer_photo(photo=image_file_id, caption=caption, reply_markup=kb, parse_mode="HTML")
     else:
@@ -829,6 +886,35 @@ async def ai_visual_handler(message: Message, state: FSMContext):
 async def visual_back(callback: CallbackQuery, state: FSMContext):
     await callback.answer()
     await visual_select_model(callback.message, state)
+
+
+@content_router.callback_query(F.data.startswith("art_to_post:"))
+async def art_to_post_handler(callback: CallbackQuery, state: FSMContext):
+    """Создаёт текстовый пост по промпту от изображения."""
+    topic = callback.data.split(":", 1)[1]
+    await callback.answer()
+    await callback.message.answer("✍️ <b>Пишу пост по теме изображения...</b>", parse_mode="HTML")
+
+    prompt = (
+        f"Напиши экспертный пост для Telegram-канала по перепланировкам (TERION).\n\n"
+        f"Тема изображения: «{topic}»\n\n"
+        f"Структура:\n"
+        f"1) Цепляющий заголовок с эмодзи\n"
+        f"2) 2-3 абзаца экспертного контента (400-500 знаков)\n"
+        f"3) Призыв: 👉 Записаться на консультацию: @Parkhovenko_i_kompaniya_bot\n\n"
+        f"Используй термины: МЖИ, несущие стены, трассировка, СНиП. Без общих фраз."
+    )
+    text = await router_ai.generate(prompt, max_tokens=800)
+    if not text:
+        text = (
+            f"<b>🏠 Перепланировка по теме: {topic}</b>\n\n"
+            f"Каждый объект уникален. Правильный подход — согласование с МЖИ, "
+            f"расчёт несущих конструкций и трассировка изменений по СНиП.\n\n"
+            f"👉 Записаться на консультацию: @Parkhovenko_i_kompaniya_bot"
+        )
+
+    await show_preview(callback.message, text)
+    await state.set_state(ContentStates.preview_mode)
 
 
 # === 📅 СЕРИЯ ПОСТОВ ===
@@ -1788,21 +1874,40 @@ async def back_to_menu(callback: CallbackQuery, state: FSMContext):
 @content_router.callback_query(F.data.startswith("queue_img_"))
 async def queue_img_handler(callback: CallbackQuery):
     post_id = int(callback.data.split("_")[-1])
-    await callback.answer("🎨 Генерирую обложку для поста...")
-    from services.image_generator import image_generator
-    from database import db
+    await callback.answer("🎨 Генерирую обложку...")
 
     post = await db.get_content_post(post_id)
-    if post:
-        image_bytes = await image_generator.generate_cover(post.get('title', 'Перепланировка'))
-        if image_bytes:
-            from aiogram.types import BufferedInputFile
-            photo = BufferedInputFile(image_bytes, filename="cover.jpg")
-            await callback.message.answer_photo(photo=photo, caption=f"🖼 Обложка для поста #{post_id}")
-        else:
-            await callback.message.answer("❌ Ошибка генерации")
-    else:
-        await callback.answer("❌ Пост не найден")
+    if not post:
+        await callback.message.answer("❌ Пост не найден")
+        return
+
+    # Строим промпт по содержимому поста
+    body = post.get("body") or post.get("title") or "Перепланировка квартиры Москва"
+    prompt = _build_cover_prompt(body)
+
+    image_b64 = await _auto_generate_image(prompt)
+    if not image_b64:
+        await callback.message.answer("❌ Не удалось сгенерировать обложку")
+        return
+
+    try:
+        image_bytes = base64.b64decode(image_b64)
+        photo = BufferedInputFile(image_bytes, filename="cover.jpg")
+        sent = await callback.message.answer_photo(
+            photo=photo,
+            caption=f"🖼 <b>Обложка для поста #{post_id}</b>",
+            parse_mode="HTML"
+        )
+        # Сохраняем file_id — теперь при публикации картинка прикрепится автоматически
+        if sent.photo:
+            await db.update_content_plan_entry(post_id, image_url=sent.photo[-1].file_id)
+            await callback.message.answer(
+                f"✅ Обложка сохранена к посту #{post_id} и будет прикреплена при публикации.",
+                reply_markup=get_back_btn()
+            )
+    except Exception as e:
+        logger.error(f"queue_img send error: {e}")
+        await callback.message.answer("❌ Ошибка отправки изображения")
 
 @content_router.callback_query(F.data.startswith("queue_pub_"))
 async def queue_pub_handler(callback: CallbackQuery):
