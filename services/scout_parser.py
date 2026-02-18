@@ -502,6 +502,11 @@ class ScoutParser:
                         entity = await self._throttled_get_entity(client, link)
                         cid = getattr(entity, "id", None)
                         if cid is None:
+                            logger.warning(
+                                "⚠️ Чат разрешён, но entity.id == None: %s (тип: %s). "
+                                "Возможно, это медиа-канал без числового ID.",
+                                link, type(entity).__name__,
+                            )
                             continue
                         channels_to_scan.append({
                             "id": cid,
@@ -512,7 +517,36 @@ class ScoutParser:
                             "db_id": t.get("id")
                         })
                     except Exception as e:
-                        logger.warning("Не удалось разрешить чат %s: %s", link, e)
+                        err_str = str(e).lower()
+                        is_private = (
+                            "no user has username" in err_str
+                            or "username not occupied" in err_str
+                            or "channel invalid" in err_str
+                            or "chat not found" in err_str
+                        )
+                        is_invite = "+joinchat" in link or "/+" in link
+
+                        if is_private and is_invite:
+                            logger.error(
+                                "🔒 ПРИВАТНАЯ ССЫЛКА-ПРИГЛАШЕНИЕ: %s — парсер-аккаунт "
+                                "(%s) должен быть участником этой группы. "
+                                "Войдите в чат вручную и повторите. Ошибка: %s",
+                                link, "TELEGRAM_PHONE", e,
+                            )
+                        elif is_private:
+                            logger.error(
+                                "❌ НЕСУЩЕСТВУЮЩИЙ USERNAME: %s — чат с таким именем "
+                                "не найден в Telegram. Проверьте правильность ссылки "
+                                "или замените на числовой chat_id. Ошибка: %s",
+                                link, e,
+                            )
+                        else:
+                            logger.error(
+                                "⚠️ Не удалось разрешить чат %s: %s. "
+                                "Если это закрытая группа — добавьте аккаунт-парсер "
+                                "вручную и вставьте числовой chat_id вместо ссылки.",
+                                link, e,
+                            )
             except Exception as e:
                 logger.warning("Не удалось загрузить активные цели из БД: %s", e)
         if not channels_to_scan:
