@@ -9,7 +9,7 @@ from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 import logging
 
-from keyboards.main_menu import get_main_menu, get_admin_menu, get_urgent_btn, get_content_menu
+from keyboards.main_menu import get_main_menu, get_admin_menu, get_urgent_btn
 from handlers.quiz import QuizStates
 
 
@@ -18,8 +18,6 @@ class QueueStates(StatesGroup):
 from config import ADMIN_ID, is_admin
 from database import db
 from agents.creative_agent import creative_agent
-from services.publisher import publisher
-from services.image_generator import image_generator
 
 logger = logging.getLogger(__name__)
 router = Router()
@@ -96,10 +94,10 @@ async def handle_start(message: Message, state: FSMContext):
     if is_admin(user_id):
         await message.answer(
             "🎯 <b>Главное меню</b>\n\n"
-            "🛠 <b>Создать пост</b> — Текст → Фото → Публикация\n"
-            "🕵️‍♂️ <b>Темы от Шпиона</b> — идеи для постов по лидам из чатов\n"
-            "📅 <b>Очередь постов</b> — черновики и статус запланированных задач\n\n"
-            "Выберите:",
+            "🕵️‍♂️ <b>Темы от Шпиона</b> — горячие идеи из чатов → сохранить в контент-план\n"
+            "💰 <b>Инвест-калькулятор</b> — покажите клиенту прирост стоимости после перепланировки\n"
+            "📝 <b>Записаться на консультацию</b> — запустить квиз\n\n"
+            "<i>Для публикаций → контент-бот</i>",
             reply_markup=get_admin_menu()
         )
     else:
@@ -109,13 +107,19 @@ async def handle_start(message: Message, state: FSMContext):
         )
 
 
-@router.message(F.text == "🛠 Создать пост")
-async def create_post_handler(message: Message, state: FSMContext):
-    """Создание поста: Текст, Фото, ИИ-Визуал. Публикация — TERION / ДОМ ГРАНД / MAX."""
+@router.message(F.text == "💰 Инвест-калькулятор")
+async def invest_calc_start_handler(message: Message, state: FSMContext):
+    """Инвест-калькулятор: оценка прироста стоимости после перепланировки."""
+    from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
     await message.answer(
-        "🛠 <b>Создание поста</b>\n\n"
-        "Выберите формат (публикация в каналы — под превью):",
-        reply_markup=get_content_menu()
+        "💰 <b>Инвест-калькулятор</b>\n\n"
+        "Покажите клиенту, как вырастет стоимость квартиры после узаконенной перепланировки.\n\n"
+        "По данным рынка: прирост составляет <b>+12–18%</b> от текущей стоимости.\n\n"
+        "Нажмите кнопку, чтобы запустить расчёт:",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="📊 Рассчитать прирост стоимости", callback_data="mode:invest")]
+        ]),
+        parse_mode="HTML"
     )
 
 
@@ -148,7 +152,7 @@ def _normalize_display_title(s: str, max_len: int = 70) -> str:
 
 @router.message(F.text == "🕵️‍♂️ Темы от Шпиона")
 async def spy_topics_handler(message: Message, state: FSMContext):
-    """Темы от Шпиона: свежие лиды из spy_leads → 3 идеи через CreativeAgent."""
+    """Темы от Шпиона: свежие лиды → 3 идеи через CreativeAgent → сохранить в контент-план."""
     await message.answer("🔍 <b>Шпион подтягивает лиды и готовит идеи...</b>", parse_mode="HTML")
     try:
         leads = await db.get_recent_spy_leads(limit=30)
@@ -156,19 +160,15 @@ async def spy_topics_handler(message: Message, state: FSMContext):
         topics = await creative_agent.ideas_from_spy_leads(leads, count=3, trends=trends)
         await state.update_data(scout_topics=topics)
         text = "🕵️‍♂️ <b>Темы от Шпиона</b>\n\n"
-        text += "Выберите, что сделать с темой:\n\n"
+        text += "Горячие идеи из чатов. Сохраните в черновики — и доработайте в контент-боте:\n\n"
         buttons = []
         for i, topic in enumerate(topics, 1):
             title = _normalize_display_title(topic.get("title", ""))
             insight = (topic.get("insight") or "").strip()
             text += f"<b>{i}. {title}</b>\n   💡 {insight}\n\n"
             buttons.append([
-                InlineKeyboardButton(text=f"📝 Создать пост #{i}", callback_data=f"create_post_{i}"),
-                InlineKeyboardButton(text=f"📢 Опубликовать #{i}", callback_data=f"pub_topic_{i}"),
-            ])
-            buttons.append([
-                InlineKeyboardButton(text=f"🖼 Обложка #{i}", callback_data=f"gen_img_{i}"),
                 InlineKeyboardButton(text=f"📋 В черновики #{i}", callback_data=f"to_draft_{i}"),
+                InlineKeyboardButton(text=f"🖼 Обложка #{i}", callback_data=f"gen_img_{i}"),
             ])
         buttons.append([InlineKeyboardButton(text="🔄 Новые темы", callback_data="refresh_spy")])
         keyboard = InlineKeyboardMarkup(inline_keyboard=buttons)
@@ -185,7 +185,7 @@ async def refresh_spy_handler(callback: CallbackQuery, state: FSMContext):
 
 @router.callback_query(F.data.startswith("create_post_"))
 async def create_post_from_topic_handler(callback: CallbackQuery, state: FSMContext):
-    """Создать пост по выбранной теме: сохраняем в черновики и предлагаем перейти в Очередь."""
+    """Сохранить тему в черновики контент-плана."""
     topic_idx = int(callback.data.split("_")[-1]) - 1
     data = await state.get_data()
     topics = data.get("scout_topics", [])
@@ -195,7 +195,6 @@ async def create_post_from_topic_handler(callback: CallbackQuery, state: FSMCont
     topic = topics[topic_idx]
     title = _normalize_display_title(topic.get("title", ""), max_len=200)
     body = (topic.get("insight") or "").strip() or title
-    from datetime import datetime
     post_id = await db.add_content_post(
         title=title,
         body=body,
@@ -203,11 +202,11 @@ async def create_post_from_topic_handler(callback: CallbackQuery, state: FSMCont
         channel="terion",
         status="draft",
     )
-    await callback.answer(f"📝 Пост #{post_id} добавлен в черновики")
+    await callback.answer(f"📋 Сохранено в черновики #{post_id}")
     await callback.message.answer(
-        f"✅ <b>Пост по теме добавлен в черновики</b>\n\n"
-        f"Заголовок: {title[:80]}{'…' if len(title) > 80 else ''}\n\n"
-        f"Откройте <b>📅 Очередь постов</b> — там можно отредактировать или опубликовать пост #{post_id}.",
+        f"✅ <b>Идея сохранена в черновики</b> (пост #{post_id})\n\n"
+        f"<b>Тема:</b> {title[:80]}{'…' if len(title) > 80 else ''}\n\n"
+        f"Откройте контент-бот → <b>📅 Очередь постов</b>, чтобы доработать и опубликовать.",
         parse_mode="HTML"
     )
 
@@ -262,35 +261,6 @@ async def generate_image_handler(callback: CallbackQuery, state: FSMContext):
     else:
         await callback.message.answer("❌ Не удалось сгенерировать обложку")
 
-@router.callback_query(F.data.startswith("pub_topic_"))
-async def publish_topic_handler(callback: CallbackQuery, state: FSMContext):
-    topic_idx = int(callback.data.split("_")[-1]) - 1
-    data = await state.get_data()
-    topics = data.get("scout_topics", [])
-    
-    if topic_idx >= len(topics):
-        await callback.answer("❌ Тема не найдена")
-        return
-        
-    topic = topics[topic_idx]
-    await callback.answer("📢 Публикую...")
-    
-    # Генерируем обложку перед публикацией
-    image_bytes = await image_generator.generate_from_topic(topic)
-    
-    post_text = f"📌 <b>{topic['title']}</b>\n\n{topic['insight']}\n\n#перепланировка #согласование #терион"
-    
-    results = await publisher.publish_all(post_text, image_bytes)
-    
-    success_count = sum(1 for r in results.values() if r)
-    total_count = len(results)
-    
-    await callback.message.answer(
-        f"✅ <b>Публикация завершена!</b>\n"
-        f"Успешно: {success_count}/{total_count}\n"
-        f"Каналы: {', '.join(results.keys())}",
-        parse_mode="HTML"
-    )
 
 
 def _format_scheduler_status() -> str:
