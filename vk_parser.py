@@ -1,6 +1,6 @@
-"""
-VK Parser — мониторинг групп ВКонтакте.
-Проверяет новые посты по ключевым словам.
+﻿"""
+VK Parser вЂ” РјРѕРЅРёС‚РѕСЂРёРЅРі РіСЂСѓРїРї Р’РљРѕРЅС‚Р°РєС‚Рµ.
+РџСЂРѕРІРµСЂСЏРµС‚ РЅРѕРІС‹Рµ РїРѕСЃС‚С‹ РїРѕ РєР»СЋС‡РµРІС‹Рј СЃР»РѕРІР°Рј.
 """
 import asyncio
 import logging
@@ -20,14 +20,14 @@ VK_API_VERSION = "5.199"
 
 
 class VKParser:
-    """Парсер групп ВКонтакте"""
+    """РџР°СЂСЃРµСЂ РіСЂСѓРїРї Р’РљРѕРЅС‚Р°РєС‚Рµ"""
     
     def __init__(self, token: str):
         self.token = token
         self.session: Optional[aiohttp.ClientSession] = None
     
     async def _request(self, method: str, params: dict) -> Optional[dict]:
-        """Вызов VK API"""
+        """Р’С‹Р·РѕРІ VK API"""
         params["access_token"] = self.token
         params["v"] = VK_API_VERSION
         
@@ -45,17 +45,17 @@ class VKParser:
             return None
     
     async def connect(self):
-        """Подключение сессии"""
+        """РџРѕРґРєР»СЋС‡РµРЅРёРµ СЃРµСЃСЃРёРё"""
         self.session = aiohttp.ClientSession()
     
     async def close(self):
-        """Закрытие сессии"""
+        """Р—Р°РєСЂС‹С‚РёРµ СЃРµСЃСЃРёРё"""
         if self.session:
             await self.session.close()
     
     async def get_group_id(self, screen_name: str) -> Optional[int]:
-        """Получение ID группы по короткому имени"""
-        # Убираем vk.com/ если есть
+        """РџРѕР»СѓС‡РµРЅРёРµ ID РіСЂСѓРїРїС‹ РїРѕ РєРѕСЂРѕС‚РєРѕРјСѓ РёРјРµРЅРё"""
+        # РЈР±РёСЂР°РµРј vk.com/ РµСЃР»Рё РµСЃС‚СЊ
         screen_name = screen_name.replace("vk.com/", "")
         
         result = await self._request("groups.getById", {"group_id": screen_name})
@@ -64,7 +64,7 @@ class VKParser:
         return None
     
     async def get_posts(self, group_id: int, count: int = 10) -> List[Dict]:
-        """Получение последних постов группы"""
+        """РџРѕР»СѓС‡РµРЅРёРµ РїРѕСЃР»РµРґРЅРёС… РїРѕСЃС‚РѕРІ РіСЂСѓРїРїС‹"""
         result = await self._request("wall.get", {
             "owner_id": -group_id,
             "count": count,
@@ -76,7 +76,7 @@ class VKParser:
         return []
     
     def check_keywords(self, text: str) -> Optional[str]:
-        """Проверка текста на ключевые слова"""
+        """РџСЂРѕРІРµСЂРєР° С‚РµРєСЃС‚Р° РЅР° РєР»СЋС‡РµРІС‹Рµ СЃР»РѕРІР°"""
         if not text:
             return None
         
@@ -87,7 +87,7 @@ class VKParser:
         return None
     
     async def forward_to_tg(self, post: dict, group_name: str, keyword: str):
-        """Пересылка поста в Telegram"""
+        """РџРµСЂРµСЃС‹Р»РєР° РїРѕСЃС‚Р° РІ Telegram"""
         from aiogram import Bot
         
         bot = Bot(token=self.session.get("_bot_token") if self.session else None)
@@ -97,23 +97,23 @@ class VKParser:
             post_id = post.get("id")
             owner_id = post.get("owner_id")
             
-            # Формируем ссылку
+            # Р¤РѕСЂРјРёСЂСѓРµРј СЃСЃС‹Р»РєСѓ
             group_id = abs(owner_id)
             link = f"https://vk.com/wall-{group_id}_{post_id}"
             
-            message = f"""📘 <b>Лид из VK!</b>
+            message = f"""рџ“ <b>Р›РёРґ РёР· VK!</b>
 
-💬 <b>Ключевое слово:</b> {keyword}
-📍 <b>Группа:</b> {group_name}
+рџ’¬ <b>РљР»СЋС‡РµРІРѕРµ СЃР»РѕРІРѕ:</b> {keyword}
+рџ“Ќ <b>Р“СЂСѓРїРїР°:</b> {group_name}
 
-📝 <b>Текст:</b>
+рџ“ќ <b>РўРµРєСЃС‚:</b>
 {text[:500]}
 
-🔗 <a href="{link}">Открыть в VK</a>
+рџ”— <a href="{link}">РћС‚РєСЂС‹С‚СЊ РІ VK</a>
 
-👉 <a href="https://t.me/TERION_KvizBot?start=quiz">КВИЗ</a> | <a href="tg://user?id=unknown">Написать</a>"""
+рџ‘‰ <a href="https://t.me/Parkhovenko_i_kompaniya_bot?start=quiz">РљР’РР—</a> | <a href="tg://user?id=unknown">РќР°РїРёСЃР°С‚СЊ</a>"""
             
-            # Бот для отправки в TG
+            # Р‘РѕС‚ РґР»СЏ РѕС‚РїСЂР°РІРєРё РІ TG
             from config import BOT_TOKEN
             tg_bot = Bot(token=BOT_TOKEN)
             
@@ -124,18 +124,18 @@ class VKParser:
                 parse_mode="HTML"
             )
             
-            logger.info(f"✅ VK лид переслан: {keyword} из {group_name}")
+            logger.info(f"вњ… VK Р»РёРґ РїРµСЂРµСЃР»Р°РЅ: {keyword} РёР· {group_name}")
             
             await tg_bot.session.close()
             
         except Exception as e:
-            logger.error(f"❌ Ошибка пересылки VK: {e}")
+            logger.error(f"вќЊ РћС€РёР±РєР° РїРµСЂРµСЃС‹Р»РєРё VK: {e}")
 
 
 async def check_vk_groups(groups: List[str]):
-    """Проверка групп ВК на новые посты"""
+    """РџСЂРѕРІРµСЂРєР° РіСЂСѓРїРї Р’Рљ РЅР° РЅРѕРІС‹Рµ РїРѕСЃС‚С‹"""
     if not VK_TOKEN:
-        logger.error("VK_TOKEN не найден")
+        logger.error("VK_TOKEN РЅРµ РЅР°Р№РґРµРЅ")
         return
     
     parser = VKParser(VK_TOKEN)
@@ -143,15 +143,15 @@ async def check_vk_groups(groups: List[str]):
     
     try:
         for group_url in groups:
-            logger.info(f"🔍 Проверяю группу: {group_url}")
+            logger.info(f"рџ”Ќ РџСЂРѕРІРµСЂСЏСЋ РіСЂСѓРїРїСѓ: {group_url}")
             
-            # Получаем ID группы
+            # РџРѕР»СѓС‡Р°РµРј ID РіСЂСѓРїРїС‹
             group_id = await parser.get_group_id(group_url)
             if not group_id:
-                logger.error(f"Не удалось получить ID группы: {group_url}")
+                logger.error(f"РќРµ СѓРґР°Р»РѕСЃСЊ РїРѕР»СѓС‡РёС‚СЊ ID РіСЂСѓРїРїС‹: {group_url}")
                 continue
             
-            # Получаем посты
+            # РџРѕР»СѓС‡Р°РµРј РїРѕСЃС‚С‹
             posts = await parser.get_posts(group_id, count=5)
             
             for post in posts:
@@ -159,11 +159,11 @@ async def check_vk_groups(groups: List[str]):
                 keyword = parser.check_keywords(text)
                 
                 if keyword:
-                    # Найден ключевик!
+                    # РќР°Р№РґРµРЅ РєР»СЋС‡РµРІРёРє!
                     group_name = group_url.replace("vk.com/", "")
-                    logger.info(f"🔔 Найден VK лид: {keyword} в {group_name}")
+                    logger.info(f"рџ”” РќР°Р№РґРµРЅ VK Р»РёРґ: {keyword} РІ {group_name}")
                     
-                    # Здесь можно добавить логику пересылки
+                    # Р—РґРµСЃСЊ РјРѕР¶РЅРѕ РґРѕР±Р°РІРёС‚СЊ Р»РѕРіРёРєСѓ РїРµСЂРµСЃС‹Р»РєРё
                     # await parser.forward_to_tg(post, group_name, keyword)
                     
     finally:
@@ -172,26 +172,26 @@ async def check_vk_groups(groups: List[str]):
 
 async def start_vk_monitoring(groups: List[str], interval: int = 300):
     """
-    Запуск мониторинга VK групп.
+    Р—Р°РїСѓСЃРє РјРѕРЅРёС‚РѕСЂРёРЅРіР° VK РіСЂСѓРїРї.
     
     Args:
-        groups: Список групп для мониторинга (['himki', 'moscow', ...])
-        interval: Интервал проверки в секундах (по умолчанию 5 минут)
+        groups: РЎРїРёСЃРѕРє РіСЂСѓРїРї РґР»СЏ РјРѕРЅРёС‚РѕСЂРёРЅРіР° (['himki', 'moscow', ...])
+        interval: РРЅС‚РµСЂРІР°Р» РїСЂРѕРІРµСЂРєРё РІ СЃРµРєСѓРЅРґР°С… (РїРѕ СѓРјРѕР»С‡Р°РЅРёСЋ 5 РјРёРЅСѓС‚)
     """
-    logger.info("🚀 Запуск мониторинга VK групп...")
+    logger.info("рџљЂ Р—Р°РїСѓСЃРє РјРѕРЅРёС‚РѕСЂРёРЅРіР° VK РіСЂСѓРїРї...")
     
     while True:
         try:
             await check_vk_groups(groups)
         except Exception as e:
-            logger.error(f"Ошибка мониторинга VK: {e}")
+            logger.error(f"РћС€РёР±РєР° РјРѕРЅРёС‚РѕСЂРёРЅРіР° VK: {e}")
         
         await asyncio.sleep(interval)
 
 
 if __name__ == "__main__":
-    # Пример использования
-    test_groups = ["himki", "moscow"]  # Замените на свои группы
+    # РџСЂРёРјРµСЂ РёСЃРїРѕР»СЊР·РѕРІР°РЅРёСЏ
+    test_groups = ["himki", "moscow"]  # Р—Р°РјРµРЅРёС‚Рµ РЅР° СЃРІРѕРё РіСЂСѓРїРїС‹
     
     logging.basicConfig(level=logging.INFO)
     asyncio.run(start_vk_monitoring(test_groups))

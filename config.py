@@ -40,7 +40,7 @@ PUBLISH_TIME_DEFAULT = os.getenv("PUBLISH_TIME_DEFAULT", "12:00")  # МСК, "Ч
 POSTS_PER_DAY_LIMIT = int(os.getenv("POSTS_PER_DAY_LIMIT", "2"))
 
 # === QUIZ LINK И ХЭШТЕГИ ДЛЯ ПОСТОВ ===
-VK_QUIZ_LINK = os.getenv("VK_QUIZ_LINK", "https://t.me/TERION_KvizBot?start=quiz")
+VK_QUIZ_LINK = os.getenv("VK_QUIZ_LINK", "https://t.me/Parkhovenko_i_kompaniya_bot?start=quiz")
 # Обязательные хэштеги в каждом посте (можно переопределить в .env)
 CONTENT_HASHTAGS = os.getenv("CONTENT_HASHTAGS", "#TERION #перепланировка #недвижимость #москва")
 
