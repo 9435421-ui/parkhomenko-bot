@@ -11,7 +11,7 @@ from aiogram.fsm.state import State, StatesGroup
 from aiogram.fsm.context import FSMContext
 
 from database import db
-from config import LEADS_GROUP_CHAT_ID, THREAD_ID_KVARTIRY, THREAD_ID_KOMMERCIA, THREAD_ID_DOMA
+from config import LEADS_GROUP_CHAT_ID, THREAD_ID_KVARTIRY, THREAD_ID_KOMMERCIA, THREAD_ID_DOMA, THREAD_ID_LOGS
 
 logger = logging.getLogger(__name__)
 router = Router()
@@ -122,6 +122,57 @@ def get_thread_id(object_type: str) -> int:
         return THREAD_ID_DOMA
     else:
         return THREAD_ID_KVARTIRY
+
+
+# === УТИЛИТА: сохранить «Тёплый» при брошенном квизе ===
+async def _save_warm_lead(state: FSMContext, user_id: int, bot: Bot):
+    """
+    Если пользователь бросил квиз на полпути — сохраняем то, что успел заполнить,
+    со статусом «Теплый». Лид уходит в топик Логи для отслеживания.
+    """
+    data = await state.get_data()
+    if not data:
+        return
+    user_name = data.get("user_name") or data.get("first_name") or f"id{user_id}"
+    phone = data.get("phone", "не получен")
+    city = data.get("city", "—")
+    filled = [k for k in ("city", "object_type", "floors", "area", "status", "description") if data.get(k)]
+    if not filled:
+        return  # ничего не заполнено — не сохраняем
+    try:
+        lead_id = await db.add_lead(
+            user_id=user_id,
+            name=user_name,
+            phone=phone,
+            city=city,
+            object_type=data.get("object_type", ""),
+            total_floors=data.get("floors", ""),
+            area=data.get("area", ""),
+            remodeling_status=data.get("status", "Квиз не завершён"),
+            change_plan=data.get("description", ""),
+            extra_questions="[Квиз брошен]",
+        )
+        # Помечаем как тёплый
+        try:
+            await db.update_lead_status(lead_id, "warm")
+        except Exception:
+            pass
+        # Уведомление в топик Логи
+        text = (
+            f"🟡 <b>Брошен квиз — Тёплый лид</b>\n\n"
+            f"👤 {user_name} | 📞 {phone}\n"
+            f"📍 Город: {city}\n"
+            f"Заполнено шагов: {len(filled)} / 6\n"
+            f"tg://user?id={user_id}"
+        )
+        await bot.send_message(
+            LEADS_GROUP_CHAT_ID,
+            text,
+            message_thread_id=THREAD_ID_LOGS,
+            parse_mode="HTML",
+        )
+    except Exception as e:
+        logger.debug("Не удалось сохранить тёплый лид: %s", e)
 
 
 # === СОГЛАСИЕ С ПД → КОНТАКТ ===

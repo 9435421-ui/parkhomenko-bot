@@ -48,7 +48,16 @@ async def handle_start(message: Message, state: FSMContext):
     user_id = message.from_user.id
     start_arg = _get_start_arg(message.text or "")
     logger.info(f"📨 /start от: {user_id}, arg={start_arg!r}")
-    
+
+    # Брошенный квиз: если пользователь нажал /start на полпути — сохраняем тёплый лид
+    current_state = await state.get_state()
+    if current_state and "Quiz" in str(current_state):
+        try:
+            from handlers.quiz import _save_warm_lead
+            await _save_warm_lead(state, user_id, message.bot)
+        except Exception as _e:
+            logger.debug("Сохранение тёплого лида: %s", _e)
+
     await state.clear()
     
     # Ссылка из канала/поста: t.me/terion_bot?start=quiz → сразу начинаем квиз (Бриф)

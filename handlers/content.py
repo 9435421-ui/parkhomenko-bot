@@ -1378,16 +1378,40 @@ async def send_post(bot: Bot, channel_id: int, post: dict, channel_name: str) ->
         return False, str(e)
 
 
+async def _check_daily_limit(callback) -> bool:
+    """
+    Проверяет лимит публикаций на сегодня (POSTS_PER_DAY_LIMIT из config).
+    Если лимит исчерпан — уведомляет пользователя и возвращает False.
+    """
+    from config import POSTS_PER_DAY_LIMIT
+    if POSTS_PER_DAY_LIMIT <= 0:
+        return True  # лимит отключён
+    try:
+        count = await db.count_published_today()
+    except Exception:
+        return True  # не удалось проверить — пропускаем
+    if count >= POSTS_PER_DAY_LIMIT:
+        await callback.answer(
+            f"⛔ Лимит на сегодня: {POSTS_PER_DAY_LIMIT} поста опубликовано. "
+            f"Следующую публикацию можно сделать завтра.",
+            show_alert=True,
+        )
+        return False
+    return True
+
+
 @content_router.callback_query(F.data.startswith("pub_terion:"))
 async def publish_terion(callback: CallbackQuery, state: FSMContext):
     """Публикация только в TERION"""
     post_id = int(callback.data.split(":")[1])
     post = await db.get_content_post(post_id)
-    
+
     if not post:
         await callback.answer("❌ Пост не найден")
         return
-    
+    if not await _check_daily_limit(callback):
+        return
+
     await callback.answer("🚀 Публикую в TERION...")
     
     success, result = await send_post(callback.bot, CHANNEL_ID_TERION, post, "TERION")
@@ -1414,11 +1438,13 @@ async def publish_dom_grnd(callback: CallbackQuery, state: FSMContext):
     """Публикация только в ДОМ ГРАНД"""
     post_id = int(callback.data.split(":")[1])
     post = await db.get_content_post(post_id)
-    
+
     if not post:
         await callback.answer("❌ Пост не найден")
         return
-    
+    if not await _check_daily_limit(callback):
+        return
+
     await callback.answer("🚀 Публикую в ДОМ ГРАНД...")
     
     success, result = await send_post(callback.bot, CHANNEL_ID_DOM_GRAD, post, "ДОМ ГРАНД")
@@ -1483,11 +1509,13 @@ async def publish_max(callback: CallbackQuery, state: FSMContext):
 async def publish_all(callback: CallbackQuery, state: FSMContext):
     post_id = int(callback.data.split(":")[1])
     post = await db.get_content_post(post_id)
-    
+
     if not post:
         await callback.answer("❌ Пост не найден")
         return
-    
+    if not await _check_daily_limit(callback):
+        return
+
     await callback.answer("🚀 Публикую...")
     
     text = ensure_quiz_and_hashtags(post['body'])

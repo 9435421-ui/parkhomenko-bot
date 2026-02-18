@@ -422,6 +422,26 @@ class Database:
             await cursor.execute("UPDATE leads SET thread_id = ? WHERE id = ?", (thread_id, lead_id))
             await self.conn.commit()
 
+    async def update_lead_status(self, lead_id: int, status: str):
+        """Обновить статус лида: warm / hot / done / archived и т.д."""
+        async with self.conn.cursor() as cursor:
+            await cursor.execute(
+                "UPDATE leads SET remodeling_status = ? WHERE id = ?",
+                (status, lead_id)
+            )
+            await self.conn.commit()
+
+    async def count_published_today(self) -> int:
+        """Количество опубликованных постов за сегодня (для лимита 1-2 поста в день)."""
+        async with self.conn.cursor() as cursor:
+            await cursor.execute(
+                """SELECT COUNT(*) FROM content_plan
+                   WHERE status = 'published'
+                   AND DATE(published_at) = DATE('now')"""
+            )
+            row = await cursor.fetchone()
+            return row[0] if row else 0
+
     # === ЛИДЫ ОТ ШПИОНА (spy_leads) ===
     async def add_spy_lead(
         self,

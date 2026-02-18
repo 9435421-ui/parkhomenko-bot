@@ -490,6 +490,48 @@ class ScoutParser:
             except Exception as e:
                 logger.warning("Не удалось загрузить target_resources для разведки: %s", e)
 
+        # Фильтр «Свой-Чужой»: собственные каналы TERION/Юлии исключаем из сканирования.
+        # Чтобы добавить новый канал — укажи его в .env как OWN_CHANNEL_IDS (через запятую).
+        from config import (
+            CHANNEL_ID_TERION, CHANNEL_ID_DOM_GRAD, NOTIFICATIONS_CHANNEL_ID,
+            LEADS_GROUP_CHAT_ID as _LEADS_GROUP_CHAT_ID,
+            THREAD_ID_LOGS, BOT_TOKEN,
+        )
+        _own_ids: set[int] = {
+            abs(CHANNEL_ID_TERION),
+            abs(CHANNEL_ID_DOM_GRAD),
+            abs(NOTIFICATIONS_CHANNEL_ID),
+            abs(_LEADS_GROUP_CHAT_ID),
+        }
+        _extra = os.getenv("OWN_CHANNEL_IDS", "")
+        for _raw in _extra.split(","):
+            _raw = _raw.strip()
+            if _raw.lstrip("-").isdigit():
+                _own_ids.add(abs(int(_raw)))
+
+        async def _notify_logs_topic(msg: str):
+            """Отправить системное сообщение в топик «Логи» рабочей группы."""
+            try:
+                from aiogram import Bot
+                from aiogram.client.default import DefaultBotProperties
+                _bot = None
+                try:
+                    from utils.bot_config import get_main_bot
+                    _bot = get_main_bot()
+                except Exception:
+                    pass
+                if _bot is None and BOT_TOKEN:
+                    _bot = Bot(token=BOT_TOKEN, default=DefaultBotProperties(parse_mode="HTML"))
+                if _bot:
+                    await _bot.send_message(
+                        _LEADS_GROUP_CHAT_ID,
+                        msg,
+                        message_thread_id=THREAD_ID_LOGS,
+                        parse_mode="HTML",
+                    )
+            except Exception as _log_err:
+                logger.debug("Не удалось отправить в топик Логи: %s", _log_err)
+
         # Список чатов: из БД (data-driven) или из конфига
         channels_to_scan = []
         if db:
@@ -508,6 +550,10 @@ class ScoutParser:
                                 "Возможно, это медиа-канал без числового ID.",
                                 link, type(entity).__name__,
                             )
+                            continue
+                        # Фильтр «Свой-Чужой»
+                        if abs(cid) in _own_ids:
+                            logger.info("⏭️ Пропуск собственного канала TERION: %s (id=%s)", link, cid)
                             continue
                         channels_to_scan.append({
                             "id": cid,
@@ -528,26 +574,36 @@ class ScoutParser:
                         is_invite = "+joinchat" in link or "/+" in link
 
                         if is_private and is_invite:
-                            logger.error(
-                                "🔒 ПРИВАТНАЯ ССЫЛКА-ПРИГЛАШЕНИЕ: %s — парсер-аккаунт "
-                                "(%s) должен быть участником этой группы. "
-                                "Войдите в чат вручную и повторите. Ошибка: %s",
-                                link, "TELEGRAM_PHONE", e,
+                            msg_text = (
+                                f"🔒 <b>Нужна помощь человека</b>\n\n"
+                                f"Чат: <code>{link}</code>\n"
+                                f"Статус: <b>ПРИВАТНАЯ ССЫЛКА-ПРИГЛАШЕНИЕ</b>\n"
+                                f"Действие: войдите в чат вручную с аккаунта TELEGRAM_PHONE, "
+                                f"затем шпион продолжит мониторинг.\n"
+                                f"Ошибка: <code>{e}</code>"
                             )
+                            logger.error("🔒 ПРИВАТНАЯ ССЫЛКА-ПРИГЛАШЕНИЕ: %s — Ошибка: %s", link, e)
+                            await _notify_logs_topic(msg_text)
                         elif is_private:
-                            logger.error(
-                                "❌ НЕСУЩЕСТВУЮЩИЙ USERNAME: %s — чат с таким именем "
-                                "не найден в Telegram. Проверьте правильность ссылки "
-                                "или замените на числовой chat_id. Ошибка: %s",
-                                link, e,
+                            msg_text = (
+                                f"❌ <b>Нужна помощь человека</b>\n\n"
+                                f"Чат: <code>{link}</code>\n"
+                                f"Статус: <b>НЕСУЩЕСТВУЮЩИЙ USERNAME</b>\n"
+                                f"Действие: проверьте правильность ссылки или замените "
+                                f"на числовой chat_id через @userinfobot.\n"
+                                f"Ошибка: <code>{e}</code>"
                             )
+                            logger.error("❌ НЕСУЩЕСТВУЮЩИЙ USERNAME: %s — Ошибка: %s", link, e)
+                            await _notify_logs_topic(msg_text)
                         else:
-                            logger.error(
-                                "⚠️ Не удалось разрешить чат %s: %s. "
-                                "Если это закрытая группа — добавьте аккаунт-парсер "
-                                "вручную и вставьте числовой chat_id вместо ссылки.",
-                                link, e,
+                            msg_text = (
+                                f"⚠️ <b>Чат недоступен</b>\n\n"
+                                f"Чат: <code>{link}</code>\n"
+                                f"Ошибка: <code>{e}</code>\n"
+                                f"Если закрытая группа — добавьте аккаунт-парсер вручную."
                             )
+                            logger.error("⚠️ Не удалось разрешить чат %s: %s", link, e)
+                            await _notify_logs_topic(msg_text)
             except Exception as e:
                 logger.warning("Не удалось загрузить активные цели из БД: %s", e)
         if not channels_to_scan:

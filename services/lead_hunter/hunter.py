@@ -475,6 +475,14 @@ class LeadHunter:
         except Exception as e:
             logger.error(f"❌ Не удалось отправить горячий лид админу: {e}")
 
+    @staticmethod
+    def _is_business_hours_msk() -> bool:
+        """True если текущее время 09:00–20:00 по МСК (UTC+3)."""
+        from datetime import timezone, timedelta
+        msk = timezone(timedelta(hours=3))
+        hour = datetime.now(msk).hour
+        return 9 <= hour < 20
+
     async def hunt(self):
         """Полный цикл: поиск → анализ → привлечение + проверка через AI Жюля и пересылка горячих лидов."""
         logger.info("🏹 LeadHunter: начало охоты за лидами...")
@@ -539,7 +547,18 @@ class LeadHunter:
         )
 
         from hunter_standalone.database import HunterDatabase as LocalHunterDatabase
+        # Анти-дубль: в рамках одного запуска не обрабатываем один и тот же post_id дважды
+        _seen_post_keys: set[str] = set()
+        _business_hours = self._is_business_hours_msk()
+        logger.info("🕐 Бизнес-часы МСК: %s", "да (09:00–20:00)" if _business_hours else "нет — горячие лиды не отправляются")
+
         for post in all_posts:
+            _post_key = f"{getattr(post, 'source_type', '')}:{getattr(post, 'source_id', '')}:{getattr(post, 'post_id', '')}"
+            if _post_key in _seen_post_keys:
+                logger.debug("⏭️ Анти-дубль: post %s уже обработан в этом цикле", _post_key)
+                continue
+            _seen_post_keys.add(_post_key)
+
             # Быстрая оценка через LeadAnalyzer (существующая ранняя логика) — ТЕПЕРЬ ВОЗВРАЩАЕТ DICT
             analysis_data = await self.analyzer.analyze_post(post.text)
             score = analysis_data.get("priority_score", 0) / 10.0 # Приводим к 0.0 - 1.0 для совместимости
@@ -800,10 +819,18 @@ class LeadHunter:
                         anton_recommendation = await self._get_anton_recommendation(post_text, main_db)
                     except Exception:
                         pass
-                    # Карточка лида в рабочую группу (с гео/высоткой и рекомендацией)
-                    if cards_sent < MAX_CARDS_PER_RUN:
+                    # Карточка лида в рабочую группу — только ST-4 в рабочее время МСК.
+                    # Остальные стадии не шумят в «Горячие лиды» вне расписания.
+                    _lead_stage = lead.get("pain_stage") or ""
+                    _is_hot = _lead_stage == "ST-4" or lead.get("hotness", 0) >= 4
+                    if cards_sent < MAX_CARDS_PER_RUN and (_is_hot and _business_hours or not _is_hot):
                         if await self._send_lead_card_to_group(lead, lead_id, profile_url, post_url, card_header, anton_recommendation):
                             cards_sent += 1
+                    elif _is_hot and not _business_hours:
+                        logger.info(
+                            "🌙 Горячий лид ST-4 найден вне рабочего времени МСК — "
+                            "карточка в группу отложена до 09:00. URL: %s", post_url
+                        )
                 if cards_sent:
                     logger.info("📋 В рабочую группу отправлено карточек лидов: %s", cards_sent)
                 # Дублирование в рабочую группу: краткий отчёт о сохранённых лидах
