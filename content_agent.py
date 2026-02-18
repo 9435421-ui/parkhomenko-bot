@@ -57,42 +57,70 @@ class ContentAgent:
         ]
 
     async def _call_yandex_gpt(self, user_prompt: str) -> str:
-        """Асинхронный вызов LLM API через aiohttp"""
-        system_prompt = """Ты — контент-менеджер Telegram-канала по перепланировкам квартир в Москве.
+        """Асинхронный вызов LLM API через aiohttp.
 
-Задача: генерировать посты, которые прогревают к заявке в бота @Parkhovenko_i_kompaniya_bot.
+        Если настроен ROUTER_AI_KEY и endpoint указывает на routerai.ru —
+        используем OpenAI-совместимый формат (gpt-4o-mini).
+        Иначе — Yandex GPT (yandexgpt/latest).
+        """
+        system_prompt = """Ты — ведущий контент-стратег и эксперт по продажам компании TERION.
+Твоя специализация: легализация перепланировок в Москве и МО.
 
-Стиль: экспертно, по-деловому, без воды, с понятными примерами и чёткими CTA."""
+Твоя задача: создавать виральный и экспертный контент, который убеждает владельцев недвижимости в необходимости профессионального согласования.
+Стиль: уверенный, экспертный, местами провокационный (через боли клиентов: штрафы, суды), но всегда конструктивный.
+
+Каждый пост должен вести к действию: переходу в @Parkhovenko_i_kompaniya_bot."""
+
+        is_router = "routerai.ru" in self.endpoint
 
         headers = {
             "Content-Type": "application/json",
-            "Authorization": f"Api-Key {self.api_key}",
-            "x-folder-id": self.folder_id
+            "Authorization": f"Bearer {self.api_key}" if is_router else f"Api-Key {self.api_key}",
         }
+        if not is_router and self.folder_id:
+            headers["x-folder-id"] = self.folder_id
 
-        payload = {
-            "modelUri": f"gpt://{self.folder_id}/yandexgpt/latest",
-            "completionOptions": {"stream": False, "temperature": 0.7, "maxTokens": 1000},
-            "messages": [
-                {"role": "system", "text": system_prompt},
-                {"role": "user", "text": user_prompt}
-            ]
-        }
+        if is_router:
+            payload = {
+                "model": os.getenv("ROUTER_AI_CHAT_MODEL", "gpt-4o-mini"),
+                "messages": [
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": user_prompt},
+                ],
+                "temperature": 0.7,
+                "max_tokens": 1000,
+            }
+        else:
+            payload = {
+                "modelUri": f"gpt://{self.folder_id}/yandexgpt/latest",
+                "completionOptions": {"stream": False, "temperature": 0.7, "maxTokens": 1000},
+                "messages": [
+                    {"role": "system", "text": system_prompt},
+                    {"role": "user", "text": user_prompt},
+                ],
+            }
 
         try:
             async with aiohttp.ClientSession() as session:
-                async with session.post(self.endpoint, headers=headers, json=payload, timeout=aiohttp.ClientTimeout(total=30)) as response:
+                async with session.post(
+                    self.endpoint, headers=headers, json=payload,
+                    timeout=aiohttp.ClientTimeout(total=30)
+                ) as response:
                     if response.status != 200:
-                        logger.error(f"GPT API error: {response.status}")
+                        error_text = await response.text()
+                        logger.error(f"GPT API error: {response.status} — {error_text[:200]}")
                         return ""
-                    
+
                     data = await response.json()
-                    text = data['result']['alternatives'][0]['message']['text']
-                    
+                    if is_router:
+                        text = data["choices"][0]["message"]["content"]
+                    else:
+                        text = data["result"]["alternatives"][0]["message"]["text"]
+
                     if not text or len(text.strip()) < 10:
                         logger.warning("GPT returned empty response")
                         return ""
-                    
+
                     return text
         except aiohttp.ClientError as e:
             logger.error(f"aiohttp error in GPT call: {e}")

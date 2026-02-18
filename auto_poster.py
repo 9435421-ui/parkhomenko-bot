@@ -11,8 +11,9 @@ import asyncio
 import logging
 import os
 from datetime import datetime
+import aiohttp
 from database.db import db
-from services.vk_service import vk_service
+from services.publisher import publisher
 
 logger = logging.getLogger(__name__)
 
@@ -22,6 +23,7 @@ class AutoPoster:
 
     def __init__(self, bot):
         self.bot = bot
+        publisher.bot = bot
         self.check_interval = 600  # 10 минут
 
     async def check_and_publish(self):
@@ -100,67 +102,33 @@ class AutoPoster:
         return configs.get(channel_key, configs['terion'])
 
     async def _publish_to_channel(self, post: dict, channel_config: dict) -> bool:
-        """Публикует пост в канал"""
+        """Публикует пост через Publisher во все каналы (TG + VK + Max.ru)."""
         try:
             text = self._format_post_text(post)
+            title = post.get("title", "") or ""
+            image_url = post.get("image_url")
+            image_bytes: bytes | None = None
 
-            if post.get('image_url'):
-                await self.bot.send_photo(
-                    chat_id=channel_config['chat_id'],
-                    photo=post['image_url'],
-                    caption=text,
-                    parse_mode='HTML'
-                )
-            else:
-                await self.bot.send_message(
-                    chat_id=channel_config['chat_id'],
-                    text=text,
-                    parse_mode='HTML'
-                )
+            # Скачиваем изображение по URL, если оно есть
+            if image_url and image_url.startswith("http"):
+                try:
+                    async with aiohttp.ClientSession() as session:
+                        async with session.get(
+                            image_url, timeout=aiohttp.ClientTimeout(total=30)
+                        ) as resp:
+                            if resp.status == 200:
+                                image_bytes = await resp.read()
+                                logger.info(
+                                    f"✅ Изображение скачано ({len(image_bytes)} байт)"
+                                )
+                except Exception as e:
+                    logger.warning(f"⚠️ Не удалось скачать изображение {image_url}: {e}")
 
-            # Если канал "both" - публикуем в VK
-            channel = post.get('channel', '').lower()
-            if channel == 'both':
-                await self._publish_to_vk(post)
-
-            return True
+            results = await publisher.publish_all(text, image_bytes, title)
+            return any(results.values())
 
         except Exception as e:
             logger.error(f"❌ Ошибка публикации: {e}")
-            return False
-
-    async def _publish_to_vk(self, post: dict) -> bool:
-        """Публикует пост в VK"""
-        try:
-            if not vk_service.vk_token:
-                logger.warning("VK не настроен, пропуск")
-                return False
-
-            # Форматируем текст для VK (без HTML)
-            title = post.get('title', '') or ''
-            body = post.get('body', '') or ''
-            cta = post.get('cta', '') or ''
-
-            vk_text = f"{title}\n\n{body}\n\n{cta}" if title else f"{body}\n\n{cta}"
-
-            # Публикуем
-            if post.get('image_url'):
-                # Если image_url это локальный путь - скачиваем и публикуем
-                image_path = post['image_url']
-                if image_path.startswith('http'):
-                    # Это URL - просто публикуем ссылку
-                    await vk_service.post(vk_text)
-                else:
-                    # Локальный файл
-                    await vk_service.post_with_photos(vk_text, [image_path])
-            else:
-                await vk_service.post(vk_text)
-
-            logger.info("✅ Пост опубликован в VK")
-            return True
-
-        except Exception as e:
-            logger.error(f"❌ Ошибка публикации в VK: {e}")
             return False
 
     def _format_post_text(self, post: dict) -> str:
