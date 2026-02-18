@@ -342,8 +342,15 @@ class LeadHunter:
         """Полный цикл: поиск → анализ → привлечение + проверка через AI Жюля и пересылка горячих лидов."""
         logger.info("🏹 LeadHunter: начало охоты за лидами...")
 
-        self.parser.last_scan_report = []
-        self.parser.last_scan_at = datetime.now()
+        # Принудительная очистка кеша парсера перед началом скана:
+        # сбрасываем предыдущие отчёты и список чатов, чтобы не опираться на старые смещения/сканы.
+        try:
+            self.parser.last_scan_report = []
+            self.parser.last_scan_chats_list = []
+            self.parser.last_scan_at = datetime.now()
+            logger.info("🔄 ScoutParser cache cleared before hunt (forced).")
+        except Exception:
+            pass
 
         from database import db as main_db
         tg_posts = await self.parser.parse_telegram(db=main_db)

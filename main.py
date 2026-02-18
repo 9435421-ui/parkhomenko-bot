@@ -174,8 +174,8 @@ async def main():
     # Lead Hunter & Creative Agent Integration
     hunter = LeadHunter()
     
-    # Поиск клиентов раз в 2 часа (каналы TG + VK)
-    scheduler.add_job(hunter.hunt, 'interval', hours=2)
+    # Поиск клиентов каждые 30 минут (каналы TG + VK)
+    scheduler.add_job(hunter.hunt, 'interval', minutes=30)
 
     # Гео-шпион 24/7: чаты ЖК (Перекрёсток, Самолёт, ПИК и т.д.) — каждые 5 мин
     async def run_geo_spy_job():
