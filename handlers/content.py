@@ -240,13 +240,23 @@ class RouterAIClient:
             "Content-Type": "application/json"
         }
     
-    async def generate(self, prompt: str, model: str = "openai/gpt-4o", max_tokens: int = 2000) -> Optional[str]:
-        """Генерация текста"""
+    async def generate(
+        self,
+        prompt: str,
+        model: str = "openai/gpt-4o",
+        max_tokens: int = 2000,
+        system_prompt: Optional[str] = None,
+    ) -> Optional[str]:
+        """Генерация текста. system_prompt задаёт роль/стиль модели."""
+        messages = []
+        if system_prompt:
+            messages.append({"role": "system", "content": system_prompt})
+        messages.append({"role": "user", "content": prompt})
         payload = {
             "model": model,
-            "messages": [{"role": "user", "content": prompt}],
+            "messages": messages,
             "max_tokens": max_tokens,
-            "temperature": 0.7
+            "temperature": 0.7,
         }
         
         try:
@@ -1340,93 +1350,114 @@ async def quick_start(message: Message, state: FSMContext):
     await state.set_state(ContentStates.ai_text)
 
 
-# === 💡 ИНТЕРЕСНЫЙ ФАКТ (из реальных ситуаций potential_leads.db) ===
+# === 💡 ИНТЕРЕСНЫЙ ФАКТ ===
+# Развлекательный формат: короткий, живой, без инструкций.
+# Читатель узнаёт что-то неожиданное — и запоминает канал.
+
+_FACT_CATEGORIES = {
+    "realty": {
+        "label": "🏠 Квартиры и Москва",
+        "hint": "Необычный факт о московских квартирах, планировках, новостройках или истории жилья.",
+    },
+    "numbers": {
+        "label": "🔢 Цифры и рекорды",
+        "hint": "Удивительная статистика или рекорд из мира стройки, ремонта или недвижимости.",
+    },
+    "history": {
+        "label": "📜 История жилья",
+        "hint": "Интересный исторический факт о хрущёвках, сталинках, советских нормах или "
+                "законах о перепланировке в СССР и России.",
+    },
+    "funny": {
+        "label": "😄 Курьёз из жизни",
+        "hint": "Смешной или неожиданный случай из практики ремонта или согласования. "
+                "Реальные ситуации, без выдумки.",
+    },
+    "custom": {
+        "label": "✏️ Своя тема",
+        "hint": None,
+    },
+}
+
+_FACT_SYSTEM = (
+    "Ты — автор яркого Telegram-канала о недвижимости и жизни в Москве.\n\n"
+    "Пишешь короткие, живые посты, которые читают до конца.\n\n"
+    "ПРАВИЛА:\n"
+    "• 60-90 слов максимум\n"
+    "• Начни с неожиданного факта, вопроса или цифры — сразу цепляй\n"
+    "• Лёгкий, разговорный тон — без канцелярита и инструкций\n"
+    "• Эмодзи уместно, не перегружай\n"
+    "• Если тема близка к ремонту — в конце одно предложение-намёк на TERION (без навязывания)\n\n"
+    "СТРОГО ЗАПРЕЩЕНО:\n"
+    "• Писать процедуры, требования, шаги согласования\n"
+    "• Принудительно вставлять: МЖИ, СНиП, трассировка, акты скрытых работ — только если сами по себе делают факт интереснее\n"
+    "• Длинные абзацы\n"
+    "• Явные продажи и навязчивые CTA\n"
+    "• Повторные хештеги — не добавляй их, они будут добавлены автоматически"
+)
+
+
+async def _generate_fact(topic_hint: str) -> str:
+    """Генерирует интересный факт по подсказке темы."""
+    prompt = (
+        f"Напиши интересный факт на тему: «{topic_hint}».\n\n"
+        f"Формат: один короткий пост для Telegram, 60-90 слов."
+    )
+    return await router_ai.generate(prompt, system_prompt=_FACT_SYSTEM, max_tokens=400) or ""
+
 
 async def fact_start(message: Message, state: FSMContext):
-    """Сначала предлагаем реальные ситуации из чатов (potential_leads.db), иначе — ввод темы."""
-    db_path = os.path.abspath(_potential_leads_db_path())
-    leads: list = []
-    try:
-        if os.path.isfile(db_path):
-            hunter_db = HunterDatabase(db_path)
-            await hunter_db.connect()
-            leads = await hunter_db.get_latest_hot_leads(3)
-            if hunter_db.conn:
-                await hunter_db.conn.close()
-    except Exception as e:
-        logger.warning("potential_leads для фактов: %s", e)
-    if leads:
-        builder = InlineKeyboardBuilder()
-        situations = []
-        for i, row in enumerate(leads):
-            raw = (row.get("content") or row.get("intent") or "")[:50]
-            situations.append(raw)
-            label = raw + "…" if len(raw) >= 50 else raw
-            builder.button(text=f"📌 {i + 1}. {label}", callback_data=f"fact_lead:{i}")
-        builder.button(text="✏️ Своя тема", callback_data="fact_lead:custom")
-        builder.adjust(1)
-        await state.update_data(fact_situations=situations, quick_prompt_prefix="fact")
-        await message.answer(
-            "💡 <b>Интересный факт</b>\n\nВыберите реальную ситуацию из чатов или введите свою тему в чат:",
-            reply_markup=builder.as_markup(),
-            parse_mode="HTML"
-        )
-        await state.set_state(ContentStates.ai_fact_choose)
-    else:
-        await state.update_data(quick_prompt_prefix="fact", fact_from_lead=None)
-        await message.answer(
-            "💡 <b>Интересный факт</b>\n\nВведите тему (например: перепланировка в сталинках, МНИИТЭП, МЖИ):",
-            reply_markup=get_back_btn(),
-            parse_mode="HTML"
-        )
-        await state.set_state(ContentStates.ai_text)
-
-
-@content_router.callback_query(F.data.startswith("fact_lead:"), ContentStates.ai_fact_choose)
-async def fact_lead_selected(callback: CallbackQuery, state: FSMContext):
-    part = callback.data.split(":", 1)[1]
-    if part == "custom":
-        await callback.answer("Введите тему в чат")
-        await callback.message.edit_text(
-            "💡 Введите тему интересного факта (например: несущие стены, МЖИ, акты скрытых работ):",
-            reply_markup=get_back_btn(),
-            parse_mode="HTML"
-        )
-        await state.update_data(fact_from_lead=None)
-        await state.set_state(ContentStates.ai_text)
-        return
-    try:
-        idx = int(part)
-    except ValueError:
-        await callback.answer("Ошибка выбора")
-        return
-    data = await state.get_data()
-    situations = data.get("fact_situations") or []
-    if idx < 0 or idx >= len(situations):
-        await callback.answer("Ситуация не найдена")
-        return
-    situation = situations[idx]
-    await state.update_data(fact_from_lead=situation, quick_prompt_prefix="fact")
-    await callback.answer()
-    await callback.message.edit_text("⏳ <b>Пишу интересный факт по реальной ситуации...</b>", parse_mode="HTML")
-    # Генерируем сразу по выбранной ситуации
-    cases_content = _load_content_template("expert_cases.txt", "МЖИ, несущие стены, трассировка, акты скрытых работ.")
-    prompt = (
-        f"Интересный факт для поста в TG на основе РЕАЛЬНОЙ ситуации из чата (не выдумывай):\n\n{situation}\n\n"
-        f"Требования: короткая познавательная заметка 80-120 слов, экспертный тон. "
-        f"Используй термины по смыслу: МЖИ, несущие стены, трассировка, акты скрытых работ. Реальные кейсы:\n{cases_content}\n\n"
-        f"Без продаж, мягкий призыв к @terion_bot. ЗАПРЕЩЕНО общие фразы без конкретики."
+    """Показывает выбор категории интересного факта."""
+    await state.clear()
+    builder = InlineKeyboardBuilder()
+    for key, cat in _FACT_CATEGORIES.items():
+        builder.button(text=cat["label"], callback_data=f"fact_cat:{key}")
+    builder.adjust(1)
+    await message.answer(
+        "💡 <b>Интересный факт</b>\n\n"
+        "Выберите категорию — бот напишет яркий короткий пост с картинкой.\n\n"
+        "<i>Развлекательный контент оживляет ленту и удерживает подписчиков.</i>",
+        reply_markup=builder.as_markup(),
+        parse_mode="HTML"
     )
-    text = await router_ai.generate(prompt)
+    await state.set_state(ContentStates.ai_fact_choose)
+
+
+@content_router.callback_query(F.data.startswith("fact_cat:"), ContentStates.ai_fact_choose)
+async def fact_category_selected(callback: CallbackQuery, state: FSMContext):
+    key = callback.data.split(":", 1)[1]
+
+    if key == "custom":
+        await callback.answer()
+        await callback.message.edit_text(
+            "💡 <b>Своя тема</b>\n\nВведите тему интересного факта:",
+            reply_markup=get_back_btn(),
+            parse_mode="HTML"
+        )
+        await state.update_data(quick_prompt_prefix="fact")
+        await state.set_state(ContentStates.ai_text)
+        return
+
+    cat = _FACT_CATEGORIES.get(key)
+    if not cat:
+        await callback.answer("Неизвестная категория")
+        return
+
+    await callback.answer()
+    await callback.message.edit_text(
+        f"⏳ <b>Пишу интересный факт...</b>\n<i>{cat['label']}</i>",
+        parse_mode="HTML"
+    )
+
+    text = await _generate_fact(cat["hint"])
     if not text:
-        await callback.message.edit_text("❌ Ошибка генерации", reply_markup=get_back_btn())
+        await callback.message.edit_text("❌ Ошибка генерации. Попробуйте ещё раз.", reply_markup=get_back_btn())
         await state.clear()
         return
-    if VK_QUIZ_LINK not in text:
-        text += f"\n\n📍 <a href='{VK_QUIZ_LINK}'>Пройти квиз</a> @terion_bot\n#TERION #перепланировка #москва"
+
     post_id = await show_preview(callback.message, text)
     await state.set_state(ContentStates.preview_mode)
-    await state.update_data(post_id=post_id, text=text)
+    await state.update_data(post_id=post_id)
 
 
 @content_router.message(ContentStates.ai_text)
@@ -1437,12 +1468,17 @@ async def ai_text_handler(message: Message, state: FSMContext):
     await message.answer("⏳ <b>Пишу...</b>" if not is_fact else "⏳ <b>Пишу интересный факт...</b>", parse_mode="HTML")
 
     if is_fact:
-        cases_content = _load_content_template("expert_cases.txt", "МЖИ, несущие стены, трассировка, акты скрытых работ.")
-        prompt = (
-            f"Интересный факт для поста в TG на тему «{topic}». "
-            f"Короткая познавательная заметка, экспертный тон, 80-120 слов. Используй по смыслу: МЖИ, несущие стены, трассировка или акты скрытых работ. Реальные кейсы:\n{cases_content}\n\n"
-            f"Эмодзи. Без продаж, мягкий призыв к @terion_bot. ЗАПРЕЩЕНО общие фразы без конкретики."
-        )
+        # Своя тема для интересного факта — живой и короткий формат без навязанного жаргона
+        prompt = f"Напиши интересный факт на тему: «{topic}».\n\nФормат: один короткий пост для Telegram, 60-90 слов."
+        text = await router_ai.generate(prompt, system_prompt=_FACT_SYSTEM, max_tokens=400)
+        if not text:
+            await message.answer("❌ Ошибка генерации", reply_markup=get_back_btn())
+            await state.clear()
+            return
+        post_id = await show_preview(message, text)
+        await state.set_state(ContentStates.preview_mode)
+        await state.update_data(post_id=post_id)
+        return
     else:
         prompt = (
             f"Пост для TG на тему «{topic}». "
@@ -1451,15 +1487,12 @@ async def ai_text_handler(message: Message, state: FSMContext):
         )
     
     text = await router_ai.generate(prompt)
-    
+
     if not text:
         await message.answer("❌ Ошибка", reply_markup=get_back_btn())
         await state.clear()
         return
-    
-    if VK_QUIZ_LINK not in text:
-        text += f"\n\n📍 <a href='{VK_QUIZ_LINK}'>Пройти квиз</a> @terion_bot\n#TERION #перепланировка #москва"
-    
+
     post_id = await show_preview(message, text)
     await state.set_state(ContentStates.preview_mode)
     await state.update_data(post_id=post_id, text=text)
