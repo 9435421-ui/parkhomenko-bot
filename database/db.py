@@ -10,7 +10,7 @@ from datetime import datetime
 class Database:
     """Класс для работы с SQLite базой данных"""
     
-    def __init__(self, db_path: str = "/root/PARKHOMENKO_BOT/database/bot.db"):
+    def __init__(self, db_path: str = "database/bot.db"):
         self.db_path = db_path
         self.conn: Optional[aiosqlite.Connection] = None
     
@@ -182,6 +182,8 @@ class Database:
                     profile_url TEXT,
                     text TEXT,
                     url TEXT NOT NULL,
+                    pain_stage TEXT,
+                    priority_score INTEGER,
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                 )
             """)
@@ -215,6 +217,13 @@ class Database:
                 await self.conn.commit()
             except Exception:
                 pass
+            # Миграция spy_leads: pain_stage, priority_score
+            for col, ctype in [("pain_stage", "TEXT"), ("priority_score", "INTEGER")]:
+                try:
+                    await cursor.execute(f"ALTER TABLE spy_leads ADD COLUMN {col} {ctype}")
+                    await self.conn.commit()
+                except Exception:
+                    pass
             # Data-Driven Scout: status (pending/active/archived), platform, geo_tag, participants_count
             try:
                 await cursor.execute("ALTER TABLE target_resources ADD COLUMN status TEXT DEFAULT 'pending'")
@@ -423,13 +432,15 @@ class Database:
         author_id: Optional[str] = None,
         username: Optional[str] = None,
         profile_url: Optional[str] = None,
+        pain_stage: Optional[str] = None,
+        priority_score: Optional[int] = None,
     ) -> int:
-        """Сохранить лид от шпиона: источник, автор, ссылка на профиль, текст."""
+        """Сохранить лид от шпиона: источник, автор, ссылка на профиль, текст, стадия боли, оценка приоритета."""
         async with self.conn.cursor() as cursor:
             await cursor.execute(
-                """INSERT INTO spy_leads (source_type, source_name, author_id, username, profile_url, text, url)
-                   VALUES (?, ?, ?, ?, ?, ?, ?)""",
-                (source_type, source_name, author_id or None, username or None, profile_url or None, text or "", url),
+                """INSERT INTO spy_leads (source_type, source_name, author_id, username, profile_url, text, url, pain_stage, priority_score)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                (source_type, source_name, author_id or None, username or None, profile_url or None, text or "", url, pain_stage, priority_score),
             )
             await self.conn.commit()
             return cursor.lastrowid
@@ -765,14 +776,12 @@ class Database:
             return dict(row) if row else None
 
     async def get_active_targets_for_scout(self) -> List[Dict]:
-        """Список целей для парсера/хантера: active + telegram. Поля: link, title, geo_tag, id, is_high_priority, last_lead_at."""
+        """Список целей для парсера/хантера: active + telegram. Поля: link, title, geo_tag, id, is_high_priority, last_lead_at, last_post_id."""
         async with self.conn.cursor() as cursor:
             try:
-            await cursor.execute(
-                """SELECT id, link, title, COALESCE(geo_tag, '') AS geo_tag,
-                          COALESCE(is_high_priority, 0) AS is_high_priority,
-                          COALESCE(last_post_id, 0) AS last_post_id,
-                          last_lead_at
+                await cursor.execute(
+                    """SELECT id, link, title, COALESCE(geo_tag, '') AS geo_tag,
+                          COALESCE(is_high_priority, 0) AS is_high_priority, last_lead_at, last_post_id
                        FROM target_resources
                        WHERE (status = 'active' OR (is_active = 1 AND (status IS NULL OR status = '')))
                          AND (platform = 'telegram' OR type = 'telegram')"""
@@ -780,7 +789,7 @@ class Database:
             except Exception:
                 await cursor.execute(
                     """SELECT id, link, title, COALESCE(geo_tag, '') AS geo_tag,
-                          COALESCE(is_high_priority, 0) AS is_high_priority
+                          COALESCE(is_high_priority, 0) AS is_high_priority, last_post_id
                        FROM target_resources
                        WHERE (status = 'active' OR (is_active = 1 AND (status IS NULL OR status = '')))
                          AND (platform = 'telegram' OR type = 'telegram')"""

@@ -503,14 +503,13 @@ class ScoutParser:
                         cid = getattr(entity, "id", None)
                         if cid is None:
                             continue
-                        # include resource_id and last_post_id from DB target record (if present)
                         channels_to_scan.append({
                             "id": cid,
-                            "resource_id": t.get("id"),
-                            "last_post_id": t.get("last_post_id", 0),
                             "name": t.get("title") or link,
                             "geo": t.get("geo_tag") or "",
                             "link": link,
+                            "last_post_id": t.get("last_post_id") or 0,
+                            "db_id": t.get("id")
                         })
                     except Exception as e:
                         logger.warning("Не удалось разрешить чат %s: %s", link, e)
@@ -518,9 +517,12 @@ class ScoutParser:
                 logger.warning("Не удалось загрузить активные цели из БД: %s", e)
         if not channels_to_scan:
             channels_to_scan = [
-                {"id": ch.get("id"), "name": ch.get("name"), "geo": ch.get("geo", ""), "link": ""}
+                {"id": ch.get("id"), "name": ch.get("name"), "geo": ch.get("geo", ""), "link": "", "last_post_id": 0, "db_id": None}
                 for ch in self.tg_channels if str(ch.get("id") or "").strip()
             ]
+        
+        if not channels_to_scan:
+            logger.warning("⚠️ Не найдено активных каналов для сканирования! Проверьте базу данных или .env (SCOUT_TG_CHANNEL_X_ID)")
 
         for channel in channels_to_scan:
             cid = channel.get("id")
@@ -528,21 +530,18 @@ class ScoutParser:
                 continue
             count = 0
             scanned = 0
+            max_id = channel.get("last_post_id", 0)
             try:
-                max_seen_id = 0
-                async for message in client.iter_messages(cid, limit=tg_limit):
+                # Используем min_id для загрузки только новых сообщений
+                iter_params = {"limit": tg_limit}
+                if max_id > 0:
+                    iter_params["min_id"] = max_id
+                
+                async for message in client.iter_messages(cid, **iter_params):
                     if not message.text:
                         continue
-                    try:
-                        mid = int(message.id)
-                    except Exception:
-                        mid = 0
-                    # Пропустить уже обработанные сообщения по last_post_id (если задано)
-                    channel_last_post = int(channel.get("last_post_id", 0)) if channel.get("last_post_id") is not None else 0
-                    if channel_last_post and mid and mid <= channel_last_post:
-                        continue
-                    if mid and mid > max_seen_id:
-                        max_seen_id = mid
+                    if message.id > max_id:
+                        max_id = message.id
                     scanned += 1
                     # Ловля ссылок: ставим в очередь, обрабатываем по одной с паузой 60 сек (anti-flood)
                     if db:
@@ -584,6 +583,13 @@ class ScoutParser:
                     "scanned": scanned,
                     "error": None,
                 })
+                # Обновляем last_post_id в базе данных
+                if db and channel.get("db_id") and max_id > channel.get("last_post_id", 0):
+                    try:
+                        await db.update_last_post_id(channel["db_id"], max_id)
+                        logger.info(f"✅ Обновлен last_post_id для {channel['name']}: {max_id}")
+                    except Exception as e:
+                        logger.warning(f"Не удалось обновить last_post_id для {channel['name']}: {e}")
                 # Режим «Разведка»: чат, в котором увидели сообщения и которого нет в базе — добавляем со статусом pending
                 if db and cid:
                     link = channel.get("link") or self._channel_id_to_link(cid)
@@ -604,13 +610,6 @@ class ScoutParser:
                             logger.info("🏢 Режим Разведка: добавлен чат %s", link)
                         except Exception as e:
                             logger.debug("Не удалось добавить ресурс %s: %s", link, e)
-                # Обновить last_post_id в БД для этой цели, если подключена БД и ресурс_id известен
-                try:
-                    resource_id = channel.get("resource_id")
-                    if db and resource_id and max_seen_id:
-                        await db.update_target_last_post_id(resource_id, max_seen_id)
-                except Exception:
-                    pass
             except Exception as e:
                 logger.error(f"❌ Ошибка парсинга ТГ {channel['name']}: {e}")
                 self.last_scan_report.append({

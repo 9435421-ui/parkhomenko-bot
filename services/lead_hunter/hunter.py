@@ -23,7 +23,7 @@ def _bot_for_send():
     except Exception:
         return None
 
-POTENTIAL_LEADS_DB = "/root/PARKHOMENKO_BOT/database/potential_leads.db"
+POTENTIAL_LEADS_DB = os.path.join(os.path.dirname(__file__), "..", "..", "database", "potential_leads.db")
 
 
 class LeadHunter:
@@ -35,6 +35,11 @@ class LeadHunter:
         self.outreach = Outreach()
         self.parser = scout_parser  # общий экземпляр: отчёт последнего скана доступен и для /spy_report
 
+    def match_portfolio_cases(self, geo: str, intent: str) -> list:
+        """Заглушка для подбора похожих кейсов из портфолио TERION (будет реализовано позже)."""
+        logger.debug(f"Matching portfolio for {geo} / {intent}")
+        return []
+
     def _format_lead_card(
         self,
         lead: dict,
@@ -45,8 +50,11 @@ class LeadHunter:
         """Форматирует карточку лида. Умный Охотник v2.0: при наличии recommendation — формат с вердиктом и болью."""
         recommendation = (lead.get("recommendation") or anton_recommendation or "").strip()
         pain_level = lead.get("pain_level") or min(lead.get("hotness", 3), 5)
-        if recommendation and pain_level:
+        pain_stage = lead.get("pain_stage")
+        
+        if pain_stage == "ST-4" or (recommendation and pain_level >= 4):
             return self._format_lead_card_v2(lead, profile_url, card_header, recommendation, pain_level)
+            
         content = (lead.get("content") or lead.get("intent") or "")[:600]
         if len(lead.get("content") or "") > 600:
             content += "…"
@@ -64,6 +72,8 @@ class LeadHunter:
             f"📍 <b>Гео:</b> {lead.get('geo', '—')}",
             f"💡 <b>Контекст:</b> {lead.get('context_summary', '—')}",
         ])
+        if pain_stage:
+            lines.append(f"🔴 <b>Стадия боли:</b> {pain_stage}")
         if anton_recommendation:
             lines.append(f"💡 <b>Рекомендация Антона:</b> {anton_recommendation}")
         if profile_url and profile_url.startswith("tg://"):
@@ -81,6 +91,8 @@ class LeadHunter:
     ) -> str:
         """Формат карточки Умный Охотник v2.0: ГОРЯЧИЙ ЛИД, цитата, аналитика, вердикт."""
         source = card_header or "Чат ЖК"
+        pain_stage = lead.get("pain_stage")
+        
         client_line = "👤 <b>Клиент:</b> "
         if profile_url and profile_url.startswith("http"):
             client_line += f'<a href="{profile_url}">профиль</a>'
@@ -91,15 +103,24 @@ class LeadHunter:
         quote = (lead.get("content") or lead.get("intent") or "")[:400]
         if len(lead.get("content") or "") > 400:
             quote += "…"
-        pain_label = "Критично" if pain_level >= 4 else "Высокая" if pain_level >= 3 else "Средняя"
+        pain_label = "Критично" if pain_level >= 4 or pain_stage == "ST-4" else "Высокая" if pain_level >= 3 else "Средняя"
+        
+        header = f"🔥 <b>ГОРЯЧИЙ ЛИД:</b> {source}"
+        urgency_note = ""
+        if pain_stage == "ST-4":
+            header = f"🚨 <b>СРОЧНЫЙ ВЫЕЗД/ЗВОНОК:</b> {source}"
+            urgency_note = "\n⚠️ <b>Почему это важно:</b> У клиента риск судебного иска или предписания!"
+
         lines = [
-            f"🔥 <b>ГОРЯЧИЙ ЛИД:</b> {source}",
+            header,
+            urgency_note,
             "",
             client_line,
             f"📝 <b>Цитата:</b> «{quote}»",
             "",
             "🎯 <b>Аналитика Антона:</b>",
             f"Уровень боли: {pain_level}/5 ({pain_label})",
+            f"Стадия: {pain_stage or '—'}",
             f"<b>Вердикт:</b> {recommendation[:500]}",
             "",
             f"🔗 Пост: {lead.get('url', '')}",
@@ -357,15 +378,33 @@ class LeadHunter:
         vk_posts = await self.parser.parse_vk()
         all_posts = tg_posts + vk_posts
 
-        # Сброс старого кеша: игнорируем первые N сообщений (старые)
+        # Если лидов не найдено, пробуем найти новые источники через Discovery
+        if not all_posts:
+            logger.info("🔎 Лидов не найдено. Запуск Discovery для поиска новых источников...")
+            new_sources = await self.discovery.find_new_sources()
+            for source in new_sources:
+                try:
+                    await main_db.add_target_resource(
+                        resource_type="telegram",
+                        link=source["link"],
+                        title=source["title"],
+                        notes="Найден через LeadHunter Discovery",
+                        status="pending",
+                        participants_count=source.get("participants_count")
+                    )
+                except Exception as e:
+                    logger.debug(f"Ошибка добавления ресурса из Discovery: {e}")
+
+        # Сброс старого кеша: игнорируем первые N сообщений (старые) — по умолчанию 0
         try:
             skip_count = int(os.getenv("SPY_SKIP_OLD_MESSAGES", "0"))
         except Exception:
             skip_count = 0
-        if len(all_posts) > skip_count:
+        
+        if skip_count > 0 and len(all_posts) > skip_count:
             remaining = all_posts[skip_count:]
         else:
-            remaining = []
+            remaining = all_posts
 
         # Переключиться на приоритетные чаты (ЖК Династия, Зиларт) — перемещаем их в начало
         preferred_names = [n.lower() for n in os.getenv("SPY_PREFERRED_CHATS", "Династия,Зиларт").split(",") if n.strip()]
@@ -385,8 +424,11 @@ class LeadHunter:
 
         from hunter_standalone.database import HunterDatabase as LocalHunterDatabase
         for post in all_posts:
-            # Быстрая оценка через LeadAnalyzer (существующая ранняя логика)
-            score = await self.analyzer.analyze_post(post.text)
+            # Быстрая оценка через LeadAnalyzer (существующая ранняя логика) — ТЕПЕРЬ ВОЗВРАЩАЕТ DICT
+            analysis_data = await self.analyzer.analyze_post(post.text)
+            score = analysis_data.get("priority_score", 0) / 10.0 # Приводим к 0.0 - 1.0 для совместимости
+            pain_stage = analysis_data.get("pain_stage", "ST-1")
+
             # Глубокий анализ намерения через Yandex GPT агент (новая логика)
             try:
                 analysis = await self._analyze_intent(post.text)
@@ -407,6 +449,8 @@ class LeadHunter:
                         "hotness": analysis.get("hotness", 3),
                         "geo": analysis.get("geo", "Не указано"),
                         "context_summary": analysis.get("context_summary", "") or "",
+                        "pain_stage": pain_stage,
+                        "priority_score": analysis_data.get("priority_score", 0),
                     }
                     saved = await hd.save_lead(lead_data)
                     try:
@@ -526,6 +570,8 @@ class LeadHunter:
                             author_id=str(author_id) if author_id else None,
                             username=author_name,
                             profile_url=profile_url or None,
+                            pain_stage=lead.get("pain_stage"),
+                            priority_score=lead.get("priority_score"),
                         )
                     except Exception as e:
                         logger.warning("Не удалось сохранить spy_lead: %s", e)

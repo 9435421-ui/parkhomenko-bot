@@ -35,6 +35,12 @@ class LeadHunter:
             has_lead_phrase = any(p in text_lower for p in self.lead_phrases)
             analysis = await self._analyze_intent(msg.get('text', ''))
             hotness = max(analysis.get('hotness', 3), 4 if has_lead_phrase else 0)
+            
+            # Приоритет и стадия боли
+            pain_stage = analysis.get("pain_stage", "ST-2" if hotness >= 3 else "ST-1")
+            if has_lead_phrase:
+                pain_stage = "ST-3"
+            
             if hotness >= 2 or analysis.get('is_lead') or has_lead_phrase:
                 lead_data = {
                     'url': msg.get('url', ''),
@@ -45,6 +51,8 @@ class LeadHunter:
                     'context_summary': analysis.get('context_summary', '') or ('по фразе: ' + next((p for p in self.lead_phrases if p in text_lower), '')),
                     'recommendation': analysis.get('recommendation', ''),
                     'pain_level': analysis.get('pain_level', min(hotness, 5)),
+                    'pain_stage': pain_stage,
+                    'priority_score': hotness * 2 if hotness <= 5 else hotness,
                 }
                 if await self.db.save_lead(lead_data):
                     results.append(lead_data)
@@ -68,6 +76,7 @@ class LeadHunter:
                 "context_summary": spy.get("recommendation", "")[:300],
                 "recommendation": spy.get("recommendation", ""),
                 "pain_level": spy.get("pain_level", min(hotness, 5)),
+                "pain_stage": spy.get("pain_stage"),
             }
         except Exception:
             pass
