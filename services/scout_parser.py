@@ -38,6 +38,8 @@ class ScoutPost:
     author_name: Optional[str] = None
     url: str = ""
     published_at: Optional[datetime] = None
+    is_comment: bool = False  # True если это комментарий из Discussion Group
+    original_channel_id: Optional[str] = None  # ID оригинального канала для комментариев
     likes: int = 0
     comments: int = 0
     source_link: Optional[str] = None  # ссылка на чат (для geo_tag из target_resources)
@@ -622,12 +624,29 @@ class ScoutParser:
             count = 0
             scanned = 0
             max_id = channel.get("last_post_id", 0)
+            
+            # ── Проверка Discussion Group (чат для комментариев) ──────────────────
+            discussion_group_id = None
+            try:
+                from telethon.tl.functions.channels import GetFullChannelRequest
+                from telethon.tl.types import Channel
+                
+                entity = await self._throttled_get_entity(client, cid)
+                if isinstance(entity, Channel):
+                    full_channel = await client(GetFullChannelRequest(entity))
+                    if full_channel.full_chat.linked_chat_id:
+                        discussion_group_id = full_channel.full_chat.linked_chat_id
+                        logger.info(f"💬 Discovery: у канала {channel.get('name')} найден Discussion Group (ID: {discussion_group_id})")
+            except Exception as e:
+                logger.debug(f"Discussion Group не найден для канала {cid}: {e}")
+            
             try:
                 # Используем min_id для загрузки только новых сообщений
                 iter_params = {"limit": tg_limit}
                 if max_id > 0:
                     iter_params["min_id"] = max_id
                 
+                # Парсим посты из основного канала
                 async for message in client.iter_messages(cid, **iter_params):
                     if not message.text:
                         continue
@@ -701,6 +720,72 @@ class ScoutParser:
                             logger.info("🏢 Режим Разведка: добавлен чат %s", link)
                         except Exception as e:
                             logger.debug("Не удалось добавить ресурс %s: %s", link, e)
+                
+                # ── Парсинг комментариев из Discussion Group ────────────────────
+                if discussion_group_id:
+                    try:
+                        discussion_count = 0
+                        discussion_scanned = 0
+                        logger.info(f"💬 Парсинг комментариев из Discussion Group канала {channel.get('name')}...")
+                        
+                        async for message in client.iter_messages(discussion_group_id, limit=tg_limit):
+                            if not message.text:
+                                continue
+                            discussion_scanned += 1
+                            
+                            # Проверяем, является ли сообщение комментарием к посту из основного канала
+                            # (в Discussion Group сообщения могут быть связаны с постами через reply_to)
+                            if self.detect_lead(message.text):
+                                author_id = getattr(message, "sender_id", None)
+                                author_name = None
+                                if getattr(message, "sender", None):
+                                    s = message.sender
+                                    author_name = getattr(s, "username", None) or getattr(s, "first_name", None)
+                                    if author_name and getattr(s, "last_name", None):
+                                        author_name = f"{author_name} {s.last_name}".strip()
+                                
+                                # Формируем URL комментария
+                                comment_url = self._tg_post_url(discussion_group_id, message.id)
+                                
+                                post = ScoutPost(
+                                    source_type="telegram",
+                                    source_name=f"{channel['name']} (комментарии)",
+                                    source_id=str(discussion_group_id),
+                                    post_id=str(message.id),
+                                    text=message.text,
+                                    author_id=author_id,
+                                    author_name=author_name,
+                                    url=comment_url,
+                                    source_link=channel.get("link") or "",
+                                    is_comment=True,  # Помечаем как комментарий
+                                    original_channel_id=str(cid),
+                                )
+                                posts.append(post)
+                                discussion_count += 1
+                                logger.debug(f"💬 Найден лид в комментариях: {message.text[:50]}...")
+                        
+                        if discussion_count > 0:
+                            logger.info(f"💬 Discovery: найдено {discussion_count} лидов в комментариях канала {channel.get('name')}")
+                            self.last_scan_report.append({
+                                "type": "telegram_discussion",
+                                "name": f"{channel['name']} (комментарии)",
+                                "id": discussion_group_id,
+                                "status": "ok",
+                                "posts": discussion_count,
+                                "scanned": discussion_scanned,
+                                "error": None,
+                            })
+                    except Exception as e:
+                        logger.warning(f"⚠️ Ошибка парсинга Discussion Group канала {channel.get('name')}: {e}")
+                        self.last_scan_report.append({
+                            "type": "telegram_discussion",
+                            "name": f"{channel['name']} (комментарии)",
+                            "id": discussion_group_id,
+                            "status": "error",
+                            "posts": 0,
+                            "scanned": 0,
+                            "error": str(e),
+                        })
             except Exception as e:
                 logger.error(f"❌ Ошибка парсинга ТГ {channel['name']}: {e}")
                 self.last_scan_report.append({

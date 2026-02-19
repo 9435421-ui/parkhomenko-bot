@@ -302,6 +302,72 @@ class LeadHunter:
             logger.exception("Ошибка Yandex intent анализатора: %s", e)
             return {"is_lead": False, "intent": "", "hotness": 0, "context_summary": "", "recommendation": "", "pain_level": 0}
 
+    async def _send_dm_to_user(
+        self,
+        user_id: int,
+        post_url: str,
+        lead_text: str,
+    ) -> bool:
+        """Отправляет личное сообщение пользователю при обнаружении лида в открытом чате.
+        
+        Args:
+            user_id: Telegram user_id пользователя
+            post_url: URL поста, где был найден лид (для контекста)
+            lead_text: Текст лида/вопроса пользователя
+        
+        Returns:
+            bool: True если сообщение отправлено успешно, False если ошибка или ЛС закрыты
+        """
+        if not user_id or user_id <= 0:
+            return False
+        
+        from config import BOT_TOKEN
+        if not BOT_TOKEN:
+            logger.warning("⚠️ BOT_TOKEN не задан — ЛС не отправлено")
+            return False
+        
+        # Формируем сообщение от Антона
+        message_text = (
+            f"Здравствуйте! Я Антон, ИИ-ассистент эксперта Юлии Пархоменко (компания TERION).\n\n"
+            f"Увидел ваш вопрос по поводу перепланировки:\n"
+            f"«{lead_text[:200]}{'…' if len(lead_text) > 200 else ''}»\n\n"
+            f"Могу помочь с согласованием перепланировки в Москве.\n"
+            f"Для начала ответьте на несколько вопросов в нашем квизе:\n"
+            f"https://t.me/Parkhovenko_i_kompaniya_bot?start=quiz\n\n"
+            f"🔗 Ваш пост: {post_url}"
+        )
+        
+        try:
+            bot = _bot_for_send()
+            if bot is None:
+                bot = Bot(token=BOT_TOKEN, default=DefaultBotProperties(parse_mode="HTML"))
+            
+            try:
+                await bot.send_message(
+                    chat_id=user_id,
+                    text=message_text,
+                    parse_mode=None,  # Обычный текст, без HTML
+                )
+                logger.info(f"✅ ЛС отправлено пользователю {user_id} (пост: {post_url[:50]}...)")
+                return True
+            except Exception as e:
+                error_str = str(e).lower()
+                # Игнорируем ошибки "bot blocked by user" или "chat not found"
+                if "blocked" in error_str or "chat not found" in error_str or "user is deactivated" in error_str:
+                    logger.debug(f"⏭️ ЛС недоступно для пользователя {user_id}: {e}")
+                else:
+                    logger.warning(f"⚠️ Ошибка отправки ЛС пользователю {user_id}: {e}")
+                return False
+            finally:
+                if _bot_for_send() is None and getattr(bot, "session", None):
+                    try:
+                        await bot.session.close()
+                    except Exception:
+                        pass
+        except Exception as e:
+            logger.error(f"❌ Критическая ошибка при отправке ЛС пользователю {user_id}: {e}")
+            return False
+
     async def _send_lead_card_to_group(
         self,
         lead: dict,
@@ -865,6 +931,12 @@ class LeadHunter:
                         anton_recommendation = await self._get_anton_recommendation(post_text, main_db)
                     except Exception:
                         pass
+                    # ── Активное вовлечение: отправка ЛС пользователю ──────────────
+                    # Если лид найден в открытом чате и есть author_id — отправляем ЛС
+                    if author_id and author_id > 0:
+                        lead_content = lead.get("content") or lead.get("intent") or post_text[:200]
+                        await self._send_dm_to_user(author_id, post_url, lead_content)
+                    
                     # Карточка лида в рабочую группу — только ST-4 в рабочее время МСК.
                     # Остальные стадии не шумят в «Горячие лиды» вне расписания.
                     _lead_stage = lead.get("pain_stage") or ""
