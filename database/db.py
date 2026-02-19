@@ -278,6 +278,31 @@ class Database:
                     (key, body),
                 )
             await self.conn.commit()
+            
+            # Таблица продажных диалогов (5-шаговый скрипт)
+            await cursor.execute("""
+                CREATE TABLE IF NOT EXISTS sales_conversations (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    user_id INTEGER NOT NULL,
+                    source_type TEXT NOT NULL,
+                    source_id TEXT NOT NULL,
+                    post_id TEXT NOT NULL,
+                    keyword TEXT,
+                    context TEXT,
+                    object_type TEXT,
+                    sales_step INTEGER DEFAULT 1,
+                    document_received BOOLEAN DEFAULT FALSE,
+                    skipped_steps TEXT,
+                    reminder_attempts INTEGER DEFAULT 0,
+                    status TEXT DEFAULT 'active',
+                    sales_started_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    last_interaction_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    last_reminder_at TIMESTAMP NULL,
+                    completed BOOLEAN DEFAULT FALSE,
+                    UNIQUE(user_id, source_type, source_id, post_id)
+                )
+            """)
+            await self.conn.commit()
 
     async def get_or_create_user(self, user_id: int, username: Optional[str] = None,
                                 first_name: Optional[str] = None, last_name: Optional[str] = None) -> Dict:
@@ -1052,6 +1077,90 @@ class Database:
             )
             rows = await cursor.fetchall()
             return {row['model_used']: {'count': row['count'], 'total': row['total_cost']} for row in rows}
+    
+    # === МЕТОДЫ ДЛЯ ПРОДАЖНЫХ ДИАЛОГОВ (5-шаговый скрипт) ===
+    
+    async def save_sales_conversation(self, data: Dict) -> int:
+        """Сохраняет новую продажную беседу"""
+        async with self.conn.cursor() as cursor:
+            await cursor.execute("""
+                INSERT INTO sales_conversations 
+                (user_id, source_type, source_id, post_id, keyword, context, sales_step, sales_started_at, last_interaction_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """, (
+                data.get("user_id"),
+                data.get("source_type"),
+                data.get("source_id"),
+                data.get("post_id"),
+                data.get("keyword"),
+                data.get("context"),
+                data.get("sales_step", 1),
+                data.get("sales_started_at", datetime.now()),
+                data.get("last_interaction_at", datetime.now()),
+            ))
+            await self.conn.commit()
+            return cursor.lastrowid
+    
+    async def get_sales_conversation(
+        self, 
+        user_id: int, 
+        source_type: str, 
+        source_id: str, 
+        post_id: str
+    ) -> Optional[Dict]:
+        """Получает активную продажную беседу"""
+        async with self.conn.cursor() as cursor:
+            await cursor.execute("""
+                SELECT * FROM sales_conversations 
+                WHERE user_id = ? AND source_type = ? AND source_id = ? AND post_id = ?
+                AND status = 'active'
+                ORDER BY last_interaction_at DESC
+                LIMIT 1
+            """, (user_id, source_type, source_id, post_id))
+            row = await cursor.fetchone()
+            return dict(row) if row else None
+    
+    async def update_sales_conversation(self, conversation_id: int, **kwargs) -> None:
+        """Обновляет продажную беседу"""
+        allowed_fields = [
+            "sales_step", "object_type", "document_received", "skipped_steps",
+            "reminder_attempts", "status", "last_interaction_at", "last_reminder_at",
+            "completed", "context"
+        ]
+        updates = {k: v for k, v in kwargs.items() if k in allowed_fields}
+        if not updates:
+            return
+        
+        # Преобразуем datetime в строку для SQLite
+        for key, value in updates.items():
+            if isinstance(value, datetime):
+                updates[key] = value.isoformat()
+        
+        set_clause = ", ".join([f"{k} = ?" for k in updates.keys()])
+        values = list(updates.values()) + [conversation_id]
+        
+        async with self.conn.cursor() as cursor:
+            await cursor.execute(
+                f"UPDATE sales_conversations SET {set_clause} WHERE id = ?",
+                values
+            )
+            await self.conn.commit()
+    
+    async def get_conversations_for_reminder(self, hours: int = 24) -> List[Dict]:
+        """Получает беседы, которым нужно отправить напоминание"""
+        async with self.conn.cursor() as cursor:
+            # SQLite: datetime('now', '-' || hours || ' hours') для проверки прошедшего времени
+            await cursor.execute(f"""
+                SELECT * FROM sales_conversations
+                WHERE status = 'active'
+                AND sales_step = 3
+                AND document_received = 0
+                AND reminder_attempts < 2
+                AND datetime(last_interaction_at, '+{hours} hours') <= datetime('now')
+                AND (last_reminder_at IS NULL OR datetime(last_reminder_at, '+{hours} hours') <= datetime('now'))
+                ORDER BY last_interaction_at ASC
+            """)
+            return [dict(row) for row in await cursor.fetchall()]
     
     async def cleanup_old_texts(self):
         """Удалить тексты старше 3 месяцев"""

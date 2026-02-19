@@ -192,6 +192,10 @@ async def main():
     # Поиск идей для контента раз в 6 часов (темы ещё отправляются в группу после создания content_bot)
     scheduler.add_job(creative_agent.scout_topics, 'interval', hours=6)
     
+    # Автоматические напоминания для продажных диалогов (дожим)
+    from services.sales_reminders import send_sales_reminders
+    scheduler.add_job(send_sales_reminders, 'interval', hours=6)
+    
     scheduler.start()
     # Задачи планировщика получают main_bot/content_bot аргументом, своих Bot() не создают
     from services.birthday_greetings import send_birthday_greetings
