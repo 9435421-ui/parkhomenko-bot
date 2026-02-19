@@ -34,15 +34,6 @@ class LeadHunter:
         self.analyzer = LeadAnalyzer()
         self.outreach = Outreach()
         self.parser = scout_parser  # общий экземпляр: отчёт последнего скана доступен и для /spy_report
-        self._db = None  # Кэш для глобального объекта БД
-    
-    async def _ensure_db_connected(self):
-        """Убедиться, что БД подключена. Возвращает объект БД."""
-        from database import db as main_db
-        if main_db.conn is None:
-            logger.info("🔌 БД не подключена, выполняю подключение...")
-            await main_db.connect()
-        return main_db
 
     def match_portfolio_cases(self, geo: str, intent: str) -> list:
         """Заглушка для подбора похожих кейсов из портфолио TERION (будет реализовано позже)."""
@@ -136,122 +127,6 @@ class LeadHunter:
         ]
         return "\n".join(lines)
 
-    async def _generate_sales_reply(
-        self,
-        post_text: str,
-        pain_stage: str,
-        zhk_name: str,
-        intent: str,
-        context_summary: str,
-    ) -> str:
-        """
-        Генерирует через Yandex GPT проект сообщения для ответа автору поста.
-        Учитывает стадию боли (ST-1…ST-4) и название ЖК.
-        Возвращает готовый текст ответа — максимально живой, 2–4 предложения.
-        """
-        # ── Загружаем Базу Знаний TERION ─────────────────────────────────────
-        kb_path = os.path.join(
-            os.path.dirname(__file__), "..", "..", "knowledge_base", "sales", "hunter_manual.md"
-        )
-        knowledge_base = ""
-        try:
-            kb_abs = os.path.abspath(kb_path)
-            if os.path.exists(kb_abs):
-                with open(kb_abs, "r", encoding="utf-8") as f:
-                    knowledge_base = f.read().strip()
-        except Exception:
-            pass
-
-        # ── Тактика ответа по стадии боли ────────────────────────────────────
-        pain_scripts = {
-            "ST-4": (
-                "Человек получил предписание МЖИ, к нему пришла инспекция или "
-                "заблокирована сделка. Напиши СРОЧНЫЙ, участливый ответ: "
-                "покажи, что понимаешь критичность ситуации, предложи бесплатную "
-                "срочную консультацию. Подчеркни, что TERION специализируется "
-                "именно на таких случаях и знает, как быстро закрыть предписание."
-            ),
-            "ST-3": (
-                "Человек активно делает ремонт или уже сделал без проекта и боится "
-                "последствий. Напиши экспертный дружелюбный ответ: "
-                "предложи зафиксировать сделанное до прихода инспекции, "
-                "расскажи о рисках и предложи помощь TERION в согласовании."
-            ),
-            "ST-2": (
-                "Человек планирует перепланировку или ремонт. "
-                "Напиши полезный ответ с конкретным советом по первому шагу, "
-                "объясни, почему важно начать с проекта, "
-                "предложи бесплатную консультацию TERION."
-            ),
-            "ST-1": (
-                "Человек просто интересуется темой перепланировок. "
-                "Напиши краткий образовательный ответ с одним полезным фактом. "
-                "Мягко упомяни, что TERION готов помочь, если понадобится."
-            ),
-        }
-        script_hint = pain_scripts.get(pain_stage, pain_scripts["ST-2"])
-        zhk_hint = f"ЖК {zhk_name.title()}" if zhk_name else "чат жильцов"
-
-        kb_section = f"\n\n---\nБАЗА ЗНАНИЙ TERION:\n{knowledge_base}" if knowledge_base else ""
-
-        system_prompt = (
-            "Ты — Агент-Продавец компании TERION по согласованию перепланировок в Москве. "
-            "Роль: Друг-эксперт. Сначала помогаешь решить проблему, потом предлагаешь услугу. "
-            "Пишешь живой ответ в публичный Telegram-чат жильцов. "
-            "Правила: не начинай с 'Здравствуйте', без маркетинговых клише, "
-            "пиши как живой человек-эксперт, 2–4 предложения максимум. "
-            "В конце всегда добавь: @terion_expert — для связи. "
-            "НЕ включай скобки, пометки вроде [имя] или [ЖК]."
-            f"{kb_section}"
-        )
-        user_prompt = (
-            f"Чат: {zhk_hint}\n"
-            f"Стадия боли клиента: {pain_stage}\n"
-            f"Сообщение клиента: \"{(post_text or '')[:400]}\"\n"
-            f"Интент: {intent}\n"
-            f"Контекст: {context_summary}\n\n"
-            f"Тактика ответа: {script_hint}\n\n"
-            "Напиши только готовый текст ответа, без объяснений и заголовков."
-        )
-
-        try:
-            from utils.yandex_gpt import generate
-            reply = await generate(
-                system_prompt=system_prompt,
-                user_message=user_prompt,
-                max_tokens=300,
-            )
-            result = (reply or "").strip()
-            if result:
-                return result
-            raise ValueError("Yandex GPT вернул пустой ответ")
-        except Exception as e:
-            logger.debug("Ошибка генерации ответа продавца: %s", e)
-            fallbacks = {
-                "ST-4": (
-                    "Ситуация серьёзная — если МЖИ уже выдало предписание, "
-                    "важно действовать быстро. TERION специализируется именно на таких случаях: "
-                    "помогаем закрыть предписание и согласовать в короткие сроки. "
-                    "Напишите — разберём бесплатно: @terion_expert"
-                ),
-                "ST-3": (
-                    "Советую зафиксировать всё, что уже сделано, до прихода инспекции. "
-                    "TERION поможет оформить проект и согласовать — в том числе задним числом. "
-                    "Пишите: @terion_expert"
-                ),
-                "ST-2": (
-                    "Первый шаг — понять, затрагивает ли ваша идея несущие конструкции "
-                    "и мокрые зоны. Если да — без проекта не обойтись. "
-                    "Консультация бесплатно: @terion_expert"
-                ),
-                "ST-1": (
-                    "Перепланировку можно согласовать заранее или узаконить после — "
-                    "всё зависит от типа изменений. "
-                    "Если нужна конкретика — @terion_expert"
-                ),
-            }
-            return fallbacks.get(pain_stage, fallbacks["ST-2"])
-
     async def _analyze_intent(self, text: str) -> dict:
         """Анализ намерения через Yandex GPT агент — возвращает структуру:
         {is_lead: bool, intent: str, hotness: int(1-5), context_summary: str, recommendation: str, pain_level: int}
@@ -311,72 +186,6 @@ class LeadHunter:
             logger.exception("Ошибка Yandex intent анализатора: %s", e)
             return {"is_lead": False, "intent": "", "hotness": 0, "context_summary": "", "recommendation": "", "pain_level": 0}
 
-    async def _send_dm_to_user(
-        self,
-        user_id: int,
-        post_url: str,
-        lead_text: str,
-    ) -> bool:
-        """Отправляет личное сообщение пользователю при обнаружении лида в открытом чате.
-        
-        Args:
-            user_id: Telegram user_id пользователя
-            post_url: URL поста, где был найден лид (для контекста)
-            lead_text: Текст лида/вопроса пользователя
-        
-        Returns:
-            bool: True если сообщение отправлено успешно, False если ошибка или ЛС закрыты
-        """
-        if not user_id or user_id <= 0:
-            return False
-        
-        from config import BOT_TOKEN
-        if not BOT_TOKEN:
-            logger.warning("⚠️ BOT_TOKEN не задан — ЛС не отправлено")
-            return False
-        
-        # Формируем сообщение от Антона
-        message_text = (
-            f"Здравствуйте! Я Антон, ИИ-ассистент эксперта Юлии Пархоменко (компания TERION).\n\n"
-            f"Увидел ваш вопрос по поводу перепланировки:\n"
-            f"«{lead_text[:200]}{'…' if len(lead_text) > 200 else ''}»\n\n"
-            f"Могу помочь с согласованием перепланировки в Москве.\n"
-            f"Для начала ответьте на несколько вопросов в нашем квизе:\n"
-            f"https://t.me/Parkhovenko_i_kompaniya_bot?start=quiz\n\n"
-            f"🔗 Ваш пост: {post_url}"
-        )
-        
-        try:
-            bot = _bot_for_send()
-            if bot is None:
-                bot = Bot(token=BOT_TOKEN, default=DefaultBotProperties(parse_mode="HTML"))
-            
-            try:
-                await bot.send_message(
-                    chat_id=user_id,
-                    text=message_text,
-                    parse_mode=None,  # Обычный текст, без HTML
-                )
-                logger.info(f"✅ ЛС отправлено пользователю {user_id} (пост: {post_url[:50]}...)")
-                return True
-            except Exception as e:
-                error_str = str(e).lower()
-                # Игнорируем ошибки "bot blocked by user" или "chat not found"
-                if "blocked" in error_str or "chat not found" in error_str or "user is deactivated" in error_str:
-                    logger.debug(f"⏭️ ЛС недоступно для пользователя {user_id}: {e}")
-                else:
-                    logger.warning(f"⚠️ Ошибка отправки ЛС пользователю {user_id}: {e}")
-                return False
-            finally:
-                if _bot_for_send() is None and getattr(bot, "session", None):
-                    try:
-                        await bot.session.close()
-                    except Exception:
-                        pass
-        except Exception as e:
-            logger.error(f"❌ Критическая ошибка при отправке ЛС пользователю {user_id}: {e}")
-            return False
-
     async def _send_lead_card_to_group(
         self,
         lead: dict,
@@ -392,16 +201,13 @@ class LeadHunter:
             logger.warning("⚠️ BOT_TOKEN или LEADS_GROUP_CHAT_ID не заданы — карточка в группу не отправлена")
             return False
         text = self._format_lead_card(lead, profile_url, card_header, anton_recommendation)
-        url_buttons = []
+        buttons = []
         if profile_url and profile_url.startswith("http"):
-            url_buttons.append(InlineKeyboardButton(text="👤 Профиль", url=profile_url))
-        url_buttons.append(InlineKeyboardButton(text="🔗 Пост", url=post_url[:500]))
-        action_buttons = [
-            InlineKeyboardButton(text="✍️ На эту тему пост", callback_data=f"lead_to_content:{lead_id}"),
-            InlineKeyboardButton(text="🛠 Ответить экспертно", callback_data=f"lead_expert_reply_{lead_id}"),
-            InlineKeyboardButton(text="✅ Взять в работу", callback_data=f"lead_take_work_{lead_id}"),
-        ]
-        keyboard = InlineKeyboardMarkup(inline_keyboard=[url_buttons, action_buttons])
+            buttons.append(InlineKeyboardButton(text="👤 Профиль", url=profile_url))
+        buttons.append(InlineKeyboardButton(text="🔗 Пост", url=post_url[:500]))
+        buttons.append(InlineKeyboardButton(text="🛠 Ответить экспертно", callback_data=f"lead_expert_reply_{lead_id}"))
+        buttons.append(InlineKeyboardButton(text="🛠 Взять в работу", callback_data=f"lead_take_work_{lead_id}"))
+        keyboard = InlineKeyboardMarkup(inline_keyboard=[buttons])
         try:
             bot = _bot_for_send()
             if bot is None:
@@ -553,14 +359,6 @@ class LeadHunter:
         except Exception as e:
             logger.error(f"❌ Не удалось отправить горячий лид админу: {e}")
 
-    @staticmethod
-    def _is_business_hours_msk() -> bool:
-        """True если текущее время 09:00–20:00 по МСК (UTC+3)."""
-        from datetime import timezone, timedelta
-        msk = timezone(timedelta(hours=3))
-        hour = datetime.now(msk).hour
-        return 9 <= hour < 20
-
     async def hunt(self):
         """Полный цикл: поиск → анализ → привлечение + проверка через AI Жюля и пересылка горячих лидов."""
         logger.info("🏹 LeadHunter: начало охоты за лидами...")
@@ -575,9 +373,7 @@ class LeadHunter:
         except Exception:
             pass
 
-        # ── Проверка подключения к БД ────────────────────────────────────────────
-        main_db = await self._ensure_db_connected()
-        
+        from database import db as main_db
         tg_posts = await self.parser.parse_telegram(db=main_db)
         vk_posts = await self.parser.parse_vk()
         all_posts = tg_posts + vk_posts
@@ -585,71 +381,19 @@ class LeadHunter:
         # Если лидов не найдено, пробуем найти новые источники через Discovery
         if not all_posts:
             logger.info("🔎 Лидов не найдено. Запуск Discovery для поиска новых источников...")
-            # Поиск новых Telegram каналов
             new_sources = await self.discovery.find_new_sources()
-            # Поиск новых VK групп
-            try:
-                vk_sources = await self.discovery.scout_vk_resources()
-                new_sources.extend(vk_sources)
-            except Exception as e:
-                logger.warning(f"⚠️ Ошибка при поиске VK групп: {e}")
-            added_count = 0
-            activated_count = 0
-            skipped_count = 0
             for source in new_sources:
-                link = source["link"]
-                title = source.get("title") or link
-                
-                # Проверяем подключение перед каждым запросом (на случай разрыва)
-                main_db = await self._ensure_db_connected()
-                
-                # Проверяем, есть ли канал в БД
                 try:
-                    existing = await main_db.get_target_resource_by_link(link)
-                except AttributeError as e:
-                    logger.error(f"❌ Ошибка доступа к БД: {e}. Переподключаюсь...")
-                    await main_db.connect()
-                    existing = await main_db.get_target_resource_by_link(link)
-                
-                if existing:
-                    # Канал уже есть в БД
-                    existing_status = existing.get("status", "pending")
-                    if existing_status != "active":
-                        # Активируем канал, если он был archived или pending
-                        try:
-                            await main_db.set_target_status(existing["id"], "active")
-                            activated_count += 1
-                            logger.info(f"🔄 Discovery: активирован канал {title} (был: {existing_status})")
-                        except Exception as e:
-                            logger.warning(f"⚠️ Ошибка активации канала {link}: {e}")
-                    else:
-                        skipped_count += 1
-                        logger.debug(f"⏭️ Discovery: канал уже активен {title}")
-                else:
-                    # Ресурс новый, добавляем
-                    try:
-                        resource_type = source.get("type", "telegram")  # По умолчанию telegram, может быть vk
-                        await main_db.add_target_resource(
-                            resource_type=resource_type,
-                            link=link,
-                            title=title,
-                            notes="Найден через LeadHunter Discovery (глобальный поиск)",
-                            status="active",  # Сразу активный, чтобы использовался для сканирования
-                            participants_count=source.get("participants_count", 0),
-                            geo_tag=source.get("geo_tag")  # Добавляем гео-тег, если есть
-                        )
-                        added_count += 1
-                        logger.info(f"✅ Discovery: добавлен {resource_type} ресурс {title}")
-                    except Exception as e:
-                        logger.warning(f"⚠️ Ошибка добавления ресурса из Discovery {link}: {e}")
-            
-            # Итоговая статистика
-            if added_count > 0:
-                logger.info(f"📊 Discovery: добавлено {added_count} новых каналов в БД (статус: active)")
-            if activated_count > 0:
-                logger.info(f"🔄 Discovery: активировано {activated_count} каналов (были archived/pending)")
-            if skipped_count > 0:
-                logger.info(f"📋 Discovery: пропущено {skipped_count} каналов (уже активны)")
+                    await main_db.add_target_resource(
+                        resource_type="telegram",
+                        link=source["link"],
+                        title=source["title"],
+                        notes="Найден через LeadHunter Discovery",
+                        status="pending",
+                        participants_count=source.get("participants_count")
+                    )
+                except Exception as e:
+                    logger.debug(f"Ошибка добавления ресурса из Discovery: {e}")
 
         # Сброс старого кеша: игнорируем первые N сообщений (старые) — по умолчанию 0
         try:
@@ -679,28 +423,9 @@ class LeadHunter:
         )
 
         from hunter_standalone.database import HunterDatabase as LocalHunterDatabase
-        # Анти-дубль: в рамках одного запуска не обрабатываем один и тот же post_id дважды
-        _seen_post_keys: set[str] = set()
-        _business_hours = self._is_business_hours_msk()
-        logger.info("🕐 Бизнес-часы МСК: %s", "да (09:00–20:00)" if _business_hours else "нет — горячие лиды не отправляются")
-
         for post in all_posts:
-            _post_key = f"{getattr(post, 'source_type', '')}:{getattr(post, 'source_id', '')}:{getattr(post, 'post_id', '')}"
-            if _post_key in _seen_post_keys:
-                logger.debug("⏭️ Анти-дубль: post %s уже обработан в этом цикле", _post_key)
-                continue
-            _seen_post_keys.add(_post_key)
-
             # Быстрая оценка через LeadAnalyzer (существующая ранняя логика) — ТЕПЕРЬ ВОЗВРАЩАЕТ DICT
-            # Гео-фильтрация: передаём source_name для проверки Москвы/МО
-            source_name = getattr(post, "source_name", "") or ""
-            analysis_data = await self.analyzer.analyze_post(post.text, source_name=source_name)
-            
-            # Если пост отфильтрован по гео — пропускаем
-            if analysis_data.get("geo_filtered"):
-                logger.debug("🚫 Пост отфильтрован по гео (не Москва/МО) — пропущен")
-                continue
-            
+            analysis_data = await self.analyzer.analyze_post(post.text)
             score = analysis_data.get("priority_score", 0) / 10.0 # Приводим к 0.0 - 1.0 для совместимости
             pain_stage = analysis_data.get("pain_stage", "ST-1")
 
@@ -740,108 +465,17 @@ class LeadHunter:
                 if saved:
                     try:
                         from config import JULIA_USER_ID, BOT_TOKEN
-                        from services.lead_hunter.analyzer import _detect_priority_zhk_hot
-
-                        # ── Профиль автора ───────────────────────────────────
-                        author_id = getattr(post, "author_id", None)
-                        author_name = getattr(post, "author_name", None)
-                        src_type = getattr(post, "source_type", "telegram")
-                        if src_type == "vk" and author_id:
-                            author_link = f"https://vk.com/id{author_id}"
-                        elif author_id:
-                            author_link = f"tg://user?id={author_id}"
-                        else:
-                            author_link = None
-
-                        # ── Приоритетный ЖК ──────────────────────────────────
-                        is_zhk_hot, zhk_name = _detect_priority_zhk_hot(post.text or "")
-                        zhk_name = zhk_name or analysis_data.get("zhk_name") or analysis.get("zhk_name") or ""
-
-                        # ── Стадия боли ───────────────────────────────────────
-                        pain_stage = analysis_data.get("pain_stage") or ""
-                        pain_label = {
-                            "ST-4": "⛔ Критично",
-                            "ST-3": "🔴 Активная боль",
-                            "ST-2": "🟡 Планирование",
-                            "ST-1": "🟢 Интерес",
-                        }.get(pain_stage, "")
-
-                        # ── Генерируем проект ответа через Yandex GPT ─────────
-                        sales_draft = ""
-                        try:
-                            sales_draft = await self._generate_sales_reply(
-                                post_text=post.text or "",
-                                pain_stage=pain_stage or "ST-2",
-                                zhk_name=zhk_name,
-                                intent=analysis.get("intent", ""),
-                                context_summary=analysis.get("context_summary", ""),
-                            )
-                        except Exception as draft_err:
-                            logger.debug("Не удалось сгенерировать проект ответа: %s", draft_err)
-
-                        # ── Строим карточку лида ──────────────────────────────
-                        if is_zhk_hot or zhk_name:
-                            header = f"🚨 <b>ГОРЯЧИЙ ЛИД — ЖК {zhk_name.title()}</b>"
-                        else:
-                            header = "🔥 <b>Новый лид</b>"
-
-                        lines = [
-                            header,
-                            "",
-                            f"🎯 {analysis.get('intent', '—')}",
-                            f"📍 ЖК/Гео: {analysis.get('geo', getattr(post, 'source_name', '—'))}",
-                            f"📝 Суть: {analysis.get('context_summary', '—')}",
-                        ]
-                        if pain_label:
-                            lines.append(f"🩺 Стадия: {pain_label} ({pain_stage})")
-                        if author_link:
-                            if src_type == "telegram":
-                                lines.append(f"👤 Автор: <code>{author_link}</code>")
-                            else:
-                                lines.append(f'👤 Автор: <a href="{author_link}">{author_name or "профиль"}</a>')
-                        elif author_name:
-                            lines.append(f"👤 Автор: @{author_name}")
-                        lines.append(f"🔗 Пост: {lead_data.get('url', '—')}")
-
-                        # ── Блок с проектом ответа (жмёшь → копируешь) ───────
-                        if sales_draft:
-                            lines += [
-                                "",
-                                "─" * 22,
-                                "✍️ <b>Проект ответа (Антон):</b>",
-                                f"<code>{sales_draft}</code>",
-                                "─" * 22,
-                            ]
-
-                        card_text = "\n".join(lines)
-
-                        # ── Кнопки: Написать автору + Открыть пост ────────────
-                        buttons_row = []
-                        if author_link:
-                            buttons_row.append(
-                                InlineKeyboardButton(
-                                    text="👤 Написать автору",
-                                    url=author_link,
-                                )
-                            )
-                        post_url = lead_data.get("url") or ""
-                        if post_url and post_url.startswith("http"):
-                            buttons_row.append(
-                                InlineKeyboardButton(text="🔗 Открыть пост", url=post_url[:500])
-                            )
-                        keyboard = InlineKeyboardMarkup(inline_keyboard=[buttons_row]) if buttons_row else None
-
                         bot = _bot_for_send()
                         if bot is None:
                             bot = Bot(token=BOT_TOKEN, default=DefaultBotProperties(parse_mode="HTML"))
+                        text = (
+                            f"🔥 Новый лид: {analysis.get('intent','—')}\n\n"
+                            f"📍 ЖК/Гео: {analysis.get('geo','—')}\n"
+                            f"📝 Суть: {analysis.get('context_summary','—')}\n"
+                            f"🔗 Ссылка: {lead_data.get('url','—')}"
+                        )
                         try:
-                            await bot.send_message(
-                                int(JULIA_USER_ID),
-                                card_text,
-                                parse_mode="HTML",
-                                disable_web_page_preview=True,
-                                reply_markup=keyboard,
-                            )
+                            await bot.send_message(int(JULIA_USER_ID), text, parse_mode="HTML")
                         finally:
                             if _bot_for_send() is None and getattr(bot, "session", None):
                                 try:
@@ -902,7 +536,7 @@ class LeadHunter:
                         source_link = getattr(post, "source_link", None)
                         if source_link:
                             try:
-                                main_db = await self._ensure_db_connected()
+                                from database import db as main_db
                                 res = await main_db.get_target_resource_by_link(source_link)
                                 if res:
                                     is_high = res.get("is_high_priority") or 0
@@ -927,7 +561,7 @@ class LeadHunter:
                         profile_url = f"tg://user?id={author_id}"
                     post_url = lead.get("url", "") or ""
                     try:
-                        main_db = await self._ensure_db_connected()
+                        from database import db as main_db
                         lead_id = await main_db.add_spy_lead(
                             source_type=source_type,
                             source_name=source_name,
@@ -946,7 +580,7 @@ class LeadHunter:
                         lead_id = 0
                     # Уведомление в личку админу при каждом лиде (если включено в пульте)
                     try:
-                        main_db = await self._ensure_db_connected()
+                        from database import db as main_db
                         notify_enabled = await main_db.get_setting("spy_notify_enabled", "1")
                         if notify_enabled == "1":
                             await self._send_lead_notify_to_admin(lead, source_name, profile_url or post_url)
@@ -955,28 +589,14 @@ class LeadHunter:
                     # Рекомендация Антона (Ассистент Продаж): по тексту подбираем скрипт из sales_templates
                     anton_recommendation = ""
                     try:
-                        main_db = await self._ensure_db_connected()
+                        from database import db as main_db
                         anton_recommendation = await self._get_anton_recommendation(post_text, main_db)
                     except Exception:
                         pass
-                    # ── Активное вовлечение: отправка ЛС пользователю ──────────────
-                    # Если лид найден в открытом чате и есть author_id — отправляем ЛС
-                    if author_id and author_id > 0:
-                        lead_content = lead.get("content") or lead.get("intent") or post_text[:200]
-                        await self._send_dm_to_user(author_id, post_url, lead_content)
-                    
-                    # Карточка лида в рабочую группу — только ST-4 в рабочее время МСК.
-                    # Остальные стадии не шумят в «Горячие лиды» вне расписания.
-                    _lead_stage = lead.get("pain_stage") or ""
-                    _is_hot = _lead_stage == "ST-4" or lead.get("hotness", 0) >= 4
-                    if cards_sent < MAX_CARDS_PER_RUN and (_is_hot and _business_hours or not _is_hot):
+                    # Карточка лида в рабочую группу (с гео/высоткой и рекомендацией)
+                    if cards_sent < MAX_CARDS_PER_RUN:
                         if await self._send_lead_card_to_group(lead, lead_id, profile_url, post_url, card_header, anton_recommendation):
                             cards_sent += 1
-                    elif _is_hot and not _business_hours:
-                        logger.info(
-                            "🌙 Горячий лид ST-4 найден вне рабочего времени МСК — "
-                            "карточка в группу отложена до 09:00. URL: %s", post_url
-                        )
                 if cards_sent:
                     logger.info("📋 В рабочую группу отправлено карточек лидов: %s", cards_sent)
                 # Дублирование в рабочую группу: краткий отчёт о сохранённых лидах

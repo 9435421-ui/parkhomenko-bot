@@ -1,6 +1,8 @@
 import logging
 import os
-from typing import List, Dict
+import asyncio
+import aiohttp
+from typing import List, Dict, Optional
 
 logger = logging.getLogger(__name__)
 
@@ -188,3 +190,82 @@ class Discovery:
         result = found if found else OPEN_HUNT_SOURCES
         logger.info("🔍 Discovery: найдено источников для мониторинга: %d", len(result))
         return result
+    
+    async def scout_vk_resources(self, keywords: List[str] = None) -> List[Dict]:
+        """Поиск новых VK групп по ключевым словам через VK API.
+        
+        Использует метод groups.search для поиска открытых групп ВКонтакте.
+        Возвращает список групп для добавления в БД как target_resources.
+        
+        Args:
+            keywords: Список ключевых слов для поиска. Если не указан, используется self.keywords.
+        
+        Returns:
+            Список словарей с полями: link, title, type='vk', participants_count
+        """
+        vk_token = os.getenv("VK_TOKEN") or os.getenv("VK_USER_TOKEN")
+        if not vk_token:
+            logger.warning("⚠️ VK_TOKEN не настроен в .env, пропускаю поиск VK групп")
+            return []
+        
+        kws = keywords or self.keywords[:10]  # Ограничиваем до 10 запросов за раз
+        vk_api_version = "5.199"
+        found_groups = []
+        
+        async with aiohttp.ClientSession() as session:
+            for keyword in kws:
+                try:
+                    # Поиск групп по ключевому слову
+                    params = {
+                        "q": keyword,
+                        "type": "group",  # Только группы, не страницы
+                        "count": 20,  # Максимум 20 групп на запрос
+                        "access_token": vk_token,
+                        "v": vk_api_version,
+                    }
+                    
+                    async with session.get(
+                        "https://api.vk.com/method/groups.search",
+                        params=params
+                    ) as resp:
+                        data = await resp.json()
+                        
+                        if "error" in data:
+                            logger.error(f"❌ VK API error при поиске '{keyword}': {data['error']}")
+                            continue
+                        
+                        response = data.get("response", {})
+                        items = response.get("items", [])
+                        
+                        for group in items:
+                            # Фильтруем только открытые группы (is_closed == 0)
+                            if group.get("is_closed", 1) == 0:
+                                screen_name = group.get("screen_name", "")
+                                group_id = group.get("id", 0)
+                                
+                                if screen_name:
+                                    link = f"https://vk.com/{screen_name}"
+                                elif group_id:
+                                    link = f"https://vk.com/club{group_id}"
+                                else:
+                                    continue
+                                
+                                # Проверяем, что группа не дублируется
+                                if not any(g.get("link") == link for g in found_groups):
+                                    found_groups.append({
+                                        "link": link,
+                                        "title": group.get("name", ""),
+                                        "type": "vk",
+                                        "participants_count": group.get("members_count", 0),
+                                        "geo_tag": "Москва/МО",  # По умолчанию, можно уточнить позже
+                                    })
+                        
+                        # Небольшая задержка между запросами (антифлуд)
+                        await asyncio.sleep(0.5)
+                        
+                except Exception as e:
+                    logger.error(f"❌ Ошибка при поиске VK групп по ключевому слову '{keyword}': {e}")
+                    continue
+        
+        logger.info(f"🔍 Discovery VK: найдено {len(found_groups)} новых групп ВКонтакте")
+        return found_groups

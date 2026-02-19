@@ -1,14 +1,11 @@
 """
-Scout Parser — глобальный поиск лидов с гео-фильтрацией.
+Scout Parser — снайперский мониторинг жилых ЖК.
 
-Стратегия «Глобальный поиск»:
-- Ищет по ключевым словам в любых открытых каналах
-- Гео-фильтрация: только Москва и Московская область
-- Не привязан к конкретным ЖК
-- Discovery автоматически находит новые каналы
+Фокус: локальные чаты жилых комплексов (обжитые дома), «горячие» проблемы
+перепланировок. Лид = вопрос + технический термин (не «посоветуйте рабочих»).
 
-Лид = вопрос о перепланировке + технический термин (не «посоветуйте рабочих»).
-Цели задаются через .env (SCOUT_TG_CHANNEL_1_ID, NAME, GEO) или через Discovery.
+Приоритетные ЖК: Сердце Столицы, Символ, Зиларт, Пресня Сити, Сити (Башни).
+Цели задаются через .env (SCOUT_TG_CHANNEL_1_ID, NAME, GEO) или дефолт ниже.
 """
 import asyncio
 import logging
@@ -38,8 +35,6 @@ class ScoutPost:
     author_name: Optional[str] = None
     url: str = ""
     published_at: Optional[datetime] = None
-    is_comment: bool = False  # True если это комментарий из Discussion Group
-    original_channel_id: Optional[str] = None  # ID оригинального канала для комментариев
     likes: int = 0
     comments: int = 0
     source_link: Optional[str] = None  # ссылка на чат (для geo_tag из target_resources)
@@ -52,19 +47,21 @@ class ScoutParser:
     Ищет посты по ключевым словам и оставляет комментарии с предложением помощи.
     """
 
-    # === ДЕФОЛТНЫЕ КАНАЛЫ (если не заданы через .env) ===
-    # ВАЖНО: Discovery автоматически находит каналы по ключевым словам.
-    # Этот список используется только если каналы не заданы вручную.
-    # Гео-фильтрация (Москва/МО) применяется на этапе анализа постов.
+    # === ПРИОРИТЕТНЫЕ ЖК ДЛЯ МОНИТОРИНГА (снайперский режим) ===
+    # ID чатов задаются в .env: SCOUT_TG_CHANNEL_1_ID, SCOUT_TG_CHANNEL_1_NAME, SCOUT_TG_CHANNEL_1_GEO и т.д.
+    # Если не заданы — используются эти дефолты (id нужно заменить на реальные чаты ЖК).
     TG_CHANNELS = [
-        # Пусто — Discovery найдёт каналы автоматически
+        {"id": "", "name": "ЖК «Сердце Столицы»", "geo": "Москва"},
+        {"id": "", "name": "ЖК «Символ»", "geo": "Москва"},
+        {"id": "", "name": "ЖК «Зиларт»", "geo": "Москва"},
+        {"id": "", "name": "ЖК «Пресня Сити»", "geo": "Москва"},
+        {"id": "", "name": "Сити (Башни)", "geo": "Москва"},
     ]
 
-    # === VK ГРУППЫ ===
-    # Наша собственная группа ТЕРИОН намеренно исключена —
-    # шпион ищет клиентов во внешних источниках, не у себя.
-    # Добавьте сюда VK-группы ЖК или тематические сообщества если нужно.
-    VK_GROUPS: list = []
+    # === VK ГРУППЫ (при необходимости добавить чаты ЖК в VK) ===
+    VK_GROUPS = [
+        {"id": "235569022", "name": "ТЕРИОН / перепланировки", "geo": "Москва/МО"},
+    ]
 
     # === КЛЮЧЕВЫЕ СЛОВА (в т.ч. боли жильцов) ===
     KEYWORDS = [
@@ -492,48 +489,6 @@ class ScoutParser:
             except Exception as e:
                 logger.warning("Не удалось загрузить target_resources для разведки: %s", e)
 
-        # Фильтр «Свой-Чужой»: собственные каналы TERION/Юлии исключаем из сканирования.
-        # Чтобы добавить новый канал — укажи его в .env как OWN_CHANNEL_IDS (через запятую).
-        from config import (
-            CHANNEL_ID_TERION, CHANNEL_ID_DOM_GRAD, NOTIFICATIONS_CHANNEL_ID,
-            LEADS_GROUP_CHAT_ID as _LEADS_GROUP_CHAT_ID,
-            THREAD_ID_LOGS, BOT_TOKEN,
-        )
-        _own_ids: set[int] = {
-            abs(CHANNEL_ID_TERION),
-            abs(CHANNEL_ID_DOM_GRAD),
-            abs(NOTIFICATIONS_CHANNEL_ID),
-            abs(_LEADS_GROUP_CHAT_ID),
-        }
-        _extra = os.getenv("OWN_CHANNEL_IDS", "")
-        for _raw in _extra.split(","):
-            _raw = _raw.strip()
-            if _raw.lstrip("-").isdigit():
-                _own_ids.add(abs(int(_raw)))
-
-        async def _notify_logs_topic(msg: str):
-            """Отправить системное сообщение в топик «Логи» рабочей группы."""
-            try:
-                from aiogram import Bot
-                from aiogram.client.default import DefaultBotProperties
-                _bot = None
-                try:
-                    from utils.bot_config import get_main_bot
-                    _bot = get_main_bot()
-                except Exception:
-                    pass
-                if _bot is None and BOT_TOKEN:
-                    _bot = Bot(token=BOT_TOKEN, default=DefaultBotProperties(parse_mode="HTML"))
-                if _bot:
-                    await _bot.send_message(
-                        _LEADS_GROUP_CHAT_ID,
-                        msg,
-                        message_thread_id=THREAD_ID_LOGS,
-                        parse_mode="HTML",
-                    )
-            except Exception as _log_err:
-                logger.debug("Не удалось отправить в топик Логи: %s", _log_err)
-
         # Список чатов: из БД (data-driven) или из конфига
         channels_to_scan = []
         if db:
@@ -547,15 +502,6 @@ class ScoutParser:
                         entity = await self._throttled_get_entity(client, link)
                         cid = getattr(entity, "id", None)
                         if cid is None:
-                            logger.warning(
-                                "⚠️ Чат разрешён, но entity.id == None: %s (тип: %s). "
-                                "Возможно, это медиа-канал без числового ID.",
-                                link, type(entity).__name__,
-                            )
-                            continue
-                        # Фильтр «Свой-Чужой»
-                        if abs(cid) in _own_ids:
-                            logger.info("⏭️ Пропуск собственного канала TERION: %s (id=%s)", link, cid)
                             continue
                         channels_to_scan.append({
                             "id": cid,
@@ -566,46 +512,7 @@ class ScoutParser:
                             "db_id": t.get("id")
                         })
                     except Exception as e:
-                        err_str = str(e).lower()
-                        is_private = (
-                            "no user has username" in err_str
-                            or "username not occupied" in err_str
-                            or "channel invalid" in err_str
-                            or "chat not found" in err_str
-                        )
-                        is_invite = "+joinchat" in link or "/+" in link
-
-                        if is_private and is_invite:
-                            msg_text = (
-                                f"🔒 <b>Нужна помощь человека</b>\n\n"
-                                f"Чат: <code>{link}</code>\n"
-                                f"Статус: <b>ПРИВАТНАЯ ССЫЛКА-ПРИГЛАШЕНИЕ</b>\n"
-                                f"Действие: войдите в чат вручную с аккаунта TELEGRAM_PHONE, "
-                                f"затем шпион продолжит мониторинг.\n"
-                                f"Ошибка: <code>{e}</code>"
-                            )
-                            logger.error("🔒 ПРИВАТНАЯ ССЫЛКА-ПРИГЛАШЕНИЕ: %s — Ошибка: %s", link, e)
-                            await _notify_logs_topic(msg_text)
-                        elif is_private:
-                            msg_text = (
-                                f"❌ <b>Нужна помощь человека</b>\n\n"
-                                f"Чат: <code>{link}</code>\n"
-                                f"Статус: <b>НЕСУЩЕСТВУЮЩИЙ USERNAME</b>\n"
-                                f"Действие: проверьте правильность ссылки или замените "
-                                f"на числовой chat_id через @userinfobot.\n"
-                                f"Ошибка: <code>{e}</code>"
-                            )
-                            logger.error("❌ НЕСУЩЕСТВУЮЩИЙ USERNAME: %s — Ошибка: %s", link, e)
-                            await _notify_logs_topic(msg_text)
-                        else:
-                            msg_text = (
-                                f"⚠️ <b>Чат недоступен</b>\n\n"
-                                f"Чат: <code>{link}</code>\n"
-                                f"Ошибка: <code>{e}</code>\n"
-                                f"Если закрытая группа — добавьте аккаунт-парсер вручную."
-                            )
-                            logger.error("⚠️ Не удалось разрешить чат %s: %s", link, e)
-                            await _notify_logs_topic(msg_text)
+                        logger.warning("Не удалось разрешить чат %s: %s", link, e)
             except Exception as e:
                 logger.warning("Не удалось загрузить активные цели из БД: %s", e)
         if not channels_to_scan:
@@ -624,100 +531,49 @@ class ScoutParser:
             count = 0
             scanned = 0
             max_id = channel.get("last_post_id", 0)
-            
-            # ── Проверка Discussion Group (чат для комментариев) ──────────────────
-            discussion_group_id = None
-            try:
-                from telethon.tl.functions.channels import GetFullChannelRequest
-                from telethon.tl.types import Channel
-                
-                entity = await self._throttled_get_entity(client, cid)
-                if isinstance(entity, Channel):
-                    full_channel = await client(GetFullChannelRequest(entity))
-                    if full_channel.full_chat.linked_chat_id:
-                        discussion_group_id = full_channel.full_chat.linked_chat_id
-                        logger.info(f"💬 Discovery: у канала {channel.get('name')} найден Discussion Group (ID: {discussion_group_id})")
-            except Exception as e:
-                logger.debug(f"Discussion Group не найден для канала {cid}: {e}")
-            
             try:
                 # Используем min_id для загрузки только новых сообщений
                 iter_params = {"limit": tg_limit}
                 if max_id > 0:
                     iter_params["min_id"] = max_id
                 
-                # ⚠️ ИГНОРИРУЕМ ОСНОВНОЙ КАНАЛ: парсим только комментарии от пользователей
-                # Основные посты от каналов (админов) пропускаем - нам нужны только сообщения от User
-                if isinstance(entity, Channel):
-                    logger.info(f"⏭️ Пропуск основного канала {channel.get('name')} - фокус на комментариях от пользователей в Discussion Group")
-                    # Не парсим основной канал, только Discussion Group (парсится ниже)
-                else:
-                    # Для групповых чатов (не каналов) парсим сообщения, но только от пользователей
-                    async for message in client.iter_messages(cid, **iter_params):
-                        if not message.text:
-                            continue
-                        
-                        # ── ФИЛЬТР: Пропускаем посты от каналов (админов) ────────────────────────
-                        sender_id = getattr(message, "sender_id", None)
-                        peer_id = getattr(message, "peer_id", None)
-                        
-                        # Проверяем, является ли отправитель каналом
-                        if sender_id and peer_id:
-                            # Если sender_id совпадает с ID канала - это пост от канала, пропускаем
-                            if hasattr(peer_id, "channel_id") and sender_id == peer_id.channel_id:
+                async for message in client.iter_messages(cid, **iter_params):
+                    if not message.text:
+                        continue
+                    if message.id > max_id:
+                        max_id = message.id
+                    scanned += 1
+                    # Ловля ссылок: ставим в очередь, обрабатываем по одной с паузой 60 сек (anti-flood)
+                    if db:
+                        for url in self._extract_tme_links(message.text):
+                            url_norm = url.rstrip("/")
+                            if url_norm in existing_links:
                                 continue
-                        
-                        # Проверяем тип отправителя - нам нужны только User, не Channel
-                        if message.sender:
-                            from telethon.tl.types import User, Channel
-                            if isinstance(message.sender, Channel):
-                                logger.debug(f"⏭️ Пропущен пост от канала (sender_id={sender_id})")
-                                continue
-                            if not isinstance(message.sender, User):
-                                # Пропускаем ботов и другие типы
-                                continue
-                        
-                        if message.id > max_id:
-                            max_id = message.id
-                        scanned += 1
-                        # Ловля ссылок: ставим в очередь, обрабатываем по одной с паузой 60 сек (anti-flood)
-                        if db:
-                            for url in self._extract_tme_links(message.text):
-                                url_norm = url.rstrip("/")
-                                if url_norm in existing_links:
-                                    continue
-                                if url_norm not in {u.rstrip("/") for u in new_links_queue}:
-                                    new_links_queue.append(url_norm)
-                                    print("[SCOUT] Найдена новая ссылка, поставлена в очередь на проверку через 60 сек.", flush=True)
-                                    logger.info("[SCOUT] Найдена новая ссылка %s, поставлена в очередь на проверку через 60 сек.", url_norm)
-                        if self.detect_lead(message.text):
-                            # ── Дополнительная проверка: пропускаем посты от канала (админов) ────────
-                            sender_id = getattr(message, "sender_id", None)
-                            peer_id = getattr(message, "peer_id", None)
-                            if sender_id and peer_id and hasattr(peer_id, "channel_id"):
-                                if sender_id == peer_id.channel_id:
-                                    continue  # Пропускаем посты от канала (админов)
-                            
-                            author_id = getattr(message, "sender_id", None)
-                            author_name = None
-                            if getattr(message, "sender", None):
-                                s = message.sender
-                                author_name = getattr(s, "username", None) or getattr(s, "first_name", None)
-                                if author_name and getattr(s, "last_name", None):
-                                    author_name = f"{author_name} {s.last_name}".strip()
-                            post = ScoutPost(
-                                source_type="telegram",
-                                source_name=channel['name'],
-                                source_id=str(channel['id']),
-                                post_id=str(message.id),
-                                text=message.text,
-                                author_id=author_id,
-                                author_name=author_name,
-                                url=self._tg_post_url(cid, message.id),
-                                source_link=channel.get("link") or "",
-                            )
-                            posts.append(post)
-                            count += 1
+                            if url_norm not in {u.rstrip("/") for u in new_links_queue}:
+                                new_links_queue.append(url_norm)
+                                print("[SCOUT] Найдена новая ссылка, поставлена в очередь на проверку через 60 сек.", flush=True)
+                                logger.info("[SCOUT] Найдена новая ссылка %s, поставлена в очередь на проверку через 60 сек.", url_norm)
+                    if self.detect_lead(message.text):
+                        author_id = getattr(message, "sender_id", None)
+                        author_name = None
+                        if getattr(message, "sender", None):
+                            s = message.sender
+                            author_name = getattr(s, "username", None) or getattr(s, "first_name", None)
+                            if author_name and getattr(s, "last_name", None):
+                                author_name = f"{author_name} {s.last_name}".strip()
+                        post = ScoutPost(
+                            source_type="telegram",
+                            source_name=channel['name'],
+                            source_id=str(channel['id']),
+                            post_id=str(message.id),
+                            text=message.text,
+                            author_id=author_id,
+                            author_name=author_name,
+                            url=self._tg_post_url(cid, message.id),
+                            source_link=channel.get("link") or "",
+                        )
+                        posts.append(post)
+                        count += 1
                 self.last_scan_report.append({
                     "type": "telegram",
                     "name": channel["name"],
@@ -754,84 +610,6 @@ class ScoutParser:
                             logger.info("🏢 Режим Разведка: добавлен чат %s", link)
                         except Exception as e:
                             logger.debug("Не удалось добавить ресурс %s: %s", link, e)
-                
-                # ── Парсинг комментариев из Discussion Group ────────────────────
-                if discussion_group_id:
-                    try:
-                        discussion_count = 0
-                        discussion_scanned = 0
-                        logger.info(f"💬 Парсинг комментариев из Discussion Group канала {channel.get('name')}...")
-                        
-                        async for message in client.iter_messages(discussion_group_id, limit=tg_limit):
-                            if not message.text:
-                                continue
-                            
-                            # ── ФИЛЬТР: Только сообщения от User, не от каналов ────────────────────
-                            sender_id = getattr(message, "sender_id", None)
-                            if message.sender:
-                                from telethon.tl.types import User, Channel
-                                if isinstance(message.sender, Channel):
-                                    logger.debug(f"⏭️ Пропущен комментарий от канала в Discussion Group")
-                                    continue
-                                if not isinstance(message.sender, User):
-                                    # Пропускаем ботов и другие типы
-                                    continue
-                            
-                            discussion_scanned += 1
-                            
-                            # Проверяем, является ли сообщение комментарием к посту из основного канала
-                            # (в Discussion Group сообщения могут быть связаны с постами через reply_to)
-                            if self.detect_lead(message.text):
-                                author_id = getattr(message, "sender_id", None)
-                                author_name = None
-                                if getattr(message, "sender", None):
-                                    s = message.sender
-                                    author_name = getattr(s, "username", None) or getattr(s, "first_name", None)
-                                    if author_name and getattr(s, "last_name", None):
-                                        author_name = f"{author_name} {s.last_name}".strip()
-                                
-                                # Формируем URL комментария
-                                comment_url = self._tg_post_url(discussion_group_id, message.id)
-                                
-                                post = ScoutPost(
-                                    source_type="telegram",
-                                    source_name=f"{channel['name']} (комментарии)",
-                                    source_id=str(discussion_group_id),
-                                    post_id=str(message.id),
-                                    text=message.text,
-                                    author_id=author_id,
-                                    author_name=author_name,
-                                    url=comment_url,
-                                    source_link=channel.get("link") or "",
-                                    is_comment=True,  # Помечаем как комментарий
-                                    original_channel_id=str(cid),
-                                )
-                                posts.append(post)
-                                discussion_count += 1
-                                logger.debug(f"💬 Найден лид в комментариях: {message.text[:50]}...")
-                        
-                        if discussion_count > 0:
-                            logger.info(f"💬 Discovery: найдено {discussion_count} лидов в комментариях канала {channel.get('name')}")
-                            self.last_scan_report.append({
-                                "type": "telegram_discussion",
-                                "name": f"{channel['name']} (комментарии)",
-                                "id": discussion_group_id,
-                                "status": "ok",
-                                "posts": discussion_count,
-                                "scanned": discussion_scanned,
-                                "error": None,
-                            })
-                    except Exception as e:
-                        logger.warning(f"⚠️ Ошибка парсинга Discussion Group канала {channel.get('name')}: {e}")
-                        self.last_scan_report.append({
-                            "type": "telegram_discussion",
-                            "name": f"{channel['name']} (комментарии)",
-                            "id": discussion_group_id,
-                            "status": "error",
-                            "posts": 0,
-                            "scanned": 0,
-                            "error": str(e),
-                        })
             except Exception as e:
                 logger.error(f"❌ Ошибка парсинга ТГ {channel['name']}: {e}")
                 self.last_scan_report.append({

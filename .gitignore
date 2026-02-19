@@ -59,3 +59,9 @@ backups/
 # === DOCKER ===
 .docker/
 docker-compose.override.yml
+
+# === ВРЕМЕННЫЕ ФАЙЛЫ ===
+kipping...
+"Жюль/"
+*.bat
+.git_repo_info.md
