@@ -646,24 +646,51 @@ class ScoutParser:
                 if max_id > 0:
                     iter_params["min_id"] = max_id
                 
-                # Парсим посты из основного канала
-                async for message in client.iter_messages(cid, **iter_params):
-                    if not message.text:
-                        continue
-                    if message.id > max_id:
-                        max_id = message.id
-                    scanned += 1
-                    # Ловля ссылок: ставим в очередь, обрабатываем по одной с паузой 60 сек (anti-flood)
-                    if db:
-                        for url in self._extract_tme_links(message.text):
-                            url_norm = url.rstrip("/")
-                            if url_norm in existing_links:
+                # ⚠️ ИГНОРИРУЕМ ОСНОВНОЙ КАНАЛ: парсим только комментарии от пользователей
+                # Основные посты от каналов (админов) пропускаем - нам нужны только сообщения от User
+                if isinstance(entity, Channel):
+                    logger.info(f"⏭️ Пропуск основного канала {channel.get('name')} - фокус на комментариях от пользователей в Discussion Group")
+                    # Не парсим основной канал, только Discussion Group (парсится ниже)
+                else:
+                    # Для групповых чатов (не каналов) парсим сообщения, но только от пользователей
+                    async for message in client.iter_messages(cid, **iter_params):
+                        if not message.text:
+                            continue
+                        
+                        # ── ФИЛЬТР: Пропускаем посты от каналов (админов) ────────────────────────
+                        sender_id = getattr(message, "sender_id", None)
+                        peer_id = getattr(message, "peer_id", None)
+                        
+                        # Проверяем, является ли отправитель каналом
+                        if sender_id and peer_id:
+                            # Если sender_id совпадает с ID канала - это пост от канала, пропускаем
+                            if hasattr(peer_id, "channel_id") and sender_id == peer_id.channel_id:
                                 continue
-                            if url_norm not in {u.rstrip("/") for u in new_links_queue}:
-                                new_links_queue.append(url_norm)
-                                print("[SCOUT] Найдена новая ссылка, поставлена в очередь на проверку через 60 сек.", flush=True)
-                                logger.info("[SCOUT] Найдена новая ссылка %s, поставлена в очередь на проверку через 60 сек.", url_norm)
-                    if self.detect_lead(message.text):
+                        
+                        # Проверяем тип отправителя - нам нужны только User, не Channel
+                        if message.sender:
+                            from telethon.tl.types import User, Channel
+                            if isinstance(message.sender, Channel):
+                                logger.debug(f"⏭️ Пропущен пост от канала (sender_id={sender_id})")
+                                continue
+                            if not isinstance(message.sender, User):
+                                # Пропускаем ботов и другие типы
+                                continue
+                        
+                        if message.id > max_id:
+                            max_id = message.id
+                        scanned += 1
+                        # Ловля ссылок: ставим в очередь, обрабатываем по одной с паузой 60 сек (anti-flood)
+                        if db:
+                            for url in self._extract_tme_links(message.text):
+                                url_norm = url.rstrip("/")
+                                if url_norm in existing_links:
+                                    continue
+                                if url_norm not in {u.rstrip("/") for u in new_links_queue}:
+                                    new_links_queue.append(url_norm)
+                                    print("[SCOUT] Найдена новая ссылка, поставлена в очередь на проверку через 60 сек.", flush=True)
+                                    logger.info("[SCOUT] Найдена новая ссылка %s, поставлена в очередь на проверку через 60 сек.", url_norm)
+                        if self.detect_lead(message.text):
                         author_id = getattr(message, "sender_id", None)
                         author_name = None
                         if getattr(message, "sender", None):
@@ -731,6 +758,18 @@ class ScoutParser:
                         async for message in client.iter_messages(discussion_group_id, limit=tg_limit):
                             if not message.text:
                                 continue
+                            
+                            # ── ФИЛЬТР: Только сообщения от User, не от каналов ────────────────────
+                            sender_id = getattr(message, "sender_id", None)
+                            if message.sender:
+                                from telethon.tl.types import User, Channel
+                                if isinstance(message.sender, Channel):
+                                    logger.debug(f"⏭️ Пропущен комментарий от канала в Discussion Group")
+                                    continue
+                                if not isinstance(message.sender, User):
+                                    # Пропускаем ботов и другие типы
+                                    continue
+                            
                             discussion_scanned += 1
                             
                             # Проверяем, является ли сообщение комментарием к посту из основного канала
