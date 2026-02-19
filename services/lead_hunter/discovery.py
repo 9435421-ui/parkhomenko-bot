@@ -86,14 +86,28 @@ class Discovery:
         """Инициализация Discovery с расширенными ключевыми словами.
         
         Генерирует комбинации ключевых слов с районами Москвы для поиска сотен чатов.
+        
+        ВАЖНО: Если SCOUT_KEYWORDS задано в .env, но содержит менее 5 ключевых слов,
+        используется расширенный список вместо env (чтобы избежать ситуации с одним словом).
         """
         env = os.getenv("SCOUT_KEYWORDS", "").strip()
         if env:
-            # Если заданы через env - используем как есть
-            self.keywords = [k.strip() for k in env.split(",") if k.strip()]
+            env_keywords = [k.strip() for k in env.split(",") if k.strip()]
+            # Если в env задано слишком мало ключевых слов (< 5) - игнорируем и используем расширенный список
+            if len(env_keywords) < 5:
+                logger.warning(
+                    f"⚠️ SCOUT_KEYWORDS содержит только {len(env_keywords)} слово(а): {env_keywords}. "
+                    f"Используется расширенный список ключевых слов вместо env."
+                )
+                self.keywords = self._generate_expanded_keywords()
+            else:
+                # Если достаточно слов - используем из env
+                self.keywords = env_keywords
+                logger.info(f"✅ Используются ключевые слова из SCOUT_KEYWORDS: {len(env_keywords)} слов")
         else:
             # Генерируем расширенный список с комбинациями
             self.keywords = self._generate_expanded_keywords()
+            logger.info(f"✅ Используется расширенный список ключевых слов: {len(self.keywords)} слов")
 
     def _generate_expanded_keywords(self) -> List[str]:
         """Генерирует расширенный список ключевых слов с комбинациями районов."""

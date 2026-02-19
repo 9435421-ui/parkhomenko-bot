@@ -11,5 +11,8 @@
         "**/.git": true,
         "**/venv": true
     },
-    "cursorpyright.analysis.typeCheckingMode": "basic"
+    "cursorpyright.analysis.typeCheckingMode": "basic",
+    "git.repository": "https://github.com/9435421-ui/parkhomenko-bot",
+    "git.remote": "origin",
+    "git.branch": "main"
 }
