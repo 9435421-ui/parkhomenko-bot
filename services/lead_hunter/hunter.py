@@ -509,18 +509,25 @@ class LeadHunter:
         if not all_posts:
             logger.info("🔎 Лидов не найдено. Запуск Discovery для поиска новых источников...")
             new_sources = await self.discovery.find_new_sources()
+            added_count = 0
             for source in new_sources:
                 try:
                     await main_db.add_target_resource(
                         resource_type="telegram",
                         link=source["link"],
-                        title=source["title"],
-                        notes="Найден через LeadHunter Discovery",
-                        status="pending",
-                        participants_count=source.get("participants_count")
+                        title=source.get("title") or source["link"],
+                        notes="Найден через LeadHunter Discovery (глобальный поиск)",
+                        status="active",  # Сразу активный, чтобы использовался для сканирования
+                        participants_count=source.get("participants_count", 0)
                     )
+                    added_count += 1
+                    logger.info(f"✅ Discovery: добавлен канал {source.get('title', source['link'])}")
                 except Exception as e:
-                    logger.debug(f"Ошибка добавления ресурса из Discovery: {e}")
+                    # Игнорируем ошибки дубликатов (канал уже есть в БД)
+                    if "UNIQUE constraint" not in str(e):
+                        logger.warning(f"⚠️ Ошибка добавления ресурса из Discovery {source.get('link')}: {e}")
+            if added_count > 0:
+                logger.info(f"📊 Discovery: добавлено {added_count} новых каналов в БД (статус: active)")
 
         # Сброс старого кеша: игнорируем первые N сообщений (старые) — по умолчанию 0
         try:

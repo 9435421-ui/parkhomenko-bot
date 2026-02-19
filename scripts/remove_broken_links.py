@@ -6,27 +6,38 @@
 import asyncio
 from database import db
 
-# Список битых ссылок из логов
+# =============================================================================
+# СПИСОК СТАРЫХ КАНАЛОВ ДЛЯ АРХИВАЦИИ
+# =============================================================================
+# Эти каналы были добавлены через старый init_spy_targets.py
+# при старой стратегии "привязка к ЖК".
+# 
+# Новая стратегия: "Глобальный поиск с гео-фильтрацией"
+# Discovery автоматически находит каналы, не нужно добавлять вручную.
+# =============================================================================
+
 BROKEN_LINKS = [
-    "https://t.me/kvartiry_moskvy",
-    "https://t.me/interiors_design",
-    "https://t.me/interior_ideas_ru",
-    "https://t.me/dizayn_kvartiry",
-    "https://t.me/zhiteli_moskvy",
-    "https://t.me/zhk_simvol_msk",
-    "https://t.me/serdce_stolicy",
-    "https://t.me/dynasty_zhk_moscow",
-    # Также старые общие каналы, которые не нужны
+    # Старые общие каналы (не привязаны к конкретным ЖК)
     "https://t.me/msk_realty_chat",
     "https://t.me/novostroyki_moscow",
     "https://t.me/msk_novostroyki",
     "https://t.me/realtymoscow",
+    "https://t.me/kvartiry_moskvy",
     "https://t.me/remont_chats",
     "https://t.me/pereplanirovka_msk",
     "https://t.me/remont_kvartir_moskva",
     "https://t.me/stroitelstvo_remont",
+    "https://t.me/interiors_design",
+    "https://t.me/interior_ideas_ru",
+    "https://t.me/dizayn_kvartiry",
+    "https://t.me/zhiteli_moskvy",
     "https://t.me/msk_chat_official",
-    "https://t.me/zilart_msk",  # Старая ссылка на Зиларт
+    
+    # Старые ЖК-специфичные каналы (больше не используем привязку к ЖК)
+    "https://t.me/zilart_msk",
+    "https://t.me/zhk_simvol_msk",
+    "https://t.me/serdce_stolicy",
+    "https://t.me/dynasty_zhk_moscow",
 ]
 
 
