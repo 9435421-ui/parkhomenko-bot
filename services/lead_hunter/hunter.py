@@ -563,7 +563,15 @@ class LeadHunter:
             _seen_post_keys.add(_post_key)
 
             # Быстрая оценка через LeadAnalyzer (существующая ранняя логика) — ТЕПЕРЬ ВОЗВРАЩАЕТ DICT
-            analysis_data = await self.analyzer.analyze_post(post.text)
+            # Гео-фильтрация: передаём source_name для проверки Москвы/МО
+            source_name = getattr(post, "source_name", "") or ""
+            analysis_data = await self.analyzer.analyze_post(post.text, source_name=source_name)
+            
+            # Если пост отфильтрован по гео — пропускаем
+            if analysis_data.get("geo_filtered"):
+                logger.debug("🚫 Пост отфильтрован по гео (не Москва/МО) — пропущен")
+                continue
+            
             score = analysis_data.get("priority_score", 0) / 10.0 # Приводим к 0.0 - 1.0 для совместимости
             pain_stage = analysis_data.get("pain_stage", "ST-1")
 
