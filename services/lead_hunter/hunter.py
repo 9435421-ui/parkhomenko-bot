@@ -1068,98 +1068,6 @@ class LeadHunter:
                         # Лид уже сохранен в БД, будет отправлен в сводке по расписанию
                 if cards_sent:
                     logger.info("📋 В рабочую группу отправлено карточек лидов: %s", cards_sent)
-        """Немедленная отправка горячих лидов (HOT_TRIGGERS, ST-1/ST-2) в топик "Горячие лиды".
-        
-        Проверяет БД на наличие неотправленных горячих лидов и отправляет их.
-        Вызывается при обнаружении нового горячего лида или по расписанию.
-        
-        Returns:
-            True если лиды отправлены успешно, False в противном случае
-        """
-        from config import BOT_TOKEN, LEADS_GROUP_CHAT_ID, THREAD_ID_HOT_LEADS
-        
-        if not BOT_TOKEN or not LEADS_GROUP_CHAT_ID:
-            logger.warning("⚠️ BOT_TOKEN или LEADS_GROUP_CHAT_ID не заданы — горячие лиды не отправлены")
-            return False
-        
-        try:
-            main_db = await self._ensure_db_connected()
-            hot_leads = await main_db.get_hot_leads_for_immediate_send()
-            
-            if not hot_leads:
-                return False
-            
-            sent_count = 0
-            bot = _bot_for_send()
-            if bot is None:
-                bot = Bot(token=BOT_TOKEN, default=DefaultBotProperties(parse_mode="HTML"))
-            
-            try:
-                for lead in hot_leads[:10]:  # Максимум 10 лидов за раз
-                    try:
-                        lead_id = lead.get("id")
-                        source_name = lead.get("source_name", "—")
-                        text = (lead.get("text") or "")[:2000]
-                        url = lead.get("url", "")
-                        profile_url = lead.get("profile_url", "")
-                        priority_score = lead.get("priority_score", 0)
-                        pain_stage = lead.get("pain_stage", "")
-                        
-                        # Форматируем карточку лида
-                        card_text = self._format_lead_card(
-                            {
-                                "content": text,
-                                "priority_score": priority_score,
-                                "pain_stage": pain_stage,
-                                "url": url
-                            },
-                            profile_url=profile_url,
-                            card_header=source_name
-                        )
-                        
-                        # Кнопки
-                        url_buttons = []
-                        if profile_url and profile_url.startswith("http"):
-                            url_buttons.append(InlineKeyboardButton(text="👤 Профиль", url=profile_url))
-                        url_buttons.append(InlineKeyboardButton(text="🔗 Пост", url=url[:500]))
-                        action_buttons = [
-                            InlineKeyboardButton(text="✍️ На эту тему пост", callback_data=f"lead_to_content:{lead_id}"),
-                            InlineKeyboardButton(text="🛠 Ответить экспертно", callback_data=f"lead_expert_reply_{lead_id}"),
-                            InlineKeyboardButton(text="✅ Взять в работу", callback_data=f"lead_take_work_{lead_id}"),
-                        ]
-                        keyboard = InlineKeyboardMarkup(inline_keyboard=[url_buttons, action_buttons])
-                        
-                        await bot.send_message(
-                            LEADS_GROUP_CHAT_ID,
-                            card_text,
-                            reply_markup=keyboard,
-                            message_thread_id=THREAD_ID_HOT_LEADS,
-                            parse_mode="HTML"
-                        )
-                        
-                        # Отмечаем как отправленный
-                        await main_db.mark_lead_sent_to_hot_leads(lead_id)
-                        sent_count += 1
-                        
-                    except Exception as e:
-                        logger.error(f"❌ Ошибка отправки горячего лида {lead.get('id')}: {e}")
-                        continue
-                
-                if sent_count > 0:
-                    logger.info(f"🔥 Отправлено горячих лидов в топик 'Горячие лиды': {sent_count}")
-                
-                return sent_count > 0
-                
-            finally:
-                if _bot_for_send() is None and getattr(bot, "session", None):
-                    try:
-                        await bot.session.close()
-                    except Exception:
-                        pass
-                        
-        except Exception as e:
-            logger.error(f"❌ Ошибка отправки горячих лидов: {e}")
-            return False
                 # Дублирование в рабочую группу: краткий отчёт о сохранённых лидах
                 if hot_leads:
                     from config import BOT_TOKEN, LEADS_GROUP_CHAT_ID, THREAD_ID_LOGS
@@ -1296,4 +1204,98 @@ class LeadHunter:
                         
         except Exception as e:
             logger.error(f"❌ Ошибка отправки сводки обычных лидов: {e}")
+            return False
+    
+    async def send_hot_leads_immediate(self) -> bool:
+        """Немедленная отправка горячих лидов (HOT_TRIGGERS, ST-1/ST-2) в топик "Горячие лиды".
+        
+        Проверяет БД на наличие неотправленных горячих лидов и отправляет их.
+        Вызывается при обнаружении нового горячего лида или по расписанию.
+        
+        Returns:
+            True если лиды отправлены успешно, False в противном случае
+        """
+        from config import BOT_TOKEN, LEADS_GROUP_CHAT_ID, THREAD_ID_HOT_LEADS
+        
+        if not BOT_TOKEN or not LEADS_GROUP_CHAT_ID:
+            logger.warning("⚠️ BOT_TOKEN или LEADS_GROUP_CHAT_ID не заданы — горячие лиды не отправлены")
+            return False
+        
+        try:
+            main_db = await self._ensure_db_connected()
+            hot_leads = await main_db.get_hot_leads_for_immediate_send()
+            
+            if not hot_leads:
+                return False
+            
+            sent_count = 0
+            bot = _bot_for_send()
+            if bot is None:
+                bot = Bot(token=BOT_TOKEN, default=DefaultBotProperties(parse_mode="HTML"))
+            
+            try:
+                for lead in hot_leads[:10]:  # Максимум 10 лидов за раз
+                    try:
+                        lead_id = lead.get("id")
+                        source_name = lead.get("source_name", "—")
+                        text = (lead.get("text") or "")[:2000]
+                        url = lead.get("url", "")
+                        profile_url = lead.get("profile_url", "")
+                        priority_score = lead.get("priority_score", 0)
+                        pain_stage = lead.get("pain_stage", "")
+                        
+                        # Форматируем карточку лида
+                        card_text = self._format_lead_card(
+                            {
+                                "content": text,
+                                "priority_score": priority_score,
+                                "pain_stage": pain_stage,
+                                "url": url
+                            },
+                            profile_url=profile_url,
+                            card_header=source_name
+                        )
+                        
+                        # Кнопки
+                        url_buttons = []
+                        if profile_url and profile_url.startswith("http"):
+                            url_buttons.append(InlineKeyboardButton(text="👤 Профиль", url=profile_url))
+                        url_buttons.append(InlineKeyboardButton(text="🔗 Пост", url=url[:500]))
+                        action_buttons = [
+                            InlineKeyboardButton(text="✍️ На эту тему пост", callback_data=f"lead_to_content:{lead_id}"),
+                            InlineKeyboardButton(text="🛠 Ответить экспертно", callback_data=f"lead_expert_reply_{lead_id}"),
+                            InlineKeyboardButton(text="✅ Взять в работу", callback_data=f"lead_take_work_{lead_id}"),
+                        ]
+                        keyboard = InlineKeyboardMarkup(inline_keyboard=[url_buttons, action_buttons])
+                        
+                        await bot.send_message(
+                            LEADS_GROUP_CHAT_ID,
+                            card_text,
+                            reply_markup=keyboard,
+                            message_thread_id=THREAD_ID_HOT_LEADS,
+                            parse_mode="HTML"
+                        )
+                        
+                        # Отмечаем как отправленный
+                        await main_db.mark_lead_sent_to_hot_leads(lead_id)
+                        sent_count += 1
+                        
+                    except Exception as e:
+                        logger.error(f"❌ Ошибка отправки горячего лида {lead.get('id')}: {e}")
+                        continue
+                
+                if sent_count > 0:
+                    logger.info(f"🔥 Отправлено горячих лидов в топик 'Горячие лиды': {sent_count}")
+                
+                return sent_count > 0
+                
+            finally:
+                if _bot_for_send() is None and getattr(bot, "session", None):
+                    try:
+                        await bot.session.close()
+                    except Exception:
+                        pass
+                        
+        except Exception as e:
+            logger.error(f"❌ Ошибка отправки горячих лидов: {e}")
             return False
