@@ -541,13 +541,83 @@ class Database:
         """Лиды за последние N часов (ревизия: кто попался, какие боли)."""
         async with self.conn.cursor() as cursor:
             await cursor.execute(
-                """SELECT id, source_type, source_name, author_id, username, profile_url, text, url, created_at
+                """SELECT id, source_type, source_name, author_id, username, profile_url, text, url, created_at, pain_stage, priority_score
                    FROM spy_leads WHERE created_at >= datetime('now', ?)
                    ORDER BY created_at DESC""",
                 (f"-{since_hours} hours",),
             )
             rows = await cursor.fetchall()
             return [dict(row) for row in rows]
+    
+    async def get_regular_leads_for_summary(self, since_hours: int = 24) -> List[Dict]:
+        """Получить обычные лиды (priority_score < 3) для сводки.
+        
+        Args:
+            since_hours: За какой период получать лиды (по умолчанию 24 часа)
+        
+        Returns:
+            Список лидов с priority_score < 3, отсортированных по дате создания
+        """
+        async with self.conn.cursor() as cursor:
+            await cursor.execute(
+                """SELECT id, source_type, source_name, author_id, username, profile_url, text, url, created_at, pain_stage, priority_score
+                   FROM spy_leads 
+                   WHERE created_at >= datetime('now', ?)
+                     AND (priority_score IS NULL OR priority_score < 3)
+                     AND (pain_stage IS NULL OR pain_stage NOT IN ('ST-3', 'ST-4'))
+                   ORDER BY created_at DESC""",
+                (f"-{since_hours} hours",),
+            )
+            rows = await cursor.fetchall()
+            return [dict(row) for row in rows]
+    
+    async def get_hot_leads_for_immediate_send(self) -> List[Dict]:
+        """Получить горячие лиды (HOT_TRIGGERS, ST-1/ST-2) для немедленной отправки.
+        
+        Returns:
+            Список горячих лидов, которые еще не были отправлены в топик "Горячие лиды"
+        """
+        async with self.conn.cursor() as cursor:
+            # Получаем лиды с высоким приоритетом или стадиями ST-1/ST-2
+            # которые еще не были отправлены (нет флага sent_to_hot_leads)
+            await cursor.execute(
+                """SELECT id, source_type, source_name, author_id, username, profile_url, text, url, created_at, pain_stage, priority_score
+                   FROM spy_leads 
+                   WHERE (
+                       priority_score >= 3 
+                       OR pain_stage IN ('ST-1', 'ST-2', 'ST-3', 'ST-4')
+                   )
+                   AND (sent_to_hot_leads IS NULL OR sent_to_hot_leads = 0)
+                   ORDER BY created_at DESC
+                   LIMIT 50""",
+            )
+            rows = await cursor.fetchall()
+            return [dict(row) for row in rows]
+    
+    async def mark_lead_sent_to_hot_leads(self, lead_id: int) -> None:
+        """Отметить лид как отправленный в топик "Горячие лиды"."""
+        if not self.conn:
+            await self.connect()
+        
+        async with self.conn.cursor() as cursor:
+            # Проверяем наличие колонки sent_to_hot_leads
+            await cursor.execute("PRAGMA table_info(spy_leads)")
+            columns = await cursor.fetchall()
+            column_names = [col_info[1] for col_info in columns]
+            
+            if "sent_to_hot_leads" not in column_names:
+                try:
+                    await cursor.execute("ALTER TABLE spy_leads ADD COLUMN sent_to_hot_leads INTEGER DEFAULT 0")
+                    await self.conn.commit()
+                    logger.debug("✅ Добавлена колонка sent_to_hot_leads в spy_leads")
+                except Exception as e:
+                    logger.warning(f"⚠️ Ошибка при добавлении колонки sent_to_hot_leads: {e}")
+            
+            await cursor.execute(
+                "UPDATE spy_leads SET sent_to_hot_leads = 1 WHERE id = ?",
+                (lead_id,),
+            )
+            await self.conn.commit()
 
     async def get_spy_lead(self, lead_id: int) -> Optional[Dict]:
         """Получить лид из spy_leads по id (для кнопки «Ответить от имени Антона»)."""

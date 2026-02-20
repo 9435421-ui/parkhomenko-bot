@@ -196,6 +196,40 @@ async def main():
     from services.sales_reminders import send_sales_reminders
     scheduler.add_job(send_sales_reminders, 'interval', hours=6)
     
+    # ── ПЛАНИРОВЩИК СВОДОК ЛИДОВ ────────────────────────────────────────────────────
+    # Отправка сводок обычных лидов (priority < 3) трижды в день: 10:00, 14:00, 19:00 МСК
+    async def send_regular_leads_summary_job():
+        """Задача для отправки сводки обычных лидов по расписанию."""
+        try:
+            await hunter.send_regular_leads_summary()
+        except Exception as e:
+            logger.error(f"Ошибка отправки сводки обычных лидов: {e}")
+    
+    # Добавляем задачи на отправку сводок в 10:00, 14:00, 19:00 МСК
+    # Используем UTC: МСК = UTC+3, поэтому 10:00 МСК = 07:00 UTC, 14:00 МСК = 11:00 UTC, 19:00 МСК = 16:00 UTC
+    try:
+        from pytz import timezone
+        moscow_tz = timezone('Europe/Moscow')
+        scheduler.add_job(send_regular_leads_summary_job, 'cron', hour=10, minute=0, timezone=moscow_tz)
+        scheduler.add_job(send_regular_leads_summary_job, 'cron', hour=14, minute=0, timezone=moscow_tz)
+        scheduler.add_job(send_regular_leads_summary_job, 'cron', hour=19, minute=0, timezone=moscow_tz)
+    except ImportError:
+        # Если pytz не установлен, используем UTC с учетом смещения
+        logger.warning("⚠️ pytz не установлен, используем UTC с учетом МСК (UTC+3)")
+        scheduler.add_job(send_regular_leads_summary_job, 'cron', hour=7, minute=0)  # 10:00 МСК
+        scheduler.add_job(send_regular_leads_summary_job, 'cron', hour=11, minute=0)  # 14:00 МСК
+        scheduler.add_job(send_regular_leads_summary_job, 'cron', hour=16, minute=0)  # 19:00 МСК
+    
+    # Проверка горячих лидов для немедленной отправки (каждые 15 минут)
+    async def check_and_send_hot_leads_job():
+        """Задача для проверки и отправки горячих лидов в топик 'Горячие лиды'."""
+        try:
+            await hunter.send_hot_leads_immediate()
+        except Exception as e:
+            logger.error(f"Ошибка отправки горячих лидов: {e}")
+    
+    scheduler.add_job(check_and_send_hot_leads_job, 'interval', minutes=15)
+    
     scheduler.start()
     # Задачи планировщика получают main_bot/content_bot аргументом, своих Bot() не создают
     from services.birthday_greetings import send_birthday_greetings
