@@ -29,7 +29,7 @@ def get_cost(model: str) -> float:
 
 
 # === EXPERT SIGNATURE ===
-EXPERT_SIGNATURE = "\n\n---\n🤖 ИИ-помощник Антон\n🏡 Эксперт: Юлия Пархоменко"
+EXPERT_SIGNATURE = "\n\n---\n🤖 ИИ-ассистент Антон\n🏡 Команда TERION"
 
 
 # === GENERATION WITH FALLBACK ===

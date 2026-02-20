@@ -39,7 +39,7 @@ class Publisher:
             return False
     
     # Подпись эксперта для VK
-    VK_SIGNATURE = "\n\n---\n🏡 Эксперт: Юлия Пархоменко\n#TERION #ИИ_Ассистент"
+    VK_SIGNATURE = "\n\n---\n🤖 ИИ-ассистент Антон\n🏡 Команда TERION\n#TERION #перепланировка"
     
     async def publish_to_vk(self, text: str, image: bytes = None, add_signature: bool = True, keyboard: str = None) -> bool:
         """Публикация в VK группу через API"""

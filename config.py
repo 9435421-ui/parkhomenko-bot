@@ -73,8 +73,8 @@ YANDEX_ART_ENABLED = os.getenv("YANDEX_ART_ENABLED", "true").lower() == "true"
 YANDEX_AI_AGENT_SPY_ID = os.getenv("YANDEX_AI_AGENT_SPY_ID", "fvt2vnpq2qjdt829em50")
 YANDEX_AI_AGENT_ANTON_ID = os.getenv("YANDEX_AI_AGENT_ANTON_ID", "fvtrdfvmv1u84s9rfn5a")
 YANDEX_AI_AGENTS_ENDPOINT = os.getenv("YANDEX_AI_AGENTS_ENDPOINT")  # опционально: URL вызова агента по ID
-# Контакт Юлии для кнопки «Взять в работу»
-JULIA_CONTACT = os.getenv("JULIA_CONTACT", "Юлия Пархоменко — эксперт по перепланировкам. Связь: @Parkhovenko_i_kompaniya_bot")
+# Контакт эксперта для кнопки «Взять в работу»
+JULIA_CONTACT = os.getenv("JULIA_CONTACT", "Эксперт TERION. Связь: @Parkhovenko_i_kompaniya_bot")
 TERION_CHANNEL_ID = CHANNEL_ID_TERION
 DOM_GRAND_CHANNEL_ID = CHANNEL_ID_DOM_GRAD
 # === ADMIN ===

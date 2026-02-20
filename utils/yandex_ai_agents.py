@@ -116,7 +116,7 @@ async def call_anton_agent(context: str, max_chars: int = 500) -> str:
 
 def _truncate_and_append_anton(text: str, max_chars: int = 500) -> str:
     """Обрезать до max_chars, добавить дисклеймер и призыв квиза."""
-    disclaimer = "\n\nС уважением, Антон — ИИ-помощник эксперта Юлии Пархоменко."
+    disclaimer = "\n\nС уважением, Антон — ИИ-ассистент TERION."
     cta = "\n\nПройти квиз для заявки: @Parkhovenko_i_kompaniya_bot"
     budget = max_chars - len(disclaimer) - len(cta)
     body = (text or "").strip()[:budget]
@@ -139,7 +139,7 @@ async def call_anton_quiz_summary(quiz_summary: str) -> str:
                     endpoint,
                     json={
                         "agent_id": agent_id,
-                        "message": f"Сводка ответов клиента по квизу:\n{quiz_summary[:3000]}\n\nСформируй предварительное заключение эксперта Юлии Пархоменко на основе базы знаний (до 600 знаков).",
+                        "message": f"Сводка ответов клиента по квизу:\n{quiz_summary[:3000]}\n\nСформируй предварительное заключение эксперта TERION на основе базы знаний (до 600 знаков).",
                     },
                     timeout=aiohttp.ClientTimeout(total=60),
                 ) as resp:

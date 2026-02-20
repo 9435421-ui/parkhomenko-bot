@@ -548,6 +548,8 @@ class ScoutParser:
         - Режим «Разведка»: чаты, в которых увидели сообщения и которых нет в target_resources, добавляются со статусом pending.
         - Ловля ссылок: из текста извлекаются t.me/..., простукиваются и при успехе добавляются в target_resources со статусом pending и participants_count.
         """
+        if db:
+            await self._sync_hardcoded_targets(db)
         from telethon import TelegramClient
         from telethon.tl.types import Channel, Chat
         from config import API_ID, API_HASH
@@ -965,6 +967,8 @@ class ScoutParser:
         
         Ищет посты по ключевым словам, оставляет комментарии.
         """
+        if db:
+            await self._sync_hardcoded_targets(db)
         if not self.enabled:
             logger.info("🔍 Scout VK: выключен")
             return []
@@ -1182,6 +1186,29 @@ class ScoutParser:
             return False
 
     # === FULL SCAN ===
+
+    async def _sync_hardcoded_targets(self, db):
+        """Синхронизация захардкоженных каналов с БД для корректного трекинга last_post_id."""
+        if not db:
+            return
+        try:
+            # TG
+            for ch in self.TG_CHANNELS:
+                if not ch.get("id"): continue
+                link = self._channel_id_to_link(ch["id"])
+                existing = await db.get_target_resource_by_link(link)
+                if not existing:
+                    await db.add_target_resource("telegram", link, title=ch["name"], geo_tag=ch["geo"], status="active")
+                    logger.info(f"✅ Авто-регистрация TG: {ch['name']}")
+            # VK
+            for g in self.VK_GROUPS:
+                link = f"https://vk.com/club{g['id']}"
+                existing = await db.get_target_resource_by_link(link)
+                if not existing:
+                    await db.add_target_resource("vk", link, title=g["name"], geo_tag=g["geo"], status="active")
+                    logger.info(f"✅ Авто-регистрация VK: {g['name']}")
+        except Exception as e:
+            logger.warning(f"Ошибка синхронизации таргетов: {e}")
 
     async def scan_all(self, db=None) -> List[ScoutPost]:
         """Полное сканирование всех источников. Заполняет last_scan_report."""
