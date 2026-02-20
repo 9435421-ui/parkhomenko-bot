@@ -953,6 +953,13 @@ class Database:
                 (last_post_id, datetime.now(), resource_id)
             )
             await self.conn.commit()
+
+    async def reset_all_last_post_ids(self):
+        """Сбросить все last_post_id для повторного сканирования всех сообщений."""
+        async with self.conn.cursor() as cursor:
+            await cursor.execute("UPDATE target_resources SET last_post_id = 0")
+            await self.conn.commit()
+            logger.info("🔄 Все last_post_id в target_resources сброшены в 0.")
     
     # === КЛЮЧЕВЫЕ СЛОВА ===
     async def add_spy_keyword(self, keyword: str) -> int:

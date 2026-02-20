@@ -732,6 +732,54 @@ class ScoutParser:
         self.last_scan_chats_list = result
         return result
 
+    async def search_public_channels(self, keyword: str) -> List[Dict]:
+        """
+        Глобальный поиск публичных каналов и групп в Telegram по ключевому слову.
+        """
+        from telethon import TelegramClient, functions
+        from telethon.tl.types import Channel, Chat
+        from config import API_ID, API_HASH
+
+        client = TelegramClient('anton_parser', API_ID, API_HASH)
+        await client.connect()
+        if not await client.is_user_authorized():
+            await client.disconnect()
+            return []
+
+        results = []
+        try:
+            # Используем глобальный поиск контактов/каналов
+            search_result = await client(functions.contacts.SearchRequest(
+                q=keyword,
+                limit=20
+            ))
+
+            for peer in search_result.results:
+                try:
+                    entity = await client.get_entity(peer)
+                    if isinstance(entity, (Channel, Chat)):
+                        cid = entity.id
+                        title = getattr(entity, "title", "Без названия")
+                        username = getattr(entity, "username", None)
+                        participants = getattr(entity, "participants_count", None)
+
+                        link = f"https://t.me/{username}" if username else f"https://t.me/c/{cid}"
+
+                        results.append({
+                            "id": cid,
+                            "title": title,
+                            "link": link,
+                            "participants_count": participants,
+                            "source_type": "telegram"
+                        })
+                except Exception:
+                    continue
+        except Exception as e:
+            logger.error(f"Ошибка глобального поиска TG по '{keyword}': {e}")
+        finally:
+            await client.disconnect()
+        return results
+
     async def resolve_telegram_link(self, link: str) -> Optional[Dict]:
         """
         По ссылке t.me/... получить сущность, название и кол-во участников.

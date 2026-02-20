@@ -1,5 +1,6 @@
 import logging
 import os
+import asyncio
 from typing import List, Dict
 
 logger = logging.getLogger(__name__)
@@ -31,21 +32,33 @@ class Discovery:
         логику поиска через Telethon / VK API.
         """
         kws = keywords or self.keywords
-        logger.info(f"🔍 Discovery: поиск новых источников по {kws}...")
-        # Заглушка: несколько популярных чатов/сообществ по теме ЖК/ремонта (примерные ссылки)
-        samples = [
-            {"link": "https://t.me/novostroyki_moscow", "title": "Новостройки Москвы", "participants_count": 4500},
-            {"link": "https://t.me/zhk_moscow_forum", "title": "ЖК Москва — обсуждения", "participants_count": 3200},
-            {"link": "https://t.me/remont_mastertips", "title": "Ремонт и отделка — советы", "participants_count": 2700},
-            {"link": "https://t.me/kvartiry_msk", "title": "Квартиры Москвы (купля/продажа)", "participants_count": 6100},
-            {"link": "https://t.me/stroitelstvo_msk", "title": "Строительство и планировки", "participants_count": 1800},
-        ]
-        # Фильтруем по наличию ключевого слова в title (примерная логика)
-        found = []
-        lower_kws = [k.lower() for k in kws]
-        for s in samples:
-            t = (s.get("title") or "").lower()
-            if any(k in t for k in lower_kws) or any(k in s.get("link", "").lower() for k in lower_kws):
-                found.append(s)
-        # Если ничего не найдено по фильтру — возвращаем всё, чтобы инициализация прошла
-        return found or samples
+        logger.info(f"🔍 Discovery: запуск глобального поиска по ключевым словам: {kws}...")
+
+        from services.scout_parser import scout_parser
+
+        found_resources = []
+        for kw in kws:
+            try:
+                # Реальный поиск через Telethon в ScoutParser
+                results = await scout_parser.search_public_channels(kw)
+                for res in results:
+                    # Избегаем дублей по ссылке
+                    if not any(f["link"] == res["link"] for f in found_resources):
+                        found_resources.append(res)
+                # Небольшая пауза между словами для избежания флуда
+                await asyncio.sleep(2)
+            except Exception as e:
+                logger.error(f"Ошибка Discovery при поиске '{kw}': {e}")
+
+        # Если поиск ничего не вернул (например, проблемы с сессией), используем эталонные чаты как fallback
+        if not found_resources:
+            logger.info("⚠️ Глобальный поиск не дал результатов, используем эталонный список ЖК.")
+            found_resources = [
+                {"link": "https://t.me/novostroyki_moscow", "title": "Новостройки Москвы", "participants_count": 4500},
+                {"link": "https://t.me/zhk_moscow_forum", "title": "ЖК Москва — обсуждения", "participants_count": 3200},
+                {"link": "https://t.me/remont_mastertips", "title": "Ремонт и отделка — советы", "participants_count": 2700},
+                {"link": "https://t.me/kvartiry_msk", "title": "Квартиры Москвы (купля/продажа)", "participants_count": 6100},
+                {"link": "https://t.me/stroitelstvo_msk", "title": "Строительство и планировки", "participants_count": 1800},
+            ]
+
+        return found_resources
