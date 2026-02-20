@@ -297,7 +297,38 @@ class LeadAnalyzer:
 
         try:
             response = await router_ai.generate_response(prompt)
-            if response is None or not str(response).strip():
+            
+            # ── ОБРАБОТКА ОШИБКИ 401 (Unauthorized) ──────────────────────────────────
+            # Проверяем, если response содержит информацию об ошибке 401
+            if response is None:
+                # Router AI вернул None - возможно, ошибка авторизации при fallback на Yandex
+                logger.warning("⚠️ Router AI вернул None - возможно, проблема с авторизацией")
+                # Продолжаем с дефолтным результатом
+                response = ""
+            elif isinstance(response, str):
+                response_upper = response.upper()
+                if any(keyword in response_upper for keyword in ["401", "UNAUTHORIZED", "YANDEX_API_KEY", "AUTHENTICATION"]):
+                    logger.error("=" * 60)
+                    logger.error("❌ ОШИБКА АВТОРИЗАЦИИ YANDEX API (401 Unauthorized)")
+                    logger.error("")
+                    logger.error("💡 ИНСТРУКЦИЯ: Обновите YANDEX_API_KEY в .env")
+                    logger.error("")
+                    logger.error("Проверьте:")
+                    logger.error("  1. YANDEX_API_KEY установлен в .env")
+                    logger.error("  2. Ключ действителен и не истек")
+                    logger.error("  3. FOLDER_ID указан корректно")
+                    logger.error("  4. У ключа есть права на использование YandexGPT API")
+                    logger.error("=" * 60)
+                    # Возвращаем дефолтный результат вместо падения
+                    return {
+                        "priority_score": 3,
+                        "pain_stage": "ST-1",
+                        "is_lead": False,
+                        "justification": "Ошибка авторизации Yandex API - требуется обновление YANDEX_API_KEY",
+                        "error": "yandex_401"
+                    }
+            
+            if not str(response).strip():
                 raise ValueError("Router AI вернул пустой ответ")
 
             import json

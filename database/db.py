@@ -17,7 +17,9 @@ class Database:
     async def connect(self):
         """Подключение к базе данных"""
         os.makedirs(os.path.dirname(self.db_path), exist_ok=True)
-        self.conn = await aiosqlite.connect(self.db_path)
+        # ── ИСПРАВЛЕНИЕ: Добавлен timeout=30 для избежания "database is locked" ─────
+        # Это заставит ждать освобождения базы до 30 секунд вместо немедленной ошибки
+        self.conn = await aiosqlite.connect(self.db_path, timeout=30.0)
         self.conn.row_factory = aiosqlite.Row
         await self._create_tables()
         print(f"✅ База данных подключена: {self.db_path}")

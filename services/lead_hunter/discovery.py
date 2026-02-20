@@ -179,12 +179,16 @@ class Discovery:
         search_keywords.extend([kw for kw in kws if kw not in search_keywords])
         search_keywords = search_keywords[:10]  # Максимум 10 запросов
         
-        client = TelegramClient('discovery_client', API_ID, API_HASH)
+        # ── ИСПРАВЛЕНИЕ: Используем тот же session name, что и в scout_parser ──────
+        # Это позволяет использовать существующий файл сессии 'anton_parser.session'
+        # вместо создания нового клиента, который не видит сессию
+        client = TelegramClient('anton_parser', API_ID, API_HASH)
         
         try:
             await client.connect()
             if not await client.is_user_authorized():
-                logger.warning("⚠️ Telethon не авторизован, пропускаю global_telegram_search")
+                logger.warning("⚠️ Telethon не авторизован (файл сессии 'anton_parser.session' не найден или устарел)")
+                logger.info("💡 Убедитесь, что scout_parser.py успешно авторизован в Telethon")
                 return []
             
             for keyword in search_keywords:
@@ -308,7 +312,7 @@ class Discovery:
         """Поиск новых VK групп по ключевым словам через VK API.
         
         Использует метод groups.search для поиска открытых групп ВКонтакте.
-        Возвращает список групп для добавления в БД как target_resources.
+        Требуется VK_USER_TOKEN (токен пользователя), так как groups.search требует пользовательский доступ.
         
         Args:
             keywords: Список ключевых слов для поиска. Если не указан, используется self.keywords.
@@ -316,10 +320,19 @@ class Discovery:
         Returns:
             Список словарей с полями: link, title, type='vk', participants_count
         """
-        vk_token = os.getenv("VK_TOKEN") or os.getenv("VK_USER_TOKEN")
+        # ── ИСПРАВЛЕНИЕ: Используем VK_USER_TOKEN для groups.search ────────────────
+        # groups.search требует пользовательский токен, не токен группы
+        vk_token = os.getenv("VK_USER_TOKEN") or os.getenv("VK_TOKEN")
         if not vk_token:
-            logger.warning("⚠️ VK_TOKEN не настроен в .env, пропускаю поиск VK групп")
+            logger.warning("⚠️ VK_USER_TOKEN не настроен в .env, пропускаю поиск VK групп")
+            logger.info("💡 Для поиска VK групп через groups.search требуется VK_USER_TOKEN (токен пользователя)")
             return []
+        
+        # Проверяем, что используется пользовательский токен
+        if os.getenv("VK_USER_TOKEN"):
+            logger.debug("✅ Используется VK_USER_TOKEN для поиска VK групп")
+        elif os.getenv("VK_TOKEN"):
+            logger.warning("⚠️ Используется VK_TOKEN вместо VK_USER_TOKEN. groups.search может не работать с токеном группы.")
         
         kws = keywords or self.keywords[:10]  # Ограничиваем до 10 запросов за раз
         vk_api_version = "5.199"
@@ -344,7 +357,25 @@ class Discovery:
                         data = await resp.json()
                         
                         if "error" in data:
-                            logger.error(f"❌ VK API error при поиске '{keyword}': {data['error']}")
+                            error_code = data['error'].get('error_code', 0)
+                            error_msg = data['error'].get('error_msg', '')
+                            
+                            # ── ОБРАБОТКА ОШИБКИ 27 (требуется пользовательский токен) ────────
+                            if error_code == 27:
+                                logger.error("=" * 60)
+                                logger.error(f"❌ VK API Error 27 при поиске '{keyword}': {error_msg}")
+                                logger.error("")
+                                logger.error("💡 ИНСТРУКЦИЯ: Для groups.search требуется VK_USER_TOKEN (токен пользователя)")
+                                logger.error("")
+                                logger.error("Проверьте:")
+                                logger.error("  1. VK_USER_TOKEN установлен в .env (не VK_TOKEN группы)")
+                                logger.error("  2. Токен пользователя получен через https://oauth.vk.com/authorize")
+                                logger.error("  3. Токен имеет права: groups (доступ к группам)")
+                                logger.error("=" * 60)
+                                # Прерываем цикл, так как все запросы будут падать с той же ошибкой
+                                break
+                            
+                            logger.error(f"❌ VK API error при поиске '{keyword}': код {error_code}, {error_msg}")
                             continue
                         
                         response = data.get("response", {})
