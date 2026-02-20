@@ -143,23 +143,136 @@ class Discovery:
     def get_keywords(self) -> List[str]:
         return self.keywords
 
+    async def global_telegram_search(self, keywords: List[str] = None) -> List[Dict]:
+        """Глобальный поиск Telegram каналов через Telethon API.
+        
+        Использует ключевые слова для поиска открытых каналов и групп.
+        Возвращает список каналов для добавления в БД.
+        
+        Args:
+            keywords: Список ключевых слов для поиска. Если не указан, используется self.keywords.
+        
+        Returns:
+            Список словарей с полями: link, title, type='telegram', participants_count
+        """
+        from telethon import TelegramClient
+        from telethon.tl.types import Channel, Chat
+        from telethon.tl.functions.messages import SearchGlobalRequest
+        from telethon.tl.types import InputMessagesFilterEmpty
+        from config import API_ID, API_HASH
+        
+        kws = keywords or self.keywords[:10]  # Ограничиваем до 10 запросов за раз
+        found_channels = []
+        
+        # Ключевые слова для поиска (из ТЗ)
+        search_keywords = [
+            "перепланировка",
+            "акт МЖИ",
+            "согласование",
+            "штраф",
+            "перепланировка москва",
+            "согласование перепланировки",
+            "БТИ москва",
+        ]
+        
+        # Объединяем с переданными ключевыми словами
+        search_keywords.extend([kw for kw in kws if kw not in search_keywords])
+        search_keywords = search_keywords[:10]  # Максимум 10 запросов
+        
+        client = TelegramClient('discovery_client', API_ID, API_HASH)
+        
+        try:
+            await client.connect()
+            if not await client.is_user_authorized():
+                logger.warning("⚠️ Telethon не авторизован, пропускаю global_telegram_search")
+                return []
+            
+            for keyword in search_keywords:
+                try:
+                    # Глобальный поиск по ключевому слову
+                    results = await client(SearchGlobalRequest(
+                        q=keyword,
+                        filter=InputMessagesFilterEmpty(),
+                        min_date=None,
+                        max_date=None,
+                        offset_rate=0,
+                        offset_peer=None,
+                        offset_id=0,
+                        limit=20  # Максимум 20 результатов на запрос
+                    ))
+                    
+                    # Извлекаем уникальные каналы из результатов
+                    seen_channels = set()
+                    for msg in results.messages:
+                        if hasattr(msg, "peer_id") and hasattr(msg.peer_id, "channel_id"):
+                            channel_id = msg.peer_id.channel_id
+                            if channel_id in seen_channels:
+                                continue
+                            seen_channels.add(channel_id)
+                            
+                            try:
+                                entity = await client.get_entity(channel_id)
+                                if isinstance(entity, (Channel, Chat)):
+                                    # Проверяем, что канал публичный
+                                    if isinstance(entity, Channel) and entity.access_hash:
+                                        username = getattr(entity, "username", None)
+                                        if username:
+                                            link = f"https://t.me/{username}"
+                                        else:
+                                            link = f"https://t.me/c/{abs(channel_id)}"
+                                        
+                                        # Проверяем на дубликаты
+                                        if not any(c.get("link") == link for c in found_channels):
+                                            found_channels.append({
+                                                "link": link,
+                                                "title": getattr(entity, "title", ""),
+                                                "type": "telegram",
+                                                "participants_count": getattr(entity, "participants_count", 0),
+                                                "geo_tag": "Москва/МО",
+                                            })
+                            except Exception as e:
+                                logger.debug(f"Ошибка при обработке канала {channel_id}: {e}")
+                    
+                    # Небольшая задержка между запросами (антифлуд)
+                    await asyncio.sleep(1)
+                    
+                except Exception as e:
+                    logger.error(f"❌ Ошибка при поиске по ключевому слову '{keyword}': {e}")
+                    continue
+            
+        except Exception as e:
+            logger.error(f"❌ Ошибка при подключении к Telethon для global_telegram_search: {e}")
+        finally:
+            try:
+                await client.disconnect()
+            except Exception:
+                pass
+        
+        logger.info(f"🔍 Global Telegram Search: найдено {len(found_channels)} новых каналов")
+        return found_channels
+
     async def find_new_sources(self, keywords: List[str] = None) -> List[Dict]:
         """Поиск новых источников по ключевым словам (глобальный поиск).
 
         Возвращает список открытых Telegram-каналов для добавления в БД.
         
         Логика:
-          1. Использует расширенный список ключевых слов (с комбинациями районов).
-          2. Фильтруем OPEN_HUNT_SOURCES по совпадению ключевых слов в title/link.
+          1. Использует global_telegram_search для реального поиска через Telegram API.
+          2. Если ничего не найдено, фильтруем OPEN_HUNT_SOURCES по совпадению ключевых слов.
           3. Включаем все источники, где упомянута Москва/МО или тематика перепланировок.
-          4. Если после фильтрации ничего не осталось — возвращаем весь пул OPEN_HUNT_SOURCES.
-        
-        TODO: В будущем добавить реальный поиск через Telegram API (SearchGlobalRequest)
-        для поиска сотен чатов, а не только фильтрации существующего списка.
         
         Гео-фильтрация (только Москва/МО) применяется позже на этапе анализа постов.
         """
         kws = keywords or self.keywords
+        
+        # ── РЕАЛЬНЫЙ ПОИСК ЧЕРЕЗ TELEGRAM API ────────────────────────────────────────
+        try:
+            global_results = await self.global_telegram_search(kws)
+            if global_results:
+                logger.info(f"✅ Global Telegram Search: найдено {len(global_results)} каналов через API")
+                return global_results
+        except Exception as e:
+            logger.warning(f"⚠️ Global Telegram Search не удался: {e}. Используем fallback.")
         
         # Логируем только первые 10 ключевых слов для читаемости
         kws_preview = kws[:10]

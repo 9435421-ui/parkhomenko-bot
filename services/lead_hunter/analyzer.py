@@ -263,26 +263,37 @@ class LeadAnalyzer:
         )
 
         prompt = f"""
-        Инструкция для оценки: {manual}
+Ты — эксперт по анализу лидов для компании TERION (согласование перепланировок в Москве).
 
-        {priority_zhk_hint}
+Инструкция для оценки: {manual}
 
-        Текст сообщения из чата: "{text}"
+{priority_zhk_hint}
 
-        Твоя задача:
-        Проанализируй сообщение и классифицируй его по шкале от 1 до 10 и присвой категорию боли:
-        - ST-1 (Инфо): Просто интересуется теорией.
-        - ST-2 (Планирование): Собирается делать ремонт, ищет варианты.
-        - ST-3 (Актив): Уже делает ремонт, боится штрафов.
-        - ST-4 (Критично): Получил предписание, пришла инспекция, суд, блокировка сделки.
+Текст сообщения из чата: "{text}"
 
-        Верни ответ ТОЛЬКО в формате JSON:
-        {{
-            "priority_score": число от 1 до 10,
-            "pain_stage": "ST-1" | "ST-2" | "ST-3" | "ST-4",
-            "justification": "краткое пояснение, почему выбрана эта стадия"
-        }}
-        """
+Твоя задача:
+Проанализируй сообщение и классифицируй его по шкале приоритета (1-10) и стадии боли:
+
+СТАДИИ БОЛИ:
+- ST-1 (Интерес): Просто интересуется теорией, общими вопросами. Нет срочности.
+- ST-2 (Планирование): Собирается делать ремонт, ищет варианты, изучает возможности. Есть время на принятие решения.
+- ST-3 (Актив): Уже делает ремонт, боится штрафов, нужен проект для согласования. Есть срочность.
+- ST-4 (Критично): Получил предписание МЖИ, пришла инспекция, суд, блокировка сделки, штраф БТИ. КРИТИЧЕСКАЯ СИТУАЦИЯ.
+
+ПРИОРИТЕТ (priority_score):
+- 1-3: Низкий приоритет (ST-1)
+- 4-5: Средний приоритет (ST-2)
+- 6-7: Высокий приоритет (ST-3)
+- 8-10: Критический приоритет (ST-4)
+
+ВАЖНО: Верни ответ ТОЛЬКО в формате валидного JSON, без дополнительного текста:
+{{
+    "priority_score": число от 1 до 10,
+    "pain_stage": "ST-1" | "ST-2" | "ST-3" | "ST-4",
+    "justification": "краткое пояснение, почему выбрана эта стадия",
+    "is_lead": true или false
+}}
+"""
 
         try:
             response = await router_ai.generate_response(prompt)
@@ -290,12 +301,47 @@ class LeadAnalyzer:
                 raise ValueError("Router AI вернул пустой ответ")
 
             import json
-            match = re.search(r"\{.*\}", response, re.DOTALL)
+            # Ищем JSON в ответе (может быть обёрнут в markdown или текст)
+            match = re.search(r"\{[^{}]*\"priority_score\"[^{}]*\}", response, re.DOTALL)
             if not match:
-                raise ValueError(f"Не удалось найти JSON в ответе: {response}")
+                # Пробуем найти любой JSON объект
+                match = re.search(r"\{.*\}", response, re.DOTALL)
+            
+            if not match:
+                logger.error(f"❌ Не удалось найти JSON в ответе Router AI: {response[:200]}")
+                raise ValueError(f"Не удалось найти JSON в ответе: {response[:200]}")
 
-            data = json.loads(match.group(0))
-            data["is_lead"] = data.get("priority_score", 0) >= 5
+            json_str = match.group(0)
+            # Очищаем от markdown code blocks если есть
+            json_str = re.sub(r"```json\s*", "", json_str)
+            json_str = re.sub(r"```\s*", "", json_str)
+            
+            data = json.loads(json_str)
+            
+            # Валидация данных
+            priority_score = int(data.get("priority_score", 0))
+            pain_stage = data.get("pain_stage", "ST-1")
+            
+            # Ограничиваем priority_score в диапазоне 1-10
+            priority_score = max(1, min(10, priority_score))
+            
+            # Валидация pain_stage
+            if pain_stage not in ["ST-1", "ST-2", "ST-3", "ST-4"]:
+                # Определяем по priority_score если pain_stage некорректен
+                if priority_score <= 3:
+                    pain_stage = "ST-1"
+                elif priority_score <= 5:
+                    pain_stage = "ST-2"
+                elif priority_score <= 7:
+                    pain_stage = "ST-3"
+                else:
+                    pain_stage = "ST-4"
+            
+            data.update({
+                "priority_score": priority_score,
+                "pain_stage": pain_stage,
+                "is_lead": data.get("is_lead", priority_score >= 5)
+            })
 
             # Дополнительная проверка: если ИИ не заметил ЖК, но он есть — повышаем
             t_lower = text.lower()

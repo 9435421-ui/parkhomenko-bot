@@ -482,13 +482,23 @@ class ScoutParser:
             logger.error("❌ Антон не авторизован в Telegram!")
             return []
 
+        # ── ИНКРЕМЕНТАЛЬНЫЙ ПОИСК: Используем last_post_id из БД ─────────────────
+        # Если SPY_SKIP_OLD_MESSAGES не задан или = 0, используем last_post_id для каждого ресурса
+        skip_old_messages = int(os.getenv("SPY_SKIP_OLD_MESSAGES", "0"))
         tg_limit = int(os.getenv("SCOUT_TG_MESSAGES_LIMIT", "50"))
         existing_links = set()
+        resource_last_post_ids = {}  # Словарь: link -> last_post_id для инкрементального поиска
         new_links_queue: List[str] = []  # очередь ссылок для проверки по одной (anti-flood)
         if db:
             try:
                 resources = await db.get_target_resources(resource_type="telegram", active_only=False)
                 existing_links = {(r.get("link") or "").strip().rstrip("/") for r in resources if r.get("link")}
+                # Загружаем last_post_id для каждого ресурса
+                for r in resources:
+                    link = (r.get("link") or "").strip().rstrip("/")
+                    last_post_id = r.get("last_post_id") or 0
+                    if link and last_post_id > 0:
+                        resource_last_post_ids[link] = last_post_id
             except Exception as e:
                 logger.warning("Не удалось загрузить target_resources для разведки: %s", e)
 
@@ -641,10 +651,17 @@ class ScoutParser:
                 logger.debug(f"Discussion Group не найден для канала {cid}: {e}")
             
             try:
-                # Используем min_id для загрузки только новых сообщений
+                # ── ИНКРЕМЕНТАЛЬНЫЙ ПОИСК: Используем last_post_id из БД ────────────────
+                # Если skip_old_messages > 0 (из .env), используем его вместо last_post_id
+                # Иначе используем last_post_id для сканирования только новых сообщений
                 iter_params = {"limit": tg_limit}
-                if max_id > 0:
+                if skip_old_messages > 0:
+                    # Режим пропуска старых сообщений (для первого запуска или тестирования)
+                    logger.debug(f"⏭️ Режим пропуска старых сообщений: skip_old_messages={skip_old_messages}")
+                elif max_id > 0:
+                    # Инкрементальный режим: сканируем только сообщения после last_post_id
                     iter_params["min_id"] = max_id
+                    logger.debug(f"🔄 Инкрементальный поиск для {channel.get('name')}: min_id={max_id}")
                 
                 # ⚠️ ИГНОРИРУЕМ ОСНОВНОЙ КАНАЛ: парсим только комментарии от пользователей
                 # Основные посты от каналов (админов) пропускаем - нам нужны только сообщения от User

@@ -259,6 +259,18 @@ class Database:
                 await self.conn.commit()
             except Exception:
                 pass
+            # Миграция: колонка priority для приоритета ресурса (1-10)
+            try:
+                await cursor.execute("ALTER TABLE target_resources ADD COLUMN priority INTEGER DEFAULT 5")
+                await self.conn.commit()
+            except Exception:
+                pass
+            # Миграция: колонка last_scanned_at для отслеживания последнего сканирования
+            try:
+                await cursor.execute("ALTER TABLE target_resources ADD COLUMN last_scanned_at TIMESTAMP NULL")
+                await self.conn.commit()
+            except Exception:
+                pass
             # Модуль «Ассистент Продаж»: скрипты подсказок для карточки лида
             await cursor.execute("""
                 CREATE TABLE IF NOT EXISTS sales_templates (

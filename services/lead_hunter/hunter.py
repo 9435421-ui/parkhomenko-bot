@@ -81,8 +81,36 @@ class LeadHunter:
             f"📍 <b>Гео:</b> {lead.get('geo', '—')}",
             f"💡 <b>Контекст:</b> {lead.get('context_summary', '—')}",
         ])
+        # ── ОБНОВЛЕННЫЙ ФОРМАТ: Эмодзи и шкала приоритета ─────────────────────────
+        priority_score = lead.get("priority_score", 0)
+        pain_stage = lead.get("pain_stage", "ST-1")
+        
+        # Эмодзи для стадий боли
+        pain_emoji = {
+            "ST-1": "💡",
+            "ST-2": "📋",
+            "ST-3": "🔥",
+            "ST-4": "🚨"
+        }
+        emoji = pain_emoji.get(pain_stage, "💡")
+        
+        # Шкала приоритета (визуальная)
+        priority_bar = "█" * min(priority_score, 10) + "░" * (10 - min(priority_score, 10))
+        
         if pain_stage:
-            lines.append(f"🔴 <b>Стадия боли:</b> {pain_stage}")
+            stage_label = {
+                "ST-1": "Интерес",
+                "ST-2": "Планирование",
+                "ST-3": "Актив",
+                "ST-4": "Критично"
+            }
+            label = stage_label.get(pain_stage, pain_stage)
+            lines.append(f"{emoji} <b>Стадия боли:</b> {pain_stage} ({label})")
+        
+        if priority_score > 0:
+            lines.append(f"⭐ <b>Приоритет:</b> {priority_score}/10")
+            lines.append(f"📊 {priority_bar}")
+        
         if anton_recommendation:
             lines.append(f"💡 <b>Рекомендация Антона:</b> {anton_recommendation}")
         if profile_url and profile_url.startswith("tg://"):
@@ -114,6 +142,13 @@ class LeadHunter:
             quote += "…"
         pain_label = "Критично" if pain_level >= 4 or pain_stage == "ST-4" else "Высокая" if pain_level >= 3 else "Средняя"
         
+        # ── ОБНОВЛЕННЫЙ ФОРМАТ: Эмодзи 🚨 для ST-4 и шкала приоритета ─────────────
+        priority_score = lead.get("priority_score", 0)
+        pain_stage = lead.get("pain_stage", "ST-1")
+        
+        # Шкала приоритета (визуальная)
+        priority_bar = "█" * min(priority_score, 10) + "░" * (10 - min(priority_score, 10))
+        
         header = f"🔥 <b>ГОРЯЧИЙ ЛИД:</b> {source}"
         urgency_note = ""
         if pain_stage == "ST-4":
@@ -130,10 +165,20 @@ class LeadHunter:
             "🎯 <b>Аналитика Антона:</b>",
             f"Уровень боли: {pain_level}/5 ({pain_label})",
             f"Стадия: {pain_stage or '—'}",
+        ]
+        
+        # Добавляем шкалу приоритета если есть
+        if priority_score > 0:
+            lines.extend([
+                f"⭐ Приоритет: {priority_score}/10",
+                f"📊 {priority_bar}",
+            ])
+        
+        lines.extend([
             f"<b>Вердикт:</b> {recommendation[:500]}",
             "",
             f"🔗 Пост: {lead.get('url', '')}",
-        ]
+        ])
         return "\n".join(lines)
 
     async def _generate_sales_reply(
@@ -651,16 +696,10 @@ class LeadHunter:
             if skipped_count > 0:
                 logger.info(f"📋 Discovery: пропущено {skipped_count} каналов (уже активны)")
 
-        # Сброс старого кеша: игнорируем первые N сообщений (старые) — по умолчанию 0
-        try:
-            skip_count = int(os.getenv("SPY_SKIP_OLD_MESSAGES", "0"))
-        except Exception:
-            skip_count = 0
-        
-        if skip_count > 0 and len(all_posts) > skip_count:
-            remaining = all_posts[skip_count:]
-        else:
-            remaining = all_posts
+        # ── ИНКРЕМЕНТАЛЬНЫЙ ПОИСК: Используем last_post_id из БД ────────────────────
+        # Логика skip_count удалена — теперь используется инкрементальный поиск через last_post_id
+        # в scout_parser.py. SPY_SKIP_OLD_MESSAGES используется только для первого запуска.
+        remaining = all_posts
 
         # Переключиться на приоритетные чаты (ЖК Династия, Зиларт) — перемещаем их в начало
         preferred_names = [n.lower() for n in os.getenv("SPY_PREFERRED_CHATS", "Династия,Зиларт").split(",") if n.strip()]
