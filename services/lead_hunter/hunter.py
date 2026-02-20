@@ -375,7 +375,7 @@ class LeadHunter:
 
         from database import db as main_db
         tg_posts = await self.parser.parse_telegram(db=main_db)
-        vk_posts = await self.parser.parse_vk()
+        vk_posts = await self.parser.parse_vk(db=main_db)
         all_posts = tg_posts + vk_posts
 
         # Если лидов не найдено, пробуем найти новые источники через Discovery
@@ -385,7 +385,7 @@ class LeadHunter:
             for source in new_sources:
                 try:
                     await main_db.add_target_resource(
-                        resource_type="telegram",
+                        resource_type=source.get("source_type", "telegram"),
                         link=source["link"],
                         title=source["title"],
                         notes="Найден через LeadHunter Discovery",

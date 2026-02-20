@@ -39,12 +39,18 @@ class Discovery:
         found_resources = []
         for kw in kws:
             try:
-                # Реальный поиск через Telethon в ScoutParser
-                results = await scout_parser.search_public_channels(kw)
-                for res in results:
-                    # Избегаем дублей по ссылке
+                # 1. Поиск в Telegram
+                tg_results = await scout_parser.search_public_channels(kw)
+                for res in tg_results:
                     if not any(f["link"] == res["link"] for f in found_resources):
                         found_resources.append(res)
+
+                # 2. Поиск в VK
+                vk_results = await scout_parser.search_public_vk_groups(kw)
+                for res in vk_results:
+                    if not any(f["link"] == res["link"] for f in found_resources):
+                        found_resources.append(res)
+
                 # Небольшая пауза между словами для избежания флуда
                 await asyncio.sleep(2)
             except Exception as e:

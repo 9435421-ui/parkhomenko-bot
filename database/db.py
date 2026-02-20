@@ -781,27 +781,26 @@ class Database:
             row = await cursor.fetchone()
             return dict(row) if row else None
 
-    async def get_active_targets_for_scout(self) -> List[Dict]:
-        """Список целей для парсера/хантера: active + telegram. Поля: link, title, geo_tag, id, is_high_priority, last_lead_at, last_post_id."""
+    async def get_active_targets_for_scout(self, platform: Optional[str] = None) -> List[Dict]:
+        """Список целей для парсера/хантера. Поля: link, title, geo_tag, id, is_high_priority, last_lead_at, last_post_id."""
         async with self.conn.cursor() as cursor:
+            query = """SELECT id, link, title, COALESCE(geo_tag, '') AS geo_tag,
+                          COALESCE(is_high_priority, 0) AS is_high_priority, last_lead_at, last_post_id,
+                          COALESCE(platform, type) as platform
+                       FROM target_resources
+                       WHERE (status = 'active' OR (is_active = 1 AND (status IS NULL OR status = '')))"""
+            params = []
+            if platform:
+                query += " AND (platform = ? OR type = ?)"
+                params.extend([platform, platform])
+
             try:
-                await cursor.execute(
-                    """SELECT id, link, title, COALESCE(geo_tag, '') AS geo_tag,
-                          COALESCE(is_high_priority, 0) AS is_high_priority, last_lead_at, last_post_id
-                       FROM target_resources
-                       WHERE (status = 'active' OR (is_active = 1 AND (status IS NULL OR status = '')))
-                         AND (platform = 'telegram' OR type = 'telegram')"""
-                )
-            except Exception:
-                await cursor.execute(
-                    """SELECT id, link, title, COALESCE(geo_tag, '') AS geo_tag,
-                          COALESCE(is_high_priority, 0) AS is_high_priority, last_post_id
-                       FROM target_resources
-                       WHERE (status = 'active' OR (is_active = 1 AND (status IS NULL OR status = '')))
-                         AND (platform = 'telegram' OR type = 'telegram')"""
-                )
-            rows = await cursor.fetchall()
-            return [dict(row) for row in rows]
+                await cursor.execute(query, params)
+                rows = await cursor.fetchall()
+                return [dict(row) for row in rows]
+            except Exception as e:
+                logger.error(f"Ошибка получения целей для скаута: {e}")
+                return []
 
     async def update_target_last_lead_at(self, link: str) -> None:
         """Обновить время последнего найденного лида по ресурсу (для исключения из скана через 48ч)."""

@@ -207,7 +207,7 @@ class ScoutParser:
         self.telegram_phone = os.getenv("TELEGRAM_PHONE", "")
         
         # Настройки
-        from config import SCOUT_ENABLED, SCOUT_TG_CHANNELS, SCOUT_VK_GROUPS, SCOUT_TG_KEYWORDS, SCOUT_VK_KEYWORDS
+        from config import SCOUT_ENABLED, SCOUT_TG_CHANNELS, SCOUT_VK_GROUPS, SCOUT_TG_KEYWORDS, SCOUT_VK_KEYWORDS, SCOUT_VK_REGIONS
         self.enabled = SCOUT_ENABLED
         self.check_interval = int(os.getenv("SCOUT_PARSER_INTERVAL", "1800"))  # 30 минут
 
@@ -273,6 +273,16 @@ class ScoutParser:
         if keywords_str:
             return [k.strip() for k in keywords_str.split(",") if k.strip()]
         return self.KEYWORDS
+
+    def _load_vk_keywords(self) -> List[str]:
+        """Загрузка ключевых слов VK из конфига"""
+        from config import SCOUT_VK_KEYWORDS
+        return SCOUT_VK_KEYWORDS or self.KEYWORDS
+
+    def _load_vk_regions(self) -> List[str]:
+        """Загрузка регионов VK из конфига"""
+        from config import SCOUT_VK_REGIONS
+        return SCOUT_VK_REGIONS or []
 
     # Минимум слов для «боли» (не мусор, не просто ссылка)
     MIN_WORDS_FOR_LEAD = 5
@@ -342,24 +352,45 @@ class ScoutParser:
                 return True
         return False
 
-    def detect_lead(self, text: str) -> bool:
+    def detect_lead(self, text: str, platform: str = "telegram") -> bool:
         """
-        Интеллектуальный фильтр (Intent v2.1): лид = вопрос + технический термин + коммерческий маркер.
-        Отсекаем мусор: «продам», «услуги сантехника», «ремонт под ключ» и т.п.
+        Интеллектуальный фильтр (Intent v2.2): лид = вопрос + технический термин + коммерческий маркер.
+        Поддерживает платформо-специфичные ключевые слова и регионы.
         """
         if not self._is_relevant_post(text):
             return False
         if self._has_junk_phrase(text):
             return False
+
+        text_lower = text.lower()
+
+        # Для ВК проверяем также привязку к региону (если задано)
+        if platform == "vk":
+            regions = self._load_vk_regions()
+            if regions and not any(r.lower() in text_lower for r in regions):
+                # Если в тексте нет ни одного целевого региона — это может быть не наш лид,
+                # но мы всё равно проверяем по ключевым словам ниже.
+                pass
+
         if not self._has_question(text) or not self._has_technical_term(text):
+            # Специальная проверка для ВК: если есть прямое вхождение SCOUT_VK_KEYWORDS,
+            # то можем считать лидом даже без явного вопроса (специфика пабликов ЖК)
+            if platform == "vk":
+                vk_kws = self._load_vk_keywords()
+                if any(kw.lower() in text_lower for kw in vk_kws):
+                    return True
+
             return False
+
         if not self._has_commercial_marker(text):
             return False
-        text_lower = text.lower()
+
         for trigger in self.LEAD_TRIGGERS:
             if re.search(trigger, text_lower):
                 return True
-        for keyword in self._load_keywords():
+
+        keywords = self._load_vk_keywords() if platform == "vk" else self._load_keywords()
+        for keyword in keywords:
             if keyword.lower() in text_lower:
                 return True
         return False
@@ -493,7 +524,7 @@ class ScoutParser:
     async def parse_telegram(self, db=None) -> List[ScoutPost]:
         """
         Парсинг Telegram. Если передан db:
-        - Список чатов берётся из БД: get_active_targets_for_scout() (status='active', platform='telegram').
+        - Список чатов берётся из БД: get_active_targets_for_scout(platform='telegram').
         - Режим «Разведка»: чаты, в которых увидели сообщения и которых нет в target_resources, добавляются со статусом pending.
         - Ловля ссылок: из текста извлекаются t.me/..., простукиваются и при успехе добавляются в target_resources со статусом pending и participants_count.
         """
@@ -523,7 +554,7 @@ class ScoutParser:
         channels_to_scan = []
         if db:
             try:
-                targets = await db.get_active_targets_for_scout()
+                targets = await db.get_active_targets_for_scout(platform="telegram")
                 for t in targets:
                     link = (t.get("link") or "").strip().rstrip("/")
                     if not link:
@@ -583,7 +614,7 @@ class ScoutParser:
                                 new_links_queue.append(url_norm)
                                 print("[SCOUT] Найдена новая ссылка, поставлена в очередь на проверку через 60 сек.", flush=True)
                                 logger.info("[SCOUT] Найдена новая ссылка %s, поставлена в очередь на проверку через 60 сек.", url_norm)
-                    if self.detect_lead(message.text):
+                    if self.detect_lead(message.text, platform="telegram"):
                         author_id = getattr(message, "sender_id", None)
                         author_name = None
                         if getattr(message, "sender", None):
@@ -780,6 +811,39 @@ class ScoutParser:
             await client.disconnect()
         return results
 
+    async def search_public_vk_groups(self, keyword: str) -> List[Dict]:
+        """
+        Глобальный поиск публичных групп в VK по ключевому слову.
+        """
+        if not self.vk_token:
+            return []
+
+        params = {
+            "q": keyword,
+            "type": "group",
+            "count": 20,
+            "sort": 0 # по релевантности
+        }
+
+        response = await self._vk_request("groups.search", params)
+        if not response or "items" not in response:
+            return []
+
+        results = []
+        for item in response["items"]:
+            gid = item["id"]
+            title = item.get("name", "Без названия")
+            screen_name = item.get("screen_name", f"club{gid}")
+
+            results.append({
+                "id": str(gid),
+                "title": title,
+                "link": f"https://vk.com/{screen_name}",
+                "participants_count": None, # Можно получить через groups.getById если нужно
+                "source_type": "vk"
+            })
+        return results
+
     async def resolve_telegram_link(self, link: str) -> Optional[Dict]:
         """
         По ссылке t.me/... получить сущность, название и кол-во участников.
@@ -852,7 +916,7 @@ class ScoutParser:
             logger.error(f"❌ VK request error: {e}")
             return None
 
-    async def parse_vk(self) -> List[ScoutPost]:
+    async def parse_vk(self, db=None) -> List[ScoutPost]:
         """
         Парсинг VK групп.
         
@@ -866,16 +930,37 @@ class ScoutParser:
             logger.error("❌ VK_TOKEN не настроен")
             return []
         
-        logger.info(f"🔍 Сканирование {len(self.vk_groups)} VK групп...")
+        # Список групп: из БД или из конфига
+        groups_to_scan = []
+        if db:
+            try:
+                targets = await db.get_active_targets_for_scout(platform="vk")
+                for t in targets:
+                    link = t.get("link", "")
+                    # Извлекаем ID из ссылки vk.com/group_id или vk.com/public_id
+                    match = re.search(r"vk\.com/(?:club|public|group)?(\d+)", link)
+                    gid = match.group(1) if match else t.get("id")
+                    if gid:
+                        groups_to_scan.append({
+                            "id": str(gid),
+                            "name": t.get("title") or link,
+                            "geo": t.get("geo_tag") or "Москва/МО",
+                            "db_id": t.get("id")
+                        })
+            except Exception as e:
+                logger.warning("Не удалось загрузить активные VK цели из БД: %s", e)
+
+        if not groups_to_scan:
+            groups_to_scan = self.vk_groups
+
+        logger.info(f"🔍 Сканирование {len(groups_to_scan)} VK групп...")
 
         posts = []
-        keywords = self._load_keywords()
-
-        # Сколько постов брать для разбора комментариев (в комментариях чаще пишут «посоветуйте», «как узаконить»)
+        # Сколько постов брать для разбора комментариев
         vk_posts_to_scan = int(os.getenv("SCOUT_VK_POSTS_FOR_COMMENTS", "10"))
         vk_comments_per_post = int(os.getenv("SCOUT_VK_COMMENTS_PER_POST", "30"))
 
-        for group in self.vk_groups:
+        for group in groups_to_scan:
             count = 0
             scanned_wall = 0
             scanned_comments = 0
@@ -904,7 +989,7 @@ class ScoutParser:
                 # Посты на стене
                 for item in items:
                     text = item.get("text", "")
-                    if self.detect_lead(text):
+                    if self.detect_lead(text, platform="vk"):
                         post = ScoutPost(
                             source_type="vk",
                             source_name=group["name"],
@@ -943,7 +1028,7 @@ class ScoutParser:
                     for comm in comments_data.get("items", []):
                         scanned_comments += 1
                         ctext = comm.get("text", "")
-                        if not ctext or not self.detect_lead(ctext):
+                        if not ctext or not self.detect_lead(ctext, platform="vk"):
                             continue
                         post = ScoutPost(
                             source_type="vk",
@@ -1055,20 +1140,20 @@ class ScoutParser:
 
     # === FULL SCAN ===
 
-    async def scan_all(self) -> List[ScoutPost]:
+    async def scan_all(self, db=None) -> List[ScoutPost]:
         """Полное сканирование всех источников. Заполняет last_scan_report."""
         self.last_scan_report = []
         self.last_scan_at = datetime.now()
         all_posts = []
 
         try:
-            tg_posts = await self.parse_telegram()
+            tg_posts = await self.parse_telegram(db=db)
             all_posts.extend(tg_posts)
         except Exception as e:
             logger.error(f"❌ TG scan error: {e}")
 
         try:
-            vk_posts = await self.parse_vk()
+            vk_posts = await self.parse_vk(db=db)
             all_posts.extend(vk_posts)
         except Exception as e:
             logger.error(f"❌ VK scan error: {e}")
@@ -1124,9 +1209,11 @@ async def run_scout_parser():
     
     logger.info("🔍 Scout Parser запущен")
     
+    from database.db import db
+
     while True:
         try:
-            posts = await scout_parser.scan_all()
+            posts = await scout_parser.scan_all(db=db)
             if posts:
                 logger.info(f"🔍 Найдено {len(posts)} лидов")
         except Exception as e:
