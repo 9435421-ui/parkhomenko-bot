@@ -14,6 +14,7 @@ from datetime import datetime
 from database.db import db
 from services.publisher import publisher
 import aiohttp
+from config import LEADS_GROUP_CHAT_ID, THREAD_ID_LOGS, TERION_CHANNEL_ID, DOM_GRAND_CHANNEL_ID
 
 logger = logging.getLogger(__name__)
 
@@ -92,17 +93,17 @@ class AutoPoster:
         configs = {
             'terion': {
                 'name': 'ТЕРИОН',
-                'chat_id': int(os.getenv("TERION_CHANNEL_ID", "-1003612599428"))
+                'chat_id': TERION_CHANNEL_ID
             },
             'dom_grand': {
                 'name': 'ДОМ ГРАНД',
-                'chat_id': int(os.getenv("DOM_GRAND_CHANNEL_ID", "-1003777777777"))
+                'chat_id': DOM_GRAND_CHANNEL_ID
             }
         }
         return configs.get(channel_key, configs['terion'])
 
     async def _publish_to_channel(self, post: dict, channel_config: dict) -> bool:
-        """Публикует пост во все настроенные каналы через Publisher"""
+        """Публикует пост в конкретный канал TG + кросс-постинг в VK/Max через Publisher"""
         try:
             text = self._format_post_text(post)
             title = post.get('title', '')
@@ -120,12 +121,17 @@ class AutoPoster:
                 except Exception as e:
                     logger.error(f"⚠️ Не удалось скачать изображение по ссылке {image_url}: {e}")
 
-            # Публикуем через Publisher
-            results = await publisher.publish_all(text, image_bytes, title)
+            results = {}
+            # 1. Публикация в конкретный TG канал
+            results['tg'] = await publisher.publish_to_telegram(channel_config['chat_id'], text, image_bytes)
 
-            # Проверяем успех хотя бы в одном канале
-            success = any(results.values())
-            return success
+            # 2. Кросс-постинг в VK
+            results['vk'] = await publisher.publish_to_vk(text, image_bytes)
+
+            # 3. Кросс-постинг в Max.ru
+            results['max'] = await publisher.publish_to_max(text, title)
+
+            return results.get('tg', False)
 
         except Exception as e:
             logger.error(f"❌ Ошибка публикации: {e}")
@@ -195,9 +201,9 @@ class AutoPoster:
             """
 
             await self.bot.send_message(
-                chat_id=int(os.getenv("LEADS_GROUP_CHAT_ID", "-1003370698977")),
+                chat_id=LEADS_GROUP_CHAT_ID,
                 text=log_text.strip(),
-                message_thread_id=int(os.getenv("THREAD_ID_LOGS", "88"))
+                message_thread_id=THREAD_ID_LOGS
             )
 
         except Exception as e:

@@ -32,7 +32,7 @@ from PIL import Image
 import io
 
 from database import db
-from handlers.vk_publisher import VKPublisher
+from services.publisher import publisher
 from content_agent import ContentAgent
 from hunter_standalone import HunterDatabase
 from config import (
@@ -142,10 +142,6 @@ async def global_menu_handler(message: Message, state: FSMContext):
         await fact_start(message, state)
     elif text == "🎉 Праздник РФ":
         await holiday_rf_start(message, state)
-
-# Инициализация VK
-vk_publisher = VKPublisher(VK_TOKEN, int(VK_GROUP_ID))
-
 
 # === FSM STATES ===
 class ContentStates(StatesGroup):
@@ -336,105 +332,6 @@ router_ai = RouterAIClient(ROUTER_AI_KEY)
 
 # === VK PUBLISHER ===
 
-class VKPublisher:
-    """Публикация в ВКонтакте с кнопками квиз/консультация"""
-    
-    def __init__(self, token: str, group_id: int):
-        self.token = token
-        self.group_id = group_id
-        self.api_version = "5.199"
-    
-    async def _make_request(self, method: str, params: dict) -> Optional[dict]:
-        params.update({"access_token": self.token, "v": self.api_version})
-        
-        try:
-            async with aiohttp.ClientSession() as session:
-                async with session.get(f"https://api.vk.com/method/{method}", params=params) as resp:
-                    data = await resp.json()
-                    if "error" in data:
-                        logger.error(f"VK API error: {data['error']}")
-                        return None
-                    return data.get("response")
-        except Exception as e:
-            logger.error(f"VK request error: {e}")
-            return None
-    
-    async def upload_photo(self, image_data: bytes) -> Optional[str]:
-        """Загрузка фото на сервер ВК"""
-        upload_data = await self._make_request("photos.getWallUploadServer", {"group_id": self.group_id})
-        if not upload_data or not upload_data.get("upload_url"):
-            return None
-        
-        try:
-            async with aiohttp.ClientSession() as session:
-                form = aiohttp.FormData()
-                form.add_field("photo", image_data, filename="photo.jpg", content_type="image/jpeg")
-                
-                async with session.post(upload_data["upload_url"], data=form) as resp:
-                    result = await resp.json()
-                    if "error" in result:
-                        return None
-                    
-                    save_data = await self._make_request(
-                        "photos.saveWallPhoto",
-                        {
-                            "group_id": self.group_id,
-                            "photo": result.get("photo"),
-                            "server": result.get("server"),
-                            "hash": result.get("hash")
-                        }
-                    )
-                    
-                    if save_data and len(save_data) > 0:
-                        photo = save_data[0]
-                        return f"photo{photo['owner_id']}_{photo['id']}"
-        except Exception as e:
-            logger.error(f"VK upload error: {e}")
-        return None
-    
-    def create_buttons(self, quiz_link: str = None, consult_link: str = None) -> str:
-        """Кнопки: Квиз и Консультация"""
-        if not quiz_link:
-            quiz_link = VK_QUIZ_LINK
-        if not consult_link:
-            consult_link = "https://t.me/terion_bot?start=consult"
-        
-        buttons = {
-            "inline": True,
-            "buttons": [
-                [{"action": {"type": "open_link", "link": quiz_link, "label": "📝 Пройти квиз"}}],
-                [{"action": {"type": "open_link", "link": consult_link, "label": "💬 Бесплатная консультация"}}]
-            ]
-        }
-        return json.dumps(buttons, ensure_ascii=False)
-    
-    async def post_to_wall(self, message: str, photo_id: Optional[str] = None) -> Optional[int]:
-        """Публикация поста"""
-        attachments = [photo_id] if photo_id else []
-        
-        params = {
-            "owner_id": -self.group_id,
-            "from_group": 1,
-            "message": message,
-            "attachments": ",".join(attachments),
-            "keyboard": self.create_buttons()
-        }
-        
-        result = await self._make_request("wall.post", params)
-        return result.get("post_id") if result else None
-    
-    async def post_text_only(self, message: str) -> Optional[int]:
-        return await self.post_to_wall(message, None)
-    
-    async def post_with_photo(self, message: str, image_bytes: bytes) -> Optional[int]:
-        photo_id = await self.upload_photo(image_bytes)
-        if not photo_id:
-            return await self.post_text_only(message)
-        return await self.post_to_wall(message, photo_id)
-
-
-# Инициализация VK
-vk_publisher = VKPublisher(VK_TOKEN, VK_GROUP_ID)
 
 
 # === FSM STATES ===
@@ -778,9 +675,9 @@ async def ai_visual_handler(message: Message, state: FSMContext):
     
     try:
         image_bytes = base64.b64decode(image_b64)
-        # Отправка файлом из памяти (io.BytesIO), без временного файла — устраняет «Ошибка отправки»
+        # Отправка файлом из памяти (io.BytesIO)
         photo = BufferedInputFile(image_bytes, filename="visual.jpg")
-        await message.answer_photo(
+        sent_msg = await message.answer_photo(
             photo=photo,
             caption=(
                 f"✅ <b>Готово!</b>\n\n"
@@ -794,11 +691,54 @@ async def ai_visual_handler(message: Message, state: FSMContext):
             .as_markup(),
             parse_mode="HTML"
         )
+        # Сохраняем в состояние для art_to_post
+        await state.update_data(
+            ai_visual_file_id=sent_msg.photo[-1].file_id,
+            ai_visual_prompt=user_prompt
+        )
     except Exception as e:
         logger.error(f"Send error: {e}")
         await message.answer("❌ Ошибка отправки", reply_markup=get_back_btn())
+
+
+@content_router.callback_query(F.data.startswith("art_to_post:"))
+async def art_to_post_handler(callback: CallbackQuery, state: FSMContext):
+    """Переход от сгенерированного арта к созданию текста поста"""
+    data = await state.get_data()
+    file_id = data.get("ai_visual_file_id")
+    prompt = data.get("ai_visual_prompt") or callback.data.split(":", 1)[1]
     
-    await state.clear()
+    await callback.answer("📝 Сочиняю пост...")
+    await callback.message.answer(f"⏳ <b>Пишу пост на основе арта...</b>\nПромпт: <code>{prompt[:40]}...</code>", parse_mode="HTML")
+
+    cases_content = _load_content_template("expert_cases.txt", "МЖИ, несущие стены, трассировка, акты скрытых работ.")
+    ai_prompt = (
+        f"Ты — эксперт TERION. Напиши пост для Telegram на основе идеи: «{prompt}».\n\n"
+        f"Используй термины: МЖИ, трассировка, СНиП. \n"
+        f"Опора на кейсы:\n{cases_content}\n\n"
+        f"Стиль: уверенный, экспертный. 100-150 слов. Добавь призыв в @terion_bot."
+    )
+
+    text = await router_ai.generate(ai_prompt)
+    if not text:
+        await callback.message.answer("❌ Ошибка генерации текста", reply_markup=get_back_btn())
+        return
+
+    text = ensure_quiz_and_hashtags(text)
+
+    # Сохраняем в БД как черновик для превью
+    post_id = await db.add_content_post(
+        title=f"Арт-пост: {prompt[:30]}",
+        body=text,
+        cta="",
+        image_url=file_id,
+        channel="ai_visual",
+        status="preview"
+    )
+
+    await show_preview(callback.message, text, image_file_id=file_id, post_id=post_id)
+    await state.set_state(ContentStates.preview_mode)
+    await state.update_data(post_id=post_id, text=text, file_id=file_id)
 
 
 @content_router.callback_query(F.data == "visual_back")
@@ -948,6 +888,60 @@ async def generate_series_images(callback: CallbackQuery, state: FSMContext):
                         pass
     
     await callback.message.answer("✅ <b>Все обложки готовы!</b>", reply_markup=get_back_btn(), parse_mode="HTML")
+
+
+@content_router.callback_query(F.data.startswith("gen_plan_img:"))
+async def generate_plan_images(callback: CallbackQuery, state: FSMContext):
+    """Генерация изображений к техническому плану"""
+    parts = callback.data.split(":")
+    model = parts[1]
+    topic = parts[2]
+    days = int(parts[3])
+
+    await callback.answer("🎨 Генерация...")
+    await callback.message.edit_text(
+        f"⏳ <b>Генерация {days} тех. иллюстраций...</b>",
+        parse_mode="HTML"
+    )
+
+    for i in range(1, days + 1):
+        art_prompt = f"Technical blueprint, {topic}, day {i}, architectural drawing, professional site plan, high detail. No text, no words, no letters, no captions — image only."
+
+        await callback.message.answer(f"🎨 <b>День {i}...</b>", parse_mode="HTML")
+
+        image_b64 = await yandex_art.generate(art_prompt) if model == 'yandex' else await router_ai.generate_image_gemini(art_prompt)
+        if not image_b64:
+            try:
+                from services.image_generator import image_generator
+                image_bytes_fb = await image_generator.generate_cover(art_prompt)
+                if image_bytes_fb:
+                    image_b64 = base64.b64encode(image_bytes_fb).decode()
+            except Exception as e:
+                logger.warning(f"Plan image fallback day {i}: {e}")
+
+        tmp_path = None
+        if image_b64:
+            try:
+                image_bytes = base64.b64decode(image_b64)
+                with tempfile.NamedTemporaryFile(suffix=".jpg", delete=False) as tmp:
+                    tmp.write(image_bytes)
+                    tmp_path = tmp.name
+
+                await callback.message.answer_photo(
+                    photo=FSInputFile(tmp_path),
+                    caption=f"📐 <b>Иллюстрация к Плану: День {i}</b> — {topic}",
+                    parse_mode="HTML"
+                )
+            except Exception as e:
+                logger.error(f"Ошибка генерации картинки плана дня {i}: {e}")
+            finally:
+                if tmp_path and os.path.exists(tmp_path):
+                    try:
+                        os.unlink(tmp_path)
+                    except Exception:
+                        pass
+
+    await callback.message.answer("✅ <b>Все иллюстрации к плану готовы!</b>", reply_markup=get_back_btn(), parse_mode="HTML")
 
 
 # === 📋 КОНТЕНТ-ПЛАН ===
@@ -1354,33 +1348,9 @@ def clean_html_for_vk(text: str) -> str:
     return text.strip()
 
 
-async def send_post(bot: Bot, channel_id: int, post: dict, channel_name: str) -> tuple[bool, str]:
-    """Отправка поста в канал: всегда ссылка на квиз + обязательные хэштеги. URL фото скачиваем и отправляем файлом."""
-    text = ensure_quiz_and_hashtags(post['body'])
-    try:
-        if post.get("image_url"):
-            photo = await _photo_input_for_send(bot, post["image_url"])
-            if photo is not None:
-                msg = await bot.send_photo(channel_id, photo, caption=text, parse_mode="HTML")
-            else:
-                msg = await bot.send_message(channel_id, text, parse_mode="HTML")
-        else:
-            msg = await bot.send_message(channel_id, text, parse_mode="HTML")
-        
-        # Формируем ссылку на пост
-        if msg.chat.username:
-            link = f"https://t.me/{msg.chat.username}/{msg.message_id}"
-        else:
-            link = f"https://t.me/c/{str(channel_id).replace('-100', '')}/{msg.message_id}"
-        
-        return True, link
-    except Exception as e:
-        return False, str(e)
-
-
 @content_router.callback_query(F.data.startswith("pub_terion:"))
 async def publish_terion(callback: CallbackQuery, state: FSMContext):
-    """Публикация только в TERION"""
+    """Публикация только в TERION через Publisher"""
     post_id = int(callback.data.split(":")[1])
     post = await db.get_content_post(post_id)
     
@@ -1389,29 +1359,24 @@ async def publish_terion(callback: CallbackQuery, state: FSMContext):
         return
     
     await callback.answer("🚀 Публикую в TERION...")
+    text = ensure_quiz_and_hashtags(post['body'])
+    image_bytes = await download_photo(callback.bot, post["image_url"]) if post.get("image_url") else None
     
-    success, result = await send_post(callback.bot, CHANNEL_ID_TERION, post, "TERION")
+    publisher.bot = callback.bot
+    success = await publisher.publish_to_telegram(CHANNEL_ID_TERION, text, image_bytes)
     
     if success:
         await db.update_content_post(post_id, status="published")
-        await callback.message.edit_text(
-            f"✅ <b>Опубликовано в TERION</b>\n\n🔗 <a href='{result}'>Ссылка на пост</a>",
-            reply_markup=get_back_btn(),
-            parse_mode="HTML"
-        )
+        await callback.message.edit_text("✅ <b>Опубликовано в TERION</b>", reply_markup=get_back_btn(), parse_mode="HTML")
     else:
-        await callback.message.edit_text(
-            f"❌ <b>Ошибка публикации в TERION</b>\n\n{result}",
-            reply_markup=get_back_btn(),
-            parse_mode="HTML"
-        )
+        await callback.message.edit_text("❌ <b>Ошибка публикации в TERION</b>", reply_markup=get_back_btn(), parse_mode="HTML")
     
     await state.clear()
 
 
 @content_router.callback_query(F.data.startswith("pub_dom_grnd:"))
 async def publish_dom_grnd(callback: CallbackQuery, state: FSMContext):
-    """Публикация только в ДОМ ГРАНД"""
+    """Публикация только в ДОМ ГРАНД через Publisher"""
     post_id = int(callback.data.split(":")[1])
     post = await db.get_content_post(post_id)
     
@@ -1420,29 +1385,24 @@ async def publish_dom_grnd(callback: CallbackQuery, state: FSMContext):
         return
     
     await callback.answer("🚀 Публикую в ДОМ ГРАНД...")
+    text = ensure_quiz_and_hashtags(post['body'])
+    image_bytes = await download_photo(callback.bot, post["image_url"]) if post.get("image_url") else None
     
-    success, result = await send_post(callback.bot, CHANNEL_ID_DOM_GRAD, post, "ДОМ ГРАНД")
+    publisher.bot = callback.bot
+    success = await publisher.publish_to_telegram(CHANNEL_ID_DOM_GRAD, text, image_bytes)
     
     if success:
         await db.update_content_post(post_id, status="published")
-        await callback.message.edit_text(
-            f"✅ <b>Опубликовано в ДОМ ГРАНД</b>\n\n🔗 <a href='{result}'>Ссылка на пост</a>",
-            reply_markup=get_back_btn(),
-            parse_mode="HTML"
-        )
+        await callback.message.edit_text("✅ <b>Опубликовано в ДОМ ГРАНД</b>", reply_markup=get_back_btn(), parse_mode="HTML")
     else:
-        await callback.message.edit_text(
-            f"❌ <b>Ошибка публикации в ДОМ ГРАНД</b>\n\n{result}",
-            reply_markup=get_back_btn(),
-            parse_mode="HTML"
-        )
+        await callback.message.edit_text("❌ <b>Ошибка публикации в ДОМ ГРАНД</b>", reply_markup=get_back_btn(), parse_mode="HTML")
     
     await state.clear()
 
 
 @content_router.callback_query(F.data.startswith("pub_max:"))
 async def publish_max(callback: CallbackQuery, state: FSMContext):
-    """Публикация в канал MAX.ru"""
+    """Публикация в канал MAX.ru через Publisher"""
     post_id = int(callback.data.split(":")[1])
     post = await db.get_content_post(post_id)
 
@@ -1451,36 +1411,22 @@ async def publish_max(callback: CallbackQuery, state: FSMContext):
         return
 
     await callback.answer("📱 Публикую в MAX...")
+    text = post['body']
+    title = post.get('title', '')
 
-    try:
-        agent = ContentAgent()
-        ok = await agent.post_to_max(post_id)
-        if ok:
-            await db.update_content_post(post_id, status="published")
-            await callback.message.edit_text(
-                "✅ <b>Опубликовано в MAX</b>\n\nПост отправлен в ваш канал на MAX.ru.",
-                reply_markup=get_back_btn(),
-                parse_mode="HTML"
-            )
-        else:
-            await callback.message.edit_text(
-                "❌ <b>Ошибка публикации в MAX</b>\n\nПроверьте MAX_DEVICE_TOKEN в .env и что канал создан в приложении MAX.",
-                reply_markup=get_back_btn(),
-                parse_mode="HTML"
-            )
-    except Exception as e:
-        logger.exception("pub_max error")
-        await callback.message.edit_text(
-            f"❌ <b>Ошибка публикации в MAX</b>\n\n{str(e)}",
-            reply_markup=get_back_btn(),
-            parse_mode="HTML"
-        )
+    success = await publisher.publish_to_max(text, title)
+    if success:
+        await db.update_content_post(post_id, status="published")
+        await callback.message.edit_text("✅ <b>Опубликовано в MAX</b>", reply_markup=get_back_btn(), parse_mode="HTML")
+    else:
+        await callback.message.edit_text("❌ <b>Ошибка публикации в MAX</b>", reply_markup=get_back_btn(), parse_mode="HTML")
 
     await state.clear()
 
 
 @content_router.callback_query(F.data.startswith("pub_all:"))
 async def publish_all(callback: CallbackQuery, state: FSMContext):
+    """Публикация во все каналы через Publisher"""
     post_id = int(callback.data.split(":")[1])
     post = await db.get_content_post(post_id)
     
@@ -1488,46 +1434,17 @@ async def publish_all(callback: CallbackQuery, state: FSMContext):
         await callback.answer("❌ Пост не найден")
         return
     
-    await callback.answer("🚀 Публикую...")
+    await callback.answer("🚀 Публикую везде...")
     
     text = ensure_quiz_and_hashtags(post['body'])
-    results = []
+    image_bytes = await download_photo(callback.bot, post["image_url"]) if post.get("image_url") else None
     
-    # TG TERION
-    try:
-        if post.get("image_url"):
-            photo = await _photo_input_for_send(callback.bot, post["image_url"])
-            if photo is not None:
-                await callback.bot.send_photo(CHANNEL_ID_TERION, photo, caption=text, parse_mode="HTML")
-            else:
-                await callback.bot.send_message(CHANNEL_ID_TERION, text, parse_mode="HTML")
-        else:
-            await callback.bot.send_message(CHANNEL_ID_TERION, text, parse_mode="HTML")
-        results.append("✅ TERION TG")
-    except Exception as e:
-        results.append(f"❌ TERION: {e}")
+    publisher.bot = callback.bot
+    results = await publisher.publish_all(text, image_bytes, title=post.get('title', ''))
     
-    # TG ДОМ ГРАНД
-    try:
-        if post.get("image_url"):
-            photo = await _photo_input_for_send(callback.bot, post["image_url"])
-            if photo is not None:
-                await callback.bot.send_photo(CHANNEL_ID_DOM_GRAD, photo, caption=text, parse_mode="HTML")
-            else:
-                await callback.bot.send_message(CHANNEL_ID_DOM_GRAD, text, parse_mode="HTML")
-        else:
-            await callback.bot.send_message(CHANNEL_ID_DOM_GRAD, text, parse_mode="HTML")
-        results.append("✅ ДОМ ГРАНД TG")
-    except Exception as e:
-        results.append(f"❌ ДОМ ГРАНД: {e}")
-    
-    # VK
-    try:
-        image_bytes = await download_photo(callback.bot, post["image_url"]) if post.get("image_url") else None
-        vk_id = await vk_publisher.post_with_photo(text, image_bytes) if image_bytes else await vk_publisher.post_text_only(text)
-        results.append(f"✅ VK (post{vk_id})" if vk_id else "❌ VK")
-    except Exception as e:
-        results.append(f"❌ VK: {e}")
+    summary = []
+    for k, v in results.items():
+        summary.append(f"{'✅' if v else '❌'} {k.upper()}")
     
     await db.update_content_post(post_id, status="published")
     
@@ -1535,12 +1452,12 @@ async def publish_all(callback: CallbackQuery, state: FSMContext):
     await callback.bot.send_message(
         chat_id=LEADS_GROUP_CHAT_ID,
         message_thread_id=THREAD_ID_LOGS,
-        text=f"🚀 <b>Публикация #{post_id}</b>\n\n" + "\n".join(results),
+        text=f"🚀 <b>Публикация #{post_id}</b>\n\n" + "\n".join(summary),
         parse_mode="HTML"
     )
     
     await callback.message.edit_text(
-        f"✅ <b>Опубликовано!</b>\n\n" + "\n".join(results),
+        f"✅ <b>Опубликовано!</b>\n\n" + "\n".join(summary),
         reply_markup=get_back_btn(),
         parse_mode="HTML"
     )
@@ -1549,7 +1466,7 @@ async def publish_all(callback: CallbackQuery, state: FSMContext):
 
 @content_router.callback_query(F.data.startswith("pub_tg:"))
 async def publish_tg_only(callback: CallbackQuery, state: FSMContext):
-    """Публикация в Telegram с подписью эксперта"""
+    """Публикация в Telegram с использованием Publisher"""
     post_id = int(callback.data.split(":")[1])
     post = await db.get_content_post(post_id)
 
@@ -1557,22 +1474,19 @@ async def publish_tg_only(callback: CallbackQuery, state: FSMContext):
         await callback.answer("❌ Пост не найден")
         return
 
-    text = ensure_quiz_and_hashtags(post['body']) + _get_expert_signature()
-    try:
-        if post.get("image_url"):
-            photo = await _photo_input_for_send(callback.bot, post["image_url"])
-            if photo is not None:
-                await callback.bot.send_photo(CHANNEL_ID_TERION, photo, caption=text, parse_mode="HTML")
-                await callback.bot.send_photo(CHANNEL_ID_DOM_GRAD, photo, caption=text, parse_mode="HTML")
-            else:
-                await callback.bot.send_message(CHANNEL_ID_TERION, text, parse_mode="HTML")
-                await callback.bot.send_message(CHANNEL_ID_DOM_GRAD, text, parse_mode="HTML")
-        else:
-            await callback.bot.send_message(CHANNEL_ID_TERION, text, parse_mode="HTML")
-            await callback.bot.send_message(CHANNEL_ID_DOM_GRAD, text, parse_mode="HTML")
-        results = ["✅ TERION", "✅ ДОМ ГРАНД"]
-    except Exception as e:
-        results = [f"❌ {e}"]
+    await callback.answer("🚀 Публикую в Telegram...")
+    text = ensure_quiz_and_hashtags(post['body'])
+    image_bytes = await download_photo(callback.bot, post["image_url"]) if post.get("image_url") else None
+
+    publisher.bot = callback.bot
+    res_terion = await publisher.publish_to_telegram(CHANNEL_ID_TERION, text, image_bytes)
+    res_dom = await publisher.publish_to_telegram(CHANNEL_ID_DOM_GRAD, text, image_bytes)
+
+    results = []
+    if res_terion: results.append("✅ TERION")
+    else: results.append("❌ TERION")
+    if res_dom: results.append("✅ ДОМ ГРАНД")
+    else: results.append("❌ ДОМ ГРАНД")
     
     await db.update_content_post(post_id, status="published")
     await callback.message.edit_text(f"✅ <b>TG:</b>\n" + "\n".join(results), reply_markup=get_back_btn(), parse_mode="HTML")
@@ -1592,22 +1506,32 @@ async def publish_vk_only(callback: CallbackQuery, state: FSMContext):
     post_id = int(callback.data.split(":")[1])
     post = await db.get_content_post(post_id)
     
-    # Очищаем HTML для ВК; добавляем квиз и хэштеги (обязательно)
+    if not post:
+        await callback.answer("❌ Пост не найден")
+        return
+
+    await callback.answer("🌐 Публикую в VK...")
+    # Очищаем HTML для ВК
     text = clean_html_for_vk(post['body'])
-    if VK_QUIZ_LINK not in text:
-        text += f"\n\n📍 Пройти квиз: {VK_QUIZ_LINK}"
-    if CONTENT_HASHTAGS and CONTENT_HASHTAGS.strip() and CONTENT_HASHTAGS.strip() not in text:
-        text += f"\n\n{CONTENT_HASHTAGS.strip()}"
+
     try:
         image_bytes = await download_photo(callback.bot, post["image_url"]) if post.get("image_url") else None
-        vk_id = await vk_publisher.post_with_photo(text, image_bytes) if image_bytes else await vk_publisher.post_text_only(text)
         
-        await db.update_content_post(post_id, status="published")
+        # Кнопки для ВК
+        vk_buttons = {
+            "inline": True,
+            "buttons": [
+                [{"action": {"type": "open_link", "link": VK_QUIZ_LINK, "label": "📝 Пройти квиз"}}],
+                [{"action": {"type": "open_link", "link": "https://t.me/terion_bot?start=consult", "label": "💬 Консультация"}}]
+            ]
+        }
         
-        vk_link = f"https://vk.com/wall-{VK_GROUP_ID}_{vk_id}" if vk_id else None
-        if vk_link:
+        success = await publisher.publish_to_vk(text, image_bytes, keyboard=json.dumps(vk_buttons, ensure_ascii=False))
+
+        if success:
+            await db.update_content_post(post_id, status="published")
             await callback.message.edit_text(
-                f"✅ <b>Опубликовано в VK</b>\n\n🔗 <a href='{vk_link}'>Ссылка на пост</a>",
+                f"✅ <b>Опубликовано в VK</b>",
                 reply_markup=get_back_btn(),
                 parse_mode="HTML"
             )

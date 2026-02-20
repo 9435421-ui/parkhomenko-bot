@@ -1,5 +1,6 @@
 import os
 import logging
+import json
 from typing import Dict, Optional
 import aiohttp
 from aiogram import Bot
@@ -40,7 +41,7 @@ class Publisher:
     # Подпись эксперта для VK
     VK_SIGNATURE = "\n\n---\n🏡 Эксперт: Юлия Пархоменко\n#TERION #ИИ_Ассистент"
     
-    async def publish_to_vk(self, text: str, image: bytes = None, add_signature: bool = True) -> bool:
+    async def publish_to_vk(self, text: str, image: bytes = None, add_signature: bool = True, keyboard: str = None) -> bool:
         """Публикация в VK группу через API"""
         if not self.vk_token or not self.vk_group:
             logger.warning("⚠️ VK_TOKEN или VK_GROUP_ID не настроены")
@@ -59,6 +60,8 @@ class Publisher:
                 'message': text,
                 'v': '5.199'
             }
+            if keyboard:
+                params['keyboard'] = keyboard
             
             # Если есть изображение, нужно сначала загрузить его в ВК
             attachments = ""
