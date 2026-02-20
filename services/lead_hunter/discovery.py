@@ -205,37 +205,71 @@ class Discovery:
                         limit=20  # Максимум 20 результатов на запрос
                     ))
                     
-                    # Извлекаем уникальные каналы из результатов
+                    # ── ИСПРАВЛЕНИЕ: Итерируемся напрямую по search_result.chats ────────
+                    # Исключаем get_entity для каждого чата - используем данные из results.chats
+                    if results is None:
+                        logger.debug(f"Пустой результат поиска для '{keyword}'")
+                        continue
+                    
+                    if not hasattr(results, "chats") or results.chats is None:
+                        logger.debug(f"Нет атрибута chats в результатах для '{keyword}'")
+                        continue
+                    
                     seen_channels = set()
-                    for msg in results.messages:
-                        if hasattr(msg, "peer_id") and hasattr(msg.peer_id, "channel_id"):
-                            channel_id = msg.peer_id.channel_id
-                            if channel_id in seen_channels:
-                                continue
-                            seen_channels.add(channel_id)
+                    for chat in results.chats:
+                        if chat is None:
+                            continue
+                        
+                        # Проверяем наличие необходимых атрибутов
+                        if not hasattr(chat, "id"):
+                            continue
+                        
+                        chat_id = chat.id
+                        if chat_id in seen_channels:
+                            continue
+                        seen_channels.add(chat_id)
+                        
+                        # Проверяем, что это канал (Channel) или группа (Chat)
+                        if not isinstance(chat, (Channel, Chat)):
+                            continue
+                        
+                        # Для каналов проверяем, что они публичные
+                        if isinstance(chat, Channel):
+                            if not hasattr(chat, "access_hash") or chat.access_hash is None:
+                                continue  # Пропускаем приватные каналы
                             
-                            try:
-                                entity = await client.get_entity(channel_id)
-                                if isinstance(entity, (Channel, Chat)):
-                                    # Проверяем, что канал публичный
-                                    if isinstance(entity, Channel) and entity.access_hash:
-                                        username = getattr(entity, "username", None)
-                                        if username:
-                                            link = f"https://t.me/{username}"
-                                        else:
-                                            link = f"https://t.me/c/{abs(channel_id)}"
-                                        
-                                        # Проверяем на дубликаты
-                                        if not any(c.get("link") == link for c in found_channels):
-                                            found_channels.append({
-                                                "link": link,
-                                                "title": getattr(entity, "title", ""),
-                                                "type": "telegram",
-                                                "participants_count": getattr(entity, "participants_count", 0),
-                                                "geo_tag": "Москва/МО",
-                                            })
-                            except Exception as e:
-                                logger.debug(f"Ошибка при обработке канала {channel_id}: {e}")
+                            username = getattr(chat, "username", None)
+                            if username:
+                                link = f"https://t.me/{username}"
+                            else:
+                                link = f"https://t.me/c/{abs(chat_id)}"
+                            
+                            title = getattr(chat, "title", "") or (username if username else f"Channel {chat_id}")
+                            participants_count = getattr(chat, "participants_count", 0)
+                            
+                            # Проверяем на дубликаты
+                            if not any(c.get("link") == link for c in found_channels):
+                                found_channels.append({
+                                    "link": link,
+                                    "title": title,
+                                    "type": "telegram",
+                                    "participants_count": participants_count,
+                                    "geo_tag": "Москва/МО",
+                                })
+                        elif isinstance(chat, Chat):
+                            # Для групп используем ID
+                            link = f"https://t.me/c/{abs(chat_id)}"
+                            title = getattr(chat, "title", "") or f"Chat {chat_id}"
+                            participants_count = getattr(chat, "participants_count", 0)
+                            
+                            if not any(c.get("link") == link for c in found_channels):
+                                found_channels.append({
+                                    "link": link,
+                                    "title": title,
+                                    "type": "telegram",
+                                    "participants_count": participants_count,
+                                    "geo_tag": "Москва/МО",
+                                })
                     
                     # Небольшая задержка между запросами (антифлуд)
                     await asyncio.sleep(1)
@@ -352,9 +386,23 @@ class Discovery:
                     
                     async with session.get(
                         "https://api.vk.com/method/groups.search",
-                        params=params
+                        params=params,
+                        timeout=aiohttp.ClientTimeout(total=10)
                     ) as resp:
-                        data = await resp.json()
+                        # ── ОБРАБОТКА ПУСТЫХ ОТВЕТОВ И ИСКЛЮЧЕНИЙ ──────────────────────────
+                        if resp.status != 200:
+                            logger.error(f"❌ VK API HTTP error {resp.status} при поиске '{keyword}'")
+                            continue
+                        
+                        try:
+                            data = await resp.json()
+                        except Exception as json_error:
+                            logger.error(f"❌ Ошибка парсинга JSON ответа VK API для '{keyword}': {json_error}")
+                            continue
+                        
+                        if not data:
+                            logger.warning(f"⚠️ Пустой ответ от VK API для '{keyword}'")
+                            continue
                         
                         if "error" in data:
                             error_code = data['error'].get('error_code', 0)
@@ -378,8 +426,15 @@ class Discovery:
                             logger.error(f"❌ VK API error при поиске '{keyword}': код {error_code}, {error_msg}")
                             continue
                         
-                        response = data.get("response", {})
+                        response = data.get("response")
+                        if not response:
+                            logger.warning(f"⚠️ Пустой response от VK API для '{keyword}'")
+                            continue
+                        
                         items = response.get("items", [])
+                        if not items:
+                            logger.debug(f"Нет результатов поиска для '{keyword}'")
+                            continue
                         
                         for group in items:
                             # Фильтруем только открытые группы (is_closed == 0)

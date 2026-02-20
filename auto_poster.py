@@ -88,21 +88,24 @@ class AutoPoster:
         return 'terion'
 
     def _get_channel_config(self, channel_key: str) -> dict:
-        """Получает конфигурацию канала"""
+        """Получает конфигурацию канала из config.py"""
+        # ── ИСПРАВЛЕНИЕ: Используем config.py вместо os.getenv ───────────────────────
+        from config import CHANNEL_ID_TERION, CHANNEL_ID_DOM_GRAD, CHANNEL_NAMES
+        
         configs = {
             'terion': {
-                'name': 'ТЕРИОН',
-                'chat_id': int(os.getenv("TERION_CHANNEL_ID", "-1003612599428"))
+                'name': CHANNEL_NAMES.get('terion', 'TERION'),
+                'chat_id': CHANNEL_ID_TERION
             },
             'dom_grand': {
-                'name': 'ДОМ ГРАНД',
-                'chat_id': int(os.getenv("DOM_GRAND_CHANNEL_ID", "-1003777777777"))
+                'name': CHANNEL_NAMES.get('dom_grand', 'ДОМ ГРАНД'),
+                'chat_id': CHANNEL_ID_DOM_GRAD
             }
         }
         return configs.get(channel_key, configs['terion'])
 
     async def _publish_to_channel(self, post: dict, channel_config: dict) -> bool:
-        """Публикует пост через Publisher во все каналы (TG + VK + Max.ru)."""
+        """Публикует пост через Publisher в целевой канал (TERION или ДОМ ГРАНД)."""
         try:
             text = self._format_post_text(post)
             title = post.get("title", "") or ""
@@ -124,8 +127,14 @@ class AutoPoster:
                 except Exception as e:
                     logger.warning(f"⚠️ Не удалось скачать изображение {image_url}: {e}")
 
-            results = await publisher.publish_all(text, image_bytes, title)
-            return any(results.values())
+            # ── ИСПРАВЛЕНИЕ: Публикуем в целевой канал, а не во все ──────────────────
+            channel_id = channel_config['chat_id']
+            success = await publisher.publish_to_telegram(channel_id, text, image_bytes)
+            
+            if success:
+                logger.info(f"✅ Пост опубликован в {channel_config['name']} (ID: {channel_id})")
+            
+            return success
 
         except Exception as e:
             logger.error(f"❌ Ошибка публикации: {e}")

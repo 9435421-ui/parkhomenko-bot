@@ -219,12 +219,23 @@ class Database:
                 await self.conn.commit()
             except Exception:
                 pass
-            # Миграция spy_leads: pain_stage, priority_score
+            # ── DB MIGRATION: Автоматическое добавление полей pain_stage и priority ───
+            # Проверяем наличие полей перед добавлением (избегаем ошибок при повторном запуске)
             for col, ctype in [("pain_stage", "TEXT"), ("priority_score", "INTEGER")]:
                 try:
-                    await cursor.execute(f"ALTER TABLE spy_leads ADD COLUMN {col} {ctype}")
-                    await self.conn.commit()
-                except Exception:
+                    # Проверяем, существует ли колонка
+                    await cursor.execute("PRAGMA table_info(spy_leads)")
+                    columns = await cursor.fetchall()
+                    column_names = [col_info[1] for col_info in columns]
+                    
+                    if col not in column_names:
+                        await cursor.execute(f"ALTER TABLE spy_leads ADD COLUMN {col} {ctype}")
+                        await self.conn.commit()
+                        logger.debug(f"✅ Добавлена колонка {col} в spy_leads")
+                    else:
+                        logger.debug(f"ℹ️ Колонка {col} уже существует в spy_leads")
+                except Exception as e:
+                    logger.warning(f"⚠️ Ошибка при добавлении колонки {col} в spy_leads: {e}")
                     pass
             # Data-Driven Scout: status (pending/active/archived), platform, geo_tag, participants_count
             try:

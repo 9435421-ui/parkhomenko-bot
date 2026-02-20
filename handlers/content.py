@@ -872,7 +872,9 @@ async def ai_visual_handler(message: Message, state: FSMContext):
     try:
         image_bytes = base64.b64decode(image_b64)
         photo = BufferedInputFile(image_bytes, filename="visual.jpg")
-        await message.answer_photo(
+        
+        # ── ВОССТАНОВЛЕНИЕ ЦЕПОЧКИ: Сохраняем file_id и prompt в FSM ───────────────
+        sent_message = await message.answer_photo(
             photo=photo,
             caption=(
                 f"✅ <b>Готово!</b>\n\n"
@@ -885,11 +887,22 @@ async def ai_visual_handler(message: Message, state: FSMContext):
             .as_markup(),
             parse_mode="HTML"
         )
+        
+        # Сохраняем file_id и prompt в состояние FSM для использования в art_to_post_handler
+        if sent_message.photo:
+            file_id = sent_message.photo[-1].file_id  # Берем самое большое фото
+            await state.update_data(
+                visual_file_id=file_id,
+                visual_prompt=user_prompt,
+                visual_image_bytes=image_b64  # Сохраняем base64 для возможного использования
+            )
+            logger.debug(f"✅ Сохранены в FSM: file_id={file_id[:20]}..., prompt={user_prompt[:30]}...")
+        
     except Exception as e:
         logger.error(f"Send visual error: {e}")
         await message.answer("❌ Ошибка отправки изображения", reply_markup=get_back_btn())
 
-    await state.clear()
+    # НЕ очищаем state - оставляем данные для art_to_post_handler
 
 
 @content_router.callback_query(F.data == "visual_back")
@@ -900,14 +913,23 @@ async def visual_back(callback: CallbackQuery, state: FSMContext):
 
 @content_router.callback_query(F.data.startswith("art_to_post:"))
 async def art_to_post_handler(callback: CallbackQuery, state: FSMContext):
-    """Создаёт текстовый пост по промпту от изображения."""
+    """Создаёт полноценный пост из сгенерированного изображения."""
     topic = callback.data.split(":", 1)[1]
     await callback.answer()
     await callback.message.answer("✍️ <b>Пишу пост по теме изображения...</b>", parse_mode="HTML")
 
+    # ── ВОССТАНОВЛЕНИЕ ЦЕПОЧКИ: Используем сохраненные file_id и prompt из FSM ──────
+    state_data = await state.get_data()
+    file_id = state_data.get("visual_file_id")
+    saved_prompt = state_data.get("visual_prompt", topic)
+    image_b64 = state_data.get("visual_image_bytes")
+    
+    # Используем сохраненный prompt или topic из callback
+    actual_topic = saved_prompt if saved_prompt else topic
+
     prompt = (
         f"Напиши экспертный пост для Telegram-канала по перепланировкам (TERION).\n\n"
-        f"Тема изображения: «{topic}»\n\n"
+        f"Тема изображения: «{actual_topic}»\n\n"
         f"Структура:\n"
         f"1) Цепляющий заголовок с эмодзи\n"
         f"2) 2-3 абзаца экспертного контента (400-500 знаков)\n"
@@ -917,11 +939,19 @@ async def art_to_post_handler(callback: CallbackQuery, state: FSMContext):
     text = await router_ai.generate(prompt, max_tokens=800)
     if not text:
         text = (
-            f"<b>🏠 Перепланировка по теме: {topic}</b>\n\n"
+            f"<b>🏠 Перепланировка по теме: {actual_topic}</b>\n\n"
             f"Каждый объект уникален. Правильный подход — согласование с МЖИ, "
             f"расчёт несущих конструкций и трассировка изменений по СНиП.\n\n"
             f"👉 Записаться на консультацию: @Parkhovenko_i_kompaniya_bot"
         )
+
+    # Сохраняем file_id и prompt для использования при публикации
+    await state.update_data(
+        post_text=text,
+        post_image_file_id=file_id,
+        post_image_b64=image_b64,
+        post_topic=actual_topic
+    )
 
     await show_preview(callback.message, text)
     await state.set_state(ContentStates.preview_mode)
@@ -1544,26 +1574,36 @@ def clean_html_for_vk(text: str) -> str:
 
 
 async def send_post(bot: Bot, channel_id: int, post: dict, channel_name: str) -> tuple[bool, str]:
-    """Отправка поста в канал: всегда ссылка на квиз + обязательные хэштеги. URL фото скачиваем и отправляем файлом."""
+    """Отправка поста в канал через централизованный Publisher."""
+    # ── ЦЕНТРАЛИЗАЦИЯ: Используем единый сервис Publisher ───────────────────────────
+    from services.publisher import publisher
+    
+    # Устанавливаем bot в publisher, если еще не установлен
+    if not publisher.bot:
+        publisher.bot = bot
+    
     text = ensure_quiz_and_hashtags(post['body'])
+    
     try:
+        image_bytes = None
         if post.get("image_url"):
-            photo = await _photo_input_for_send(bot, post["image_url"])
-            if photo is not None:
-                msg = await bot.send_photo(channel_id, photo, caption=text, parse_mode="HTML")
+            image_bytes = await download_photo(bot, post["image_url"])
+        
+        # Используем Publisher для публикации
+        success = await publisher.publish_to_telegram(channel_id, text, image_bytes)
+        
+        if success:
+            # Формируем ссылку на пост (Publisher не возвращает message_id, используем приблизительную)
+            if str(channel_id).startswith("-100"):
+                # Для приватных каналов ссылка будет примерной
+                link = f"https://t.me/c/{str(channel_id).replace('-100', '')}/1"
             else:
-                msg = await bot.send_message(channel_id, text, parse_mode="HTML")
+                link = f"https://t.me/{channel_id}/1"
+            return True, link
         else:
-            msg = await bot.send_message(channel_id, text, parse_mode="HTML")
-        
-        # Формируем ссылку на пост
-        if msg.chat.username:
-            link = f"https://t.me/{msg.chat.username}/{msg.message_id}"
-        else:
-            link = f"https://t.me/c/{str(channel_id).replace('-100', '')}/{msg.message_id}"
-        
-        return True, link
+            return False, "Ошибка публикации через Publisher"
     except Exception as e:
+        logger.error(f"Ошибка в send_post: {e}")
         return False, str(e)
 
 
@@ -1696,6 +1736,7 @@ async def publish_max(callback: CallbackQuery, state: FSMContext):
 
 @content_router.callback_query(F.data.startswith("pub_all:"))
 async def publish_all(callback: CallbackQuery, state: FSMContext):
+    """Централизованная публикация через Publisher во все каналы."""
     post_id = int(callback.data.split(":")[1])
     post = await db.get_content_post(post_id)
 
@@ -1707,42 +1748,39 @@ async def publish_all(callback: CallbackQuery, state: FSMContext):
 
     await callback.answer("🚀 Публикую...")
     
+    # ── ЦЕНТРАЛИЗАЦИЯ: Используем единый сервис Publisher ───────────────────────────
+    from services.publisher import publisher
+    
+    # Устанавливаем bot в publisher
+    if not publisher.bot:
+        publisher.bot = callback.bot
+    
     text = ensure_quiz_and_hashtags(post['body'])
     results = []
     
-    # TG TERION
+    # Подготавливаем изображение
+    image_bytes = None
+    if post.get("image_url"):
+        image_bytes = await download_photo(callback.bot, post["image_url"])
+    
+    # TG TERION через Publisher
     try:
-        if post.get("image_url"):
-            photo = await _photo_input_for_send(callback.bot, post["image_url"])
-            if photo is not None:
-                await callback.bot.send_photo(CHANNEL_ID_TERION, photo, caption=text, parse_mode="HTML")
-            else:
-                await callback.bot.send_message(CHANNEL_ID_TERION, text, parse_mode="HTML")
-        else:
-            await callback.bot.send_message(CHANNEL_ID_TERION, text, parse_mode="HTML")
-        results.append("✅ TERION TG")
+        success = await publisher.publish_to_telegram(CHANNEL_ID_TERION, text, image_bytes)
+        results.append("✅ TERION TG" if success else "❌ TERION TG")
     except Exception as e:
         results.append(f"❌ TERION: {e}")
     
-    # TG ДОМ ГРАНД
+    # TG ДОМ ГРАНД через Publisher
     try:
-        if post.get("image_url"):
-            photo = await _photo_input_for_send(callback.bot, post["image_url"])
-            if photo is not None:
-                await callback.bot.send_photo(CHANNEL_ID_DOM_GRAD, photo, caption=text, parse_mode="HTML")
-            else:
-                await callback.bot.send_message(CHANNEL_ID_DOM_GRAD, text, parse_mode="HTML")
-        else:
-            await callback.bot.send_message(CHANNEL_ID_DOM_GRAD, text, parse_mode="HTML")
-        results.append("✅ ДОМ ГРАНД TG")
+        success = await publisher.publish_to_telegram(CHANNEL_ID_DOM_GRAD, text, image_bytes)
+        results.append("✅ ДОМ ГРАНД TG" if success else "❌ ДОМ ГРАНД TG")
     except Exception as e:
         results.append(f"❌ ДОМ ГРАНД: {e}")
     
-    # VK
+    # VK через Publisher
     try:
-        image_bytes = await download_photo(callback.bot, post["image_url"]) if post.get("image_url") else None
-        vk_id = await vk_publisher.post_with_photo(text, image_bytes) if image_bytes else await vk_publisher.post_text_only(text)
-        results.append(f"✅ VK (post{vk_id})" if vk_id else "❌ VK")
+        success = await publisher.publish_to_vk(text, image_bytes)
+        results.append("✅ VK" if success else "❌ VK")
     except Exception as e:
         results.append(f"❌ VK: {e}")
     
@@ -1766,7 +1804,7 @@ async def publish_all(callback: CallbackQuery, state: FSMContext):
 
 @content_router.callback_query(F.data.startswith("pub_tg:"))
 async def publish_tg_only(callback: CallbackQuery, state: FSMContext):
-    """Публикация в Telegram с подписью эксперта"""
+    """Централизованная публикация в Telegram через Publisher с подписью эксперта"""
     post_id = int(callback.data.split(":")[1])
     post = await db.get_content_post(post_id)
 
@@ -1774,20 +1812,29 @@ async def publish_tg_only(callback: CallbackQuery, state: FSMContext):
         await callback.answer("❌ Пост не найден")
         return
 
+    # ── ЦЕНТРАЛИЗАЦИЯ: Используем единый сервис Publisher ───────────────────────────
+    from services.publisher import publisher
+    
+    # Устанавливаем bot в publisher
+    if not publisher.bot:
+        publisher.bot = callback.bot
+
     text = ensure_quiz_and_hashtags(post['body']) + _get_expert_signature()
+    results = []
+    
+    # Подготавливаем изображение
+    image_bytes = None
+    if post.get("image_url"):
+        image_bytes = await download_photo(callback.bot, post["image_url"])
+    
     try:
-        if post.get("image_url"):
-            photo = await _photo_input_for_send(callback.bot, post["image_url"])
-            if photo is not None:
-                await callback.bot.send_photo(CHANNEL_ID_TERION, photo, caption=text, parse_mode="HTML")
-                await callback.bot.send_photo(CHANNEL_ID_DOM_GRAD, photo, caption=text, parse_mode="HTML")
-            else:
-                await callback.bot.send_message(CHANNEL_ID_TERION, text, parse_mode="HTML")
-                await callback.bot.send_message(CHANNEL_ID_DOM_GRAD, text, parse_mode="HTML")
-        else:
-            await callback.bot.send_message(CHANNEL_ID_TERION, text, parse_mode="HTML")
-            await callback.bot.send_message(CHANNEL_ID_DOM_GRAD, text, parse_mode="HTML")
-        results = ["✅ TERION", "✅ ДОМ ГРАНД"]
+        # Публикуем в TERION через Publisher
+        success_terion = await publisher.publish_to_telegram(CHANNEL_ID_TERION, text, image_bytes)
+        results.append("✅ TERION" if success_terion else "❌ TERION")
+        
+        # Публикуем в ДОМ ГРАНД через Publisher
+        success_dom_grad = await publisher.publish_to_telegram(CHANNEL_ID_DOM_GRAD, text, image_bytes)
+        results.append("✅ ДОМ ГРАНД" if success_dom_grad else "❌ ДОМ ГРАНД")
     except Exception as e:
         results = [f"❌ {e}"]
     
