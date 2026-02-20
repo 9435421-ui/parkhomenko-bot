@@ -1068,85 +1068,6 @@ class LeadHunter:
                         # Лид уже сохранен в БД, будет отправлен в сводке по расписанию
                 if cards_sent:
                     logger.info("📋 В рабочую группу отправлено карточек лидов: %s", cards_sent)
-    
-    async def send_regular_leads_summary(self) -> bool:
-        """Отправка сводки обычных лидов (priority < 3) в рабочую группу.
-        
-        Собирает обычные лиды за последние 24 часа и отправляет их сводкой.
-        Вызывается по расписанию: 10:00, 14:00, 19:00 МСК.
-        
-        Returns:
-            True если сводка отправлена успешно, False в противном случае
-        """
-        from config import BOT_TOKEN, LEADS_GROUP_CHAT_ID, THREAD_ID_LOGS
-        
-        if not BOT_TOKEN or not LEADS_GROUP_CHAT_ID:
-            logger.warning("⚠️ BOT_TOKEN или LEADS_GROUP_CHAT_ID не заданы — сводка не отправлена")
-            return False
-        
-        try:
-            main_db = await self._ensure_db_connected()
-            regular_leads = await main_db.get_regular_leads_for_summary(since_hours=24)
-            
-            if not regular_leads:
-                logger.debug("📋 Нет обычных лидов для сводки за последние 24 часа")
-                return False
-            
-            # Формируем сводку
-            lines = [
-                f"📋 <b>Сводка обычных лидов</b> (за последние 24 часа)",
-                f"Всего лидов: {len(regular_leads)}",
-                "",
-                "---",
-                "",
-            ]
-            
-            for i, lead in enumerate(regular_leads[:20], 1):  # Максимум 20 лидов в сводке
-                source_name = lead.get("source_name", "—")
-                text_preview = (lead.get("text") or "")[:200].replace("\n", " ")
-                url = lead.get("url", "")
-                priority = lead.get("priority_score", 0)
-                stage = lead.get("pain_stage", "—")
-                
-                lines.append(f"<b>{i}. {source_name}</b>")
-                lines.append(f"   Приоритет: {priority}/10 | Стадия: {stage}")
-                if text_preview:
-                    lines.append(f"   {text_preview}...")
-                if url:
-                    lines.append(f"   🔗 <a href='{url}'>Пост</a>")
-                lines.append("")
-            
-            if len(regular_leads) > 20:
-                lines.append(f"... и ещё {len(regular_leads) - 20} лидов")
-            
-            summary_text = "\n".join(lines)
-            
-            bot = _bot_for_send()
-            if bot is None:
-                bot = Bot(token=BOT_TOKEN, default=DefaultBotProperties(parse_mode="HTML"))
-            
-            try:
-                await bot.send_message(
-                    LEADS_GROUP_CHAT_ID,
-                    summary_text,
-                    message_thread_id=THREAD_ID_LOGS,
-                    parse_mode="HTML",
-                    disable_web_page_preview=True
-                )
-                logger.info(f"✅ Сводка обычных лидов отправлена: {len(regular_leads)} лидов")
-                return True
-            finally:
-                if _bot_for_send() is None and getattr(bot, "session", None):
-                    try:
-                        await bot.session.close()
-                    except Exception:
-                        pass
-                        
-        except Exception as e:
-            logger.error(f"❌ Ошибка отправки сводки обычных лидов: {e}")
-            return False
-    
-    async def send_hot_leads_immediate(self) -> bool:
         """Немедленная отправка горячих лидов (HOT_TRIGGERS, ST-1/ST-2) в топик "Горячие лиды".
         
         Проверяет БД на наличие неотправленных горячих лидов и отправляет их.
@@ -1299,3 +1220,80 @@ class LeadHunter:
             await self._send_raw_leads_file_to_group(all_posts)
 
         logger.info(f"🏹 LeadHunter: охота завершена. Обработано {len(all_posts)} постов.")
+    
+    async def send_regular_leads_summary(self) -> bool:
+        """Отправка сводки обычных лидов (priority < 3) в рабочую группу.
+        
+        Собирает обычные лиды за последние 24 часа и отправляет их сводкой.
+        Вызывается по расписанию: 10:00, 14:00, 19:00 МСК.
+        
+        Returns:
+            True если сводка отправлена успешно, False в противном случае
+        """
+        from config import BOT_TOKEN, LEADS_GROUP_CHAT_ID, THREAD_ID_LOGS
+        
+        if not BOT_TOKEN or not LEADS_GROUP_CHAT_ID:
+            logger.warning("⚠️ BOT_TOKEN или LEADS_GROUP_CHAT_ID не заданы — сводка не отправлена")
+            return False
+        
+        try:
+            main_db = await self._ensure_db_connected()
+            regular_leads = await main_db.get_regular_leads_for_summary(since_hours=24)
+            
+            if not regular_leads:
+                logger.debug("📋 Нет обычных лидов для сводки за последние 24 часа")
+                return False
+            
+            # Формируем сводку
+            lines = [
+                f"📋 <b>Сводка обычных лидов</b> (за последние 24 часа)",
+                f"Всего лидов: {len(regular_leads)}",
+                "",
+                "---",
+                "",
+            ]
+            
+            for i, lead in enumerate(regular_leads[:20], 1):  # Максимум 20 лидов в сводке
+                source_name = lead.get("source_name", "—")
+                text_preview = (lead.get("text") or "")[:200].replace("\n", " ")
+                url = lead.get("url", "")
+                priority = lead.get("priority_score", 0)
+                stage = lead.get("pain_stage", "—")
+                
+                lines.append(f"<b>{i}. {source_name}</b>")
+                lines.append(f"   Приоритет: {priority}/10 | Стадия: {stage}")
+                if text_preview:
+                    lines.append(f"   {text_preview}...")
+                if url:
+                    lines.append(f"   🔗 <a href='{url}'>Пост</a>")
+                lines.append("")
+            
+            if len(regular_leads) > 20:
+                lines.append(f"... и ещё {len(regular_leads) - 20} лидов")
+            
+            summary_text = "\n".join(lines)
+            
+            bot = _bot_for_send()
+            if bot is None:
+                bot = Bot(token=BOT_TOKEN, default=DefaultBotProperties(parse_mode="HTML"))
+            
+            try:
+                await bot.send_message(
+                    LEADS_GROUP_CHAT_ID,
+                    summary_text,
+                    message_thread_id=THREAD_ID_LOGS,
+                    parse_mode="HTML",
+                    disable_web_page_preview=True
+                )
+                logger.info(f"✅ Сводка обычных лидов отправлена: {len(regular_leads)} лидов")
+                return True
+            finally:
+                if _bot_for_send() is None and getattr(bot, "session", None):
+                    try:
+                        await bot.session.close()
+                    except Exception:
+                        pass
+                        
+        except Exception as e:
+            logger.error(f"❌ Ошибка отправки сводки обычных лидов: {e}")
+            return False
