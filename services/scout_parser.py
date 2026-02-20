@@ -197,6 +197,19 @@ class ScoutParser:
         r"хотим\s+объединить",
     ]
 
+    # === ГОРЯЧИЕ ТРИГГЕРЫ (Лид без дополнительных проверок) ===
+    HOT_TRIGGERS = [
+        r"предписание\s+МЖИ",
+        r"узаконить\s+перепланировку",
+        r"штраф\s+за\s+перепланировку",
+        r"инспектор\s+МЖИ",
+        r"согласовать\s+перепланировку",
+        r"проект\s+перепланировки",
+        r"заказать\s+проект",
+        r"нужен\s+проект",
+        r"кто\s+согласовывал",
+    ]
+
     def __init__(self):
         self.vk_token = VK_TOKEN
         self.vk_api_version = "5.199"
@@ -354,8 +367,10 @@ class ScoutParser:
 
     def detect_lead(self, text: str, platform: str = "telegram") -> bool:
         """
-        Интеллектуальный фильтр (Intent v2.2): лид = вопрос + технический термин + коммерческий маркер.
-        Поддерживает платформо-специфичные ключевые слова и регионы.
+        Интеллектуальный фильтр (Intent v2.3):
+        - Горячие триггеры -> Лид (сразу)
+        - Для ВК: ключевые слова -> Лид (сразу)
+        - Для ТГ: (Вопрос + Тех.термин) ИЛИ (Тех.термин + Коммерч.маркер) -> Лид
         """
         if not self._is_relevant_post(text):
             return False
@@ -364,35 +379,40 @@ class ScoutParser:
 
         text_lower = text.lower()
 
-        # Для ВК проверяем также привязку к региону (если задано)
-        if platform == "vk":
-            regions = self._load_vk_regions()
-            if regions and not any(r.lower() in text_lower for r in regions):
-                # Если в тексте нет ни одного целевого региона — это может быть не наш лид,
-                # но мы всё равно проверяем по ключевым словам ниже.
-                pass
+        # 1. Проверка горячих триггеров (безусловный лид)
+        for ht in self.HOT_TRIGGERS:
+            if re.search(ht, text_lower):
+                return True
 
-        if not self._has_question(text) or not self._has_technical_term(text):
-            # Специальная проверка для ВК: если есть прямое вхождение SCOUT_VK_KEYWORDS,
-            # то можем считать лидом даже без явного вопроса (специфика пабликов ЖК)
-            if platform == "vk":
-                vk_kws = self._load_vk_keywords()
-                if any(kw.lower() in text_lower for kw in vk_kws):
+        # 2. Специфика ВК (паблики ЖК)
+        if platform == "vk":
+            vk_kws = self._load_vk_keywords()
+            if any(kw.lower() in text_lower for kw in vk_kws):
+                return True
+            # Если не нашли по ключевым словам, проверяем общую логику ниже
+
+        # 3. Общая логика (расслабленная)
+        has_question = self._has_question(text)
+        has_tech = self._has_technical_term(text)
+        has_comm = self._has_commercial_marker(text)
+
+        # Комбинации для лида
+        if has_tech and (has_question or has_comm):
+            return True
+
+        # Проверка по триггерам болей (тоже считаем за лид если есть тех. подтекст)
+        if has_tech:
+            for trigger in self.LEAD_TRIGGERS:
+                if re.search(trigger, text_lower):
                     return True
 
-            return False
-
-        if not self._has_commercial_marker(text):
-            return False
-
-        for trigger in self.LEAD_TRIGGERS:
-            if re.search(trigger, text_lower):
-                return True
-
+        # Дополнительная проверка по ключевым словам из конфига
         keywords = self._load_vk_keywords() if platform == "vk" else self._load_keywords()
-        for keyword in keywords:
-            if keyword.lower() in text_lower:
-                return True
+        if has_question or has_comm:
+            for keyword in keywords:
+                if keyword.lower() in text_lower:
+                    return True
+
         return False
 
     def extract_geo_header(self, text: str, source_name: str = "") -> str:
@@ -591,12 +611,19 @@ class ScoutParser:
                 continue
             count = 0
             scanned = 0
-            max_id = channel.get("last_post_id", 0)
+            last_post_id = channel.get("last_post_id", 0)
+            max_id = last_post_id
+
             try:
                 # Используем min_id для загрузки только новых сообщений
                 iter_params = {"limit": tg_limit}
-                if max_id > 0:
-                    iter_params["min_id"] = max_id
+                if last_post_id > 0:
+                    iter_params["min_id"] = last_post_id
+                    logger.debug(f"[SCOUT] Канал {channel['name']}: инкрементальный скан от ID {last_post_id}")
+                else:
+                    # Прогревочный скан если база пуста: берем последние 20 сообщений
+                    iter_params["limit"] = 20
+                    logger.info(f"[SCOUT] Канал {channel['name']}: прогревочный скан (первый запуск)")
 
                 async for message in client.iter_messages(cid, **iter_params):
                     if not message.text:
@@ -785,16 +812,26 @@ class ScoutParser:
                 limit=20
             ))
 
-            for peer in search_result.results:
+            if not search_result or not hasattr(search_result, "chats"):
+                return []
+
+            # Используем напрямую список чатов из результата (они уже подгружены)
+            for entity in search_result.chats:
                 try:
-                    entity = await client.get_entity(peer)
-                    if isinstance(entity, (Channel, Chat)):
+                    if isinstance(entity, (Channel, Chat)) and not getattr(entity, "left", False):
                         cid = entity.id
                         title = getattr(entity, "title", "Без названия")
                         username = getattr(entity, "username", None)
                         participants = getattr(entity, "participants_count", None)
 
-                        link = f"https://t.me/{username}" if username else f"https://t.me/c/{cid}"
+                        # Формируем ссылку
+                        if username:
+                            link = f"https://t.me/{username}"
+                        else:
+                            # Для приватных каналов/групп, к которым у нас нет доступа,
+                            # id может быть бесполезен для внешней ссылки без /c/,
+                            # но для системного ID пойдет
+                            link = f"https://t.me/c/{cid}"
 
                         results.append({
                             "id": cid,
@@ -803,7 +840,8 @@ class ScoutParser:
                             "participants_count": participants,
                             "source_type": "telegram"
                         })
-                except Exception:
+                except Exception as e:
+                    logger.debug(f"Ошибка обработки сущности в поиске: {e}")
                     continue
         except Exception as e:
             logger.error(f"Ошибка глобального поиска TG по '{keyword}': {e}")
@@ -825,7 +863,12 @@ class ScoutParser:
             "sort": 0 # по релевантности
         }
 
-        response = await self._vk_request("groups.search", params)
+        try:
+            response = await self._vk_request("groups.search", params)
+        except Exception as e:
+            logger.error(f"Ошибка API ВК при поиске '{keyword}': {e}")
+            return []
+
         if not response or "items" not in response:
             return []
 
