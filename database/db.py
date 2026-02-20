@@ -3,8 +3,11 @@
 """
 import aiosqlite
 import os
+import logging
 from typing import Optional, Dict, List
 from datetime import datetime
+
+logger = logging.getLogger(__name__)
 
 
 class Database:
