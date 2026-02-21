@@ -1101,33 +1101,55 @@ class LeadHunter:
                 logger.error(f"❌ Ошибка hunter_standalone (AI Жюля): {e}")
 
         # Отчёт в рабочую группу: где был шпион, в какие группы/каналы удалось попасть
+        # Отправляем только если есть реальные данные (просмотрено > 0 сообщений)
         try:
             from config import BOT_TOKEN, LEADS_GROUP_CHAT_ID, THREAD_ID_LOGS
             report = self.parser.get_last_scan_report()
+            
+            # Проверяем, есть ли реальные данные для отчёта
+            tg_ok = [r for r in (self.parser.last_scan_report or []) if r.get("type") == "telegram" and r.get("status") == "ok"]
+            vk_ok = [r for r in (self.parser.last_scan_report or []) if r.get("type") == "vk" and r.get("status") == "ok"]
+            total_scanned = sum(r.get("scanned", 0) for r in tg_ok + vk_ok)
+            
+            # Отправляем отчёт только если есть данные или есть ошибки
             if BOT_TOKEN and LEADS_GROUP_CHAT_ID and report and "Отчёта ещё нет" not in report:
-                bot = _bot_for_send()
-                if bot is None:
-                    bot = Bot(token=BOT_TOKEN, default=DefaultBotProperties(parse_mode="HTML"))
-                try:
-                    await bot.send_message(
-                        LEADS_GROUP_CHAT_ID,
-                        report,
-                        message_thread_id=THREAD_ID_LOGS,
-                    )
-                finally:
-                    if _bot_for_send() is None and getattr(bot, "session", None):
-                        try:
-                            await bot.session.close()
-                        except Exception:
-                            pass
+                # Не отправляем пустые отчёты (0 просмотрено сообщений)
+                if total_scanned > 0 or any(r.get("status") == "error" for r in (tg_ok + vk_ok)):
+                    bot = _bot_for_send()
+                    if bot is None:
+                        bot = Bot(token=BOT_TOKEN, default=DefaultBotProperties(parse_mode="HTML"))
+                    try:
+                        await bot.send_message(
+                            LEADS_GROUP_CHAT_ID,
+                            report,
+                            message_thread_id=THREAD_ID_LOGS,
+                        )
+                        logger.info(f"📊 Отчёт отправлен в топик 'Логи': просмотрено {total_scanned} сообщений")
+                    finally:
+                        if _bot_for_send() is None and getattr(bot, "session", None):
+                            try:
+                                await bot.session.close()
+                            except Exception:
+                                pass
+                else:
+                    logger.debug("⏭️ Пропуск пустого отчёта (0 просмотрено сообщений)")
         except Exception as e:
             logger.warning("Не удалось отправить отчёт шпиона в группу: %s", e)
 
         # Файл со списком всех лидов (источник, превью текста, ссылка) — в тот же топик «Логи»
-        if all_posts:
+        # Отправляем только если есть реальные лиды
+        if all_posts and len(all_posts) > 0:
             await self._send_raw_leads_file_to_group(all_posts)
+        else:
+            logger.debug("⏭️ Пропуск отправки файла лидов (0 лидов найдено)")
 
         logger.info(f"🏹 LeadHunter: охота завершена. Обработано {len(all_posts)} постов.")
+        
+        # Сбрасываем статистику парсера после использования
+        self.parser.total_scanned = 0
+        self.parser.total_with_keywords = 0
+        self.parser.total_leads = 0
+        self.parser.total_hot_leads = 0
     
     async def send_regular_leads_summary(self) -> bool:
         """Отправка сводки обычных лидов (priority < 3) в рабочую группу.
@@ -1298,4 +1320,99 @@ class LeadHunter:
                         
         except Exception as e:
             logger.error(f"❌ Ошибка отправки горячих лидов: {e}")
+            return False
+    
+    async def send_daily_report(self) -> bool:
+        """Отправка итогового отчёта за день в рабочую группу.
+        
+        Вызывается по расписанию: 9:00, 14:00, 19:00 МСК.
+        Показывает статистику за последние 24 часа.
+        
+        Returns:
+            True если отчёт отправлен успешно, False в противном случае
+        """
+        from config import BOT_TOKEN, LEADS_GROUP_CHAT_ID, THREAD_ID_LOGS
+        
+        if not BOT_TOKEN or not LEADS_GROUP_CHAT_ID:
+            logger.warning("⚠️ BOT_TOKEN или LEADS_GROUP_CHAT_ID не заданы — отчёт не отправлен")
+            return False
+        
+        try:
+            main_db = await self._ensure_db_connected()
+            
+            # Получаем статистику за последние 24 часа
+            total_leads_24h = await main_db.get_spy_leads_count_24h()
+            recent_leads = await main_db.get_spy_leads_since_hours(since_hours=24)
+            
+            # Разделяем на горячие и обычные
+            hot_leads = [l for l in recent_leads if (l.get("priority_score") or 0) >= 3]
+            regular_leads = [l for l in recent_leads if (l.get("priority_score") or 0) < 3]
+            
+            # Получаем отчёт парсера о последнем скане
+            parser_report = self.parser.get_last_scan_report()
+            
+            # Формируем итоговый отчёт
+            lines = [
+                "📊 <b>ИТОГОВЫЙ ОТЧЁТ ШПИОНА</b>",
+                f"⏱ За последние 24 часа",
+                "",
+                f"🎯 <b>Всего найдено лидов:</b> {total_leads_24h}",
+                f"🔥 <b>Горячих (priority ≥ 3):</b> {len(hot_leads)}",
+                f"📋 <b>Обычных:</b> {len(regular_leads)}",
+                "",
+                "─" * 30,
+                "",
+            ]
+            
+            # Добавляем отчёт парсера о последнем скане
+            if parser_report and "Отчёта ещё нет" not in parser_report:
+                lines.append("<b>Последний скан:</b>")
+                lines.append(parser_report.replace("<b>", "").replace("</b>", ""))
+                lines.append("")
+            
+            # Показываем последние горячие лиды (до 5 штук)
+            if hot_leads:
+                lines.append("<b>🔥 Последние горячие лиды:</b>")
+                for i, lead in enumerate(hot_leads[:5], 1):
+                    source_name = lead.get("source_name", "—")
+                    text_preview = (lead.get("text") or "")[:100].replace("\n", " ")
+                    url = lead.get("url", "")
+                    priority = lead.get("priority_score", 0)
+                    stage = lead.get("pain_stage", "—")
+                    
+                    lines.append(f"{i}. <b>{source_name}</b> (приоритет: {priority}, стадия: {stage})")
+                    if text_preview:
+                        lines.append(f"   {text_preview}...")
+                    if url:
+                        lines.append(f"   🔗 <a href='{url}'>Пост</a>")
+                    lines.append("")
+            
+            if len(hot_leads) > 5:
+                lines.append(f"... и ещё {len(hot_leads) - 5} горячих лидов")
+            
+            report_text = "\n".join(lines)
+            
+            bot = _bot_for_send()
+            if bot is None:
+                bot = Bot(token=BOT_TOKEN, default=DefaultBotProperties(parse_mode="HTML"))
+            
+            try:
+                await bot.send_message(
+                    LEADS_GROUP_CHAT_ID,
+                    report_text,
+                    message_thread_id=THREAD_ID_LOGS,
+                    parse_mode="HTML",
+                    disable_web_page_preview=True
+                )
+                logger.info(f"✅ Итоговый отчёт отправлен: {total_leads_24h} лидов за 24 часа")
+                return True
+            finally:
+                if _bot_for_send() is None and getattr(bot, "session", None):
+                    try:
+                        await bot.session.close()
+                    except Exception:
+                        pass
+                        
+        except Exception as e:
+            logger.error(f"❌ Ошибка отправки итогового отчёта: {e}")
             return False

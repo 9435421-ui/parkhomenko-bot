@@ -124,14 +124,16 @@ SPY_KEYWORDS = [
 
 # === SCOUT PARSER ===
 SCOUT_ENABLED = os.getenv("SCOUT_ENABLED", "true") == "true"
+SCOUT_DEBUG = os.getenv("SCOUT_DEBUG", "false").lower() == "true"
+SCOUT_DEBUG_LIMIT = int(os.getenv("SCOUT_DEBUG_LIMIT", "10"))
 
 # Telegram
-SCOUT_TG_CHANNELS = os.getenv("SCOUT_TG_CHANNELS", "").split(",")
-SCOUT_TG_KEYWORDS = ["перепланировка", "согласование", "узаконить"]
+SCOUT_TG_CHANNELS = [c.strip() for c in os.getenv("SCOUT_TG_CHANNELS", "").split(",") if c.strip()]
+SCOUT_TG_KEYWORDS = [k.strip() for k in os.getenv("SCOUT_TG_KEYWORDS", "перепланировка,согласование,узаконить").split(",") if k.strip()]
 
 # VK
-SCOUT_VK_GROUPS = os.getenv("SCOUT_VK_GROUPS", "").split(",")  # ID групп
-SCOUT_VK_KEYWORDS = ["перепланировка", "согласование", "перепланировка квартиры", "узаконить перепланировку"]
+SCOUT_VK_GROUPS = [g.strip() for g in os.getenv("SCOUT_VK_GROUPS", "").split(",") if g.strip()]  # ID групп
+SCOUT_VK_KEYWORDS = [k.strip() for k in os.getenv("SCOUT_VK_KEYWORDS", "перепланировка,согласование,перепланировка квартиры,узаконить перепланировку").split(",") if k.strip()]
 SCOUT_VK_REGIONS = ["Химки", "Красногорск", "Север Москвы", "Северо-Запад Москвы", "Новые Химки"]
 
 # Лимиты (чтобы не забанили)

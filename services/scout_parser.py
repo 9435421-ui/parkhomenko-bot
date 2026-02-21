@@ -97,6 +97,24 @@ class ScoutParser:
         "перенесли радиатор",
         "залили пол",
         "хотим объединить",
+        # Расширенные паттерны для реальных лидов
+        "нужен проект перепланировки",
+        "узаконить перепланировку в новостройке",
+        "объединить кухню и комнату",
+        "перенос мокрой зоны",
+        "разрешение на перепланировку",
+        "узаконить перепланировку без проекта",
+        "сделали проем в несущей стене",
+        "несущая стена",
+        "БТИ",
+        "проектировщик",
+        "согласование перепланировки",
+        "жилищная инспекция",
+        "смежная стена",
+        "монолит",
+        "панельный дом",
+        "проектная организация",
+        "акты скрытых работ",
     ]
 
     # === ТЕХНИЧЕСКИЕ ТЕРМИНЫ (Intent: лид только если есть вопрос + один из них) ===
@@ -117,6 +135,20 @@ class ScoutParser:
         r"нежилое\s+помещен",
         r"проект\s+перепланировки",
         r"план\s+(квартир|помещен)",
+        # Расширенные технические термины
+        r"несущ\w*\s+стен",
+        r"бти",
+        r"проектировщик",
+        r"жилищн\w*\s+инспекц",
+        r"смежн\w*\s+стен",
+        r"монолит",
+        r"панельн\w*\s+дом",
+        r"проектн\w*\s+организац",
+        r"акт\w*\s+скрыт\w*\s+работ",
+        r"объедин\w*\s+(кухн|комнат|ванн)",
+        r"перенос\w*\s+мокр\w*\s+зон",
+        r"проем\w*\s+в\w*\s+несущ",
+        r"разрешен\w*\s+на\w*\s+перепланиров",
     ]
 
     # === МАРКЕРЫ ДЕЙСТВИЯ (Intent v3.0: живой лид = вопрос + термин + маркер) ===
@@ -138,6 +170,18 @@ class ScoutParser:
         r"оформить\s+перепланировку",
         r"согласовал\w*",
         r"узаконил\w*",
+        # Расширенные коммерческие маркеры
+        r"к\s+кому\s+обратиться",
+        r"сколько\s+стоит",
+        r"сделаете\?",
+        r"делали\s+ли\s+кто\s*[-–]?\s*то",
+        r"подскажите\s+компани",
+        r"есть\s+контакт",
+        r"ищу\s+исполнител",
+        r"готов\s+заплатит",
+        r"срочно",
+        r"нужна\s+помощь",
+        r"помогите",
     ]
 
     # === МУСОР: отсекаем рекламу и объявления без прямого вопроса к эксперту ===
@@ -166,6 +210,16 @@ class ScoutParser:
         r"где\s+(согласовывал|оформлял)",
         r"можно\s+ли\s+(сносит|объединят|переносит)",
         r"\?\s*$",  # заканчивается вопросом
+        # Расширенные паттерны вопросов
+        r"как\s+оформить",
+        r"что\s+нужно",
+        r"что\s+требуется",
+        r"что\s+делать",
+        r"подскажите\s+пожалуйста",
+        r"помогите",
+        r"нужна\s+консультац",
+        r"кто\s+знает",
+        r"кто\s+сталкивался",
     ]
 
     # === ТРИГГЕРНЫЕ ФРАЗЫ (расширенные: боли жильцов) ===
@@ -228,6 +282,10 @@ class ScoutParser:
         from config import SCOUT_ENABLED, SCOUT_TG_CHANNELS, SCOUT_VK_GROUPS, SCOUT_TG_KEYWORDS, SCOUT_VK_KEYWORDS
         self.enabled = SCOUT_ENABLED
         self.check_interval = int(os.getenv("SCOUT_PARSER_INTERVAL", "1800"))  # 30 минут
+        
+        # Отладочный режим
+        self.debug_mode = os.getenv("SCOUT_DEBUG", "false").lower() == "true"
+        self.debug_limit = int(os.getenv("SCOUT_DEBUG_LIMIT", "10"))  # Сколько сообщений логировать в debug режиме
 
         # Каналы и группы: сначала детальный .env (SCOUT_TG_CHANNEL_1_ID и т.д.), иначе список из .env, иначе дефолт (Москва/МО)
         self.tg_channels = self._load_tg_channels()
@@ -243,15 +301,21 @@ class ScoutParser:
             self.vk_groups = self.VK_GROUPS
 
         # Отчёт последнего скана: где был шпион, куда удалось попасть
-        self.last_scan_report = []  # list of {"type", "name", "id", "status": "ok"|"error", "posts": N, "error": str|None}
+        self.last_scan_report = []  # list of {"type", "name", "id", "status": "ok"|"error", "posts": N, "scanned": N, "error": str|None}
         self.last_scan_at: Optional[datetime] = None
         self.last_scan_chats_list: List[Dict] = []  # результат scan_all_chats() для импорта в target_resources
+        
+        # Статистика для отчётов
+        self.total_scanned = 0  # Всего просмотрено сообщений
+        self.total_with_keywords = 0  # С ключевыми словами
+        self.total_leads = 0  # Найдено лидов
+        self.total_hot_leads = 0  # Горячих лидов
 
         # Anti-Flood: не более одного get_entity в 60 секунд (защита сессии от бана)
         self._get_entity_interval = 60.0
         self._last_get_entity_at = 0.0
 
-        logger.info(f"🔍 ScoutParser инициализирован. Включен: {'✅' if self.enabled else '❌'}. TG каналов: {len(self.tg_channels)}, VK групп: {len(self.vk_groups)}")
+        logger.info(f"🔍 ScoutParser инициализирован. Включен: {'✅' if self.enabled else '❌'}. TG каналов: {len(self.tg_channels)}, VK групп: {len(self.vk_groups)}. Debug: {'✅' if self.debug_mode else '❌'}")
 
     def _load_tg_channels(self) -> List[Dict]:
         """Загрузка TG каналов из .env"""
@@ -704,12 +768,19 @@ class ScoutParser:
                 # Парсим и основной канал, и Discussion Group
                 # Фильтруем: только сообщения от User, не от самого канала (Channel)
                 messages_list = []
+                debug_count = 0
                 async for message in client.iter_messages(cid, **iter_params):
                     if not message.text:
                         continue
                     messages_list.append(message)
+                    
+                    # Отладочный режим: логируем первые N сообщений
+                    if self.debug_mode and debug_count < self.debug_limit:
+                        debug_count += 1
+                        logger.debug(f"[DEBUG] Сообщение #{debug_count} из {channel.get('name')}: {message.text[:100]}...")
                 
-                logger.info(f'Проверено сообщений: {len(messages_list)}')
+                logger.info(f'📊 Канал {channel.get("name")}: проверено сообщений: {len(messages_list)}')
+                self.total_scanned += len(messages_list)
                 
                 for message in messages_list:
                     # ── ФИЛЬТР: Пропускаем посты от самого канала (Admin/Channel ID) ─────────────
@@ -750,6 +821,13 @@ class ScoutParser:
                                 logger.info("[SCOUT] Найдена новая ссылка %s, поставлена в очередь на проверку через 60 сек.", url_norm)
                     
                     # ── ПРОВЕРКА КЛЮЧЕВЫХ СЛОВ: если сообщение от пользователя содержит ключевые слова — это лид ──
+                    # Проверяем наличие ключевых слов (для статистики)
+                    has_keywords = any(kw.lower() in message.text.lower() for kw in self._load_keywords())
+                    if has_keywords:
+                        self.total_with_keywords += 1
+                        if self.debug_mode:
+                            logger.debug(f"[DEBUG] Сообщение с ключевыми словами: {message.text[:100]}...")
+                    
                     if self.detect_lead(message.text):
                         # Дополнительная проверка: убеждаемся, что это не пост от канала
                         if sender_id and peer_id and hasattr(peer_id, "channel_id"):
@@ -778,7 +856,11 @@ class ScoutParser:
                         )
                         posts.append(post)
                         count += 1
-                        logger.debug(f"✅ Найден лид в основном канале {channel['name']}: {message.text[:50]}...")
+                        self.total_leads += 1
+                        logger.info(f"✅ Найден лид в канале {channel['name']}: {message.text[:80]}...")
+                    elif self.debug_mode and has_keywords:
+                        # В debug режиме логируем, почему сообщение с ключевыми словами не стало лидом
+                        logger.debug(f"[DEBUG] Сообщение с ключевыми словами не прошло фильтр detect_lead(): {message.text[:100]}...")
                 self.last_scan_report.append({
                     "type": "telegram",
                     "name": channel["name"],
@@ -1120,10 +1202,19 @@ class ScoutParser:
 
                 items = wall_posts["items"]
                 scanned_wall = len(items)
+                self.total_scanned += scanned_wall
+                logger.info(f"📊 VK группа {group['name']}: проверено постов на стене: {scanned_wall}")
 
                 # Посты на стене
                 for item in items:
                     text = item.get("text", "")
+                    # Проверяем наличие ключевых слов (для статистики)
+                    has_keywords = any(kw.lower() in text.lower() for kw in keywords) if text else False
+                    if has_keywords:
+                        self.total_with_keywords += 1
+                        if self.debug_mode:
+                            logger.debug(f"[DEBUG] VK пост с ключевыми словами: {text[:100]}...")
+                    
                     if self.detect_lead(text):
                         post = ScoutPost(
                             source_type="vk",
@@ -1139,6 +1230,8 @@ class ScoutParser:
                         )
                         posts.append(post)
                         count += 1
+                        self.total_leads += 1
+                        logger.info(f"✅ Найден лид в VK группе {group['name']}: {text[:80]}...")
                         await self.send_vk_comment(
                             item["id"], group["id"],
                             self.generate_outreach_message("vk", group["geo"])
@@ -1162,8 +1255,15 @@ class ScoutParser:
                         continue
                     for comm in comments_data.get("items", []):
                         scanned_comments += 1
+                        self.total_scanned += 1
                         ctext = comm.get("text", "")
-                        if not ctext or not self.detect_lead(ctext):
+                        if not ctext:
+                            continue
+                        # Проверяем наличие ключевых слов
+                        has_keywords = any(kw.lower() in ctext.lower() for kw in keywords)
+                        if has_keywords:
+                            self.total_with_keywords += 1
+                        if not self.detect_lead(ctext):
                             continue
                         post = ScoutPost(
                             source_type="vk",
@@ -1179,21 +1279,25 @@ class ScoutParser:
                         )
                         posts.append(post)
                         count += 1
+                        self.total_leads += 1
+                        logger.info(f"✅ Найден лид в комментариях VK группы {group['name']}: {ctext[:80]}...")
                         if comm.get("from_id"):
                             await self.send_vk_message(
                                 comm["from_id"],
                                 self.generate_outreach_message("vk", group["geo"])
                             )
 
+                total_scanned_group = scanned_wall + scanned_comments
                 self.last_scan_report.append({
                     "type": "vk",
                     "name": group["name"],
                     "id": group["id"],
                     "status": "ok",
                     "posts": count,
-                    "scanned": scanned_wall + scanned_comments,
+                    "scanned": total_scanned_group,
                     "error": None,
                 })
+                logger.info(f"📊 VK группа {group['name']}: всего просмотрено {total_scanned_group} (посты: {scanned_wall}, комментарии: {scanned_comments}), найдено лидов: {count}")
                 if count > 0 and db:
                     try:
                         await db.set_setting("scout_vk_lead_" + str(group["id"]), datetime.now().isoformat())
@@ -1279,6 +1383,11 @@ class ScoutParser:
         """Полное сканирование всех источников. Заполняет last_scan_report."""
         self.last_scan_report = []
         self.last_scan_at = datetime.now()
+        # Сбрасываем статистику перед новым сканом
+        self.total_scanned = 0
+        self.total_with_keywords = 0
+        self.total_leads = 0
+        self.total_hot_leads = 0
         all_posts = []
 
         try:
@@ -1298,8 +1407,8 @@ class ScoutParser:
     def get_last_scan_report(self) -> str:
         """Форматированный отчёт: где был шпион, сколько просмотрено, сколько лидов."""
         if not self.last_scan_report:
-            return "📭 Отчёта ещё нет. Дождитесь следующего запуска охоты за лидами (раз в 2 часа)."
-        lines = ["🕵️ <b>Где был шпион</b> (последний скан)"]
+            return "📭 Отчёта ещё нет. Дождитесь следующего запуска охоты за лидами."
+        lines = ["🕵️ <b>Отчёт шпиона</b> (последний скан)"]
         if self.last_scan_at:
             lines.append(f"⏱ {self.last_scan_at.strftime('%d.%m.%Y %H:%M')}\n")
         tg_ok = [r for r in self.last_scan_report if r["type"] == "telegram" and r["status"] == "ok"]
@@ -1308,12 +1417,22 @@ class ScoutParser:
         vk_err = [r for r in self.last_scan_report if r["type"] == "vk" and r["status"] == "error"]
         total_scanned = sum(r.get("scanned", 0) for r in tg_ok + vk_ok)
         total_leads = sum(r.get("posts", 0) for r in tg_ok + vk_ok)
-        lines.append(f"📊 Просмотрено сообщений/постов: <b>{total_scanned}</b>, с ключевыми словами: <b>{total_leads}</b>\n")
+        
+        # Используем статистику из self, если она есть
+        if self.total_scanned > 0:
+            total_scanned = self.total_scanned
+        if self.total_with_keywords > 0:
+            lines.append(f"📊 <b>Всего просмотрено:</b> {total_scanned} сообщений")
+            lines.append(f"🔍 <b>С ключевыми словами:</b> {self.total_with_keywords}")
+            lines.append(f"🎯 <b>Найдено лидов:</b> {total_leads}\n")
+        else:
+            lines.append(f"📊 Просмотрено сообщений/постов: <b>{total_scanned}</b>, найдено лидов: <b>{total_leads}</b>\n")
+        
         if tg_ok or tg_err:
             lines.append("<b>📱 Telegram каналы:</b>")
             for r in tg_ok:
                 s = f"  ✅ {r['name']} — {r['posts']} лидов"
-                if r.get("scanned") is not None:
+                if r.get("scanned") is not None and r.get("scanned") > 0:
                     s += f" (просмотрено {r['scanned']})"
                 lines.append(s)
             for r in tg_err:
@@ -1322,13 +1441,18 @@ class ScoutParser:
             lines.append("<b>📘 VK группы:</b>")
             for r in vk_ok:
                 s = f"  ✅ {r['name']} — {r['posts']} лидов"
-                if r.get("scanned") is not None:
+                if r.get("scanned") is not None and r.get("scanned") > 0:
                     s += f" (просмотрено {r['scanned']})"
                 lines.append(s)
             for r in vk_err:
                 lines.append(f"  ❌ {r['name']} — {r.get('error', 'ошибка')}")
-        if total_scanned > 0 and total_leads == 0:
-            lines.append("\n💡 Если лидов 0 при большом объёме — см. docs/SCOUT_WHY_NO_LEADS.md")
+        if total_scanned == 0:
+            lines.append("\n⚠️ <b>ВНИМАНИЕ:</b> Просмотрено 0 сообщений. Проверьте:")
+            lines.append("  • Есть ли активные источники в БД (target_resources, status='active')")
+            lines.append("  • Правильно ли настроены SCOUT_TG_CHANNELS / SCOUT_VK_GROUPS в .env")
+            lines.append("  • Авторизован ли Telethon (файл anton_parser.session)")
+        elif total_scanned > 0 and total_leads == 0:
+            lines.append("\n💡 Если лидов 0 при большом объёме — проверьте ключевые слова и фильтры")
         return "\n".join(lines)
 
 

@@ -18,14 +18,18 @@ class Database:
         self.conn: Optional[aiosqlite.Connection] = None
     
     async def connect(self):
-        """Подключение к базе данных"""
+        """Подключение к базе данных с режимом WAL для избежания ошибки 'database is locked'"""
         os.makedirs(os.path.dirname(self.db_path), exist_ok=True)
-        # ── ИСПРАВЛЕНИЕ: Добавлен timeout=30 для избежания "database is locked" ─────
-        # Это заставит ждать освобождения базы до 30 секунд вместо немедленной ошибки
+        # ── WAL режим для избежания "database is locked" при параллельных запросах ─────
+        # timeout=30 заставит ждать освобождения базы до 30 секунд вместо немедленной ошибки
         self.conn = await aiosqlite.connect(self.db_path, timeout=30.0)
         self.conn.row_factory = aiosqlite.Row
+        # Включаем WAL режим для поддержки параллельных чтений
+        async with self.conn.cursor() as cursor:
+            await cursor.execute("PRAGMA journal_mode=WAL")
+            await self.conn.commit()
         await self._create_tables()
-        print(f"✅ База данных подключена: {self.db_path}")
+        logger.info(f"✅ База данных подключена (WAL режим): {self.db_path}")
     
     async def close(self):
         if self.conn:
