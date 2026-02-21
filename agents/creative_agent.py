@@ -12,14 +12,16 @@ from utils import router_ai, yandex_gpt
 
 logger = logging.getLogger(__name__)
 
-# --- ИСПРАВЛЕНИЕ: Адаптивный стиль вместо жесткого "High-end" ---
+# --- ИСПРАВЛЕНИЕ: Адаптивный стиль без упоминаний "High-end" и особняков ---
 STYLE_PRESET = (
-    "Detailed digital illustration or professional photography that EXACTLY MATCHES the post topic. "
-    "No abstract or luxury bias unless the topic requires it. "
-    "If the topic is about budget/mass housing (ЖК, хрущевка, ПИК, Самолет), "
-    "show realistic modern renovation, technical drawings, or typical apartment layouts. "
-    "If the topic is about luxury/houses, show premium interiors. "
-    "Focal point on spatial solutions and floor plans. No people, no text on image."
+    "Realistic interior or technical floor plan matching the text. "
+    "The image must EXACTLY match the post topic and content. "
+    "For mass housing topics (ЖК, хрущевка, ПИК, Самолет): show typical apartment layouts, "
+    "realistic renovation examples, or technical floor plans. "
+    "For technical topics: show diagrams, floor plans, or construction details. "
+    "For general topics: show relevant interior spaces or architectural solutions. "
+    "No abstract elements, no luxury bias, no mansions unless specifically required by the topic. "
+    "Focal point on spatial solutions and practical examples. No people, no text on image."
 )
 
 class CreativeAgent:

@@ -27,32 +27,34 @@ class AutoPoster:
         self.check_interval = 600  # 10 минут
 
     async def check_and_publish(self):
-        """Проверка и публикация готового контента"""
+        """Проверка и публикация готового контента (только один самый старый пост за цикл)"""
         try:
             posts = await db.get_posts_to_publish()
             if not posts:
                 logger.info("📭 Нет постов для публикации")
                 return
 
-            logger.info(f"📋 Найдено {len(posts)} постов для публикации")
+            # Берем только самый старый пост (первый в списке, если они отсортированы по дате)
+            post = posts[0]
+            logger.info(f"📋 Найдено {len(posts)} постов. Обрабатываем самый старый: #{post.get('id')}")
 
-            for post in posts:
-                try:
-                    # Определяем канал публикации
-                    channel_key = self._determine_channel(post)
-                    channel_config = self._get_channel_config(channel_key)
+            try:
+                # Определяем канал публикации
+                channel_key = self._determine_channel(post)
+                channel_config = self._get_channel_config(channel_key)
 
-                    # Публикуем
-                    success = await self._publish_to_channel(post, channel_config)
-                    if success:
-                        # Логируем в группу
-                        await self._send_publication_log(post, channel_config)
-                        await db.mark_as_published(post['id'])
-                        logger.info(f"✅ Пост #{post['id']} опубликован в {channel_config['name']}")
+                # Публикуем
+                success = await self._publish_to_channel(post, channel_config)
+                if success:
+                    # Логируем в группу
+                    await self._send_publication_log(post, channel_config)
+                    await db.mark_as_published(post['id'])
+                    logger.info(f"✅ Пост #{post['id']} опубликован в {channel_config['name']}")
+                else:
+                    logger.warning(f"⚠️ Пост #{post.get('id')} не опубликован (проверьте логи выше)")
 
-                except Exception as e:
-                    logger.error(f"❌ Ошибка публикации поста #{post.get('id')}: {e}")
-                    continue
+            except Exception as e:
+                logger.error(f"❌ Ошибка публикации поста #{post.get('id')}: {e}")
 
         except Exception as e:
             logger.error(f"❌ Ошибка в check_and_publish: {e}")
@@ -112,8 +114,13 @@ class AutoPoster:
             image_url = post.get("image_url")
             image_bytes: bytes | None = None
 
-            # Скачиваем изображение по URL, если оно есть
-            if image_url and image_url.startswith("http"):
+            # Проверка: если image_url пустой, пост не публикуется
+            if not image_url or not image_url.strip():
+                logger.warning(f"⏸️ Пост #{post.get('id')} пропущен: image_url пустой. Ожидаем генерацию изображения.")
+                return False
+
+            # Скачиваем изображение по URL
+            if image_url.startswith("http"):
                 try:
                     async with aiohttp.ClientSession() as session:
                         async with session.get(
@@ -121,11 +128,22 @@ class AutoPoster:
                         ) as resp:
                             if resp.status == 200:
                                 image_bytes = await resp.read()
-                                logger.info(
-                                    f"✅ Изображение скачано ({len(image_bytes)} байт)"
-                                )
+                                if image_bytes and len(image_bytes) > 0:
+                                    logger.info(
+                                        f"✅ Изображение скачано ({len(image_bytes)} байт)"
+                                    )
+                                else:
+                                    logger.warning(f"⚠️ Пост #{post.get('id')} пропущен: изображение пустое")
+                                    return False
+                            else:
+                                logger.warning(f"⚠️ Пост #{post.get('id')} пропущен: HTTP {resp.status} при скачивании изображения")
+                                return False
                 except Exception as e:
-                    logger.warning(f"⚠️ Не удалось скачать изображение {image_url}: {e}")
+                    logger.warning(f"⚠️ Пост #{post.get('id')} пропущен: ошибка скачивания изображения {image_url}: {e}")
+                    return False
+            else:
+                logger.warning(f"⚠️ Пост #{post.get('id')} пропущен: image_url не является валидным HTTP URL")
+                return False
 
             # ── ИСПРАВЛЕНИЕ: Публикуем в целевой канал, а не во все ──────────────────
             channel_id = channel_config['chat_id']
