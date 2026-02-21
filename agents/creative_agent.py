@@ -66,8 +66,16 @@ class CreativeAgent:
         except Exception as e:
             logger.warning(f"KnowledgeBase error: {e}")
 
-        # Определяем, является ли тема новостью
-        is_news = 'новости' in query.lower() or 'новость' in query.lower() or query.lower().startswith('news')
+        # Определяем, является ли тема новостью (расширенная детекция)
+        query_lower = query.lower()
+        is_news = (
+            'новости' in query_lower or 
+            'новость' in query_lower or 
+            'ипотека' in query_lower or 
+            'закон' in query_lower or 
+            'мжи' in query_lower or
+            query_lower.startswith('news')
+        )
         
         # --- ИСПРАВЛЕНИЕ: Жесткое требование к КВИЗУ и ХЭШТЕГАМ в системном промпте ---
         system_prompt = f"""Ты — эксперт TERION по согласованию перепланировок.
@@ -84,17 +92,20 @@ class CreativeAgent:
 #перепланировка #МЖИ #БТИ #TERION #согласование #Москва #МО
 
 КРИТИЧЕСКИ ВАЖНО:
-- ЗАПРЕЩЕНО обрывать текст. Пост должен быть логически завершен. Если лимит символов исчерпан, сокращай вводную часть, но не финал.
-{f"- Если тема помечена как 'новости', ЗАПРЕЩЕНО выдумывать цифры и условия (например, про ПВ или ставки). Если точных данных в Базе Знаний нет, пиши только подтвержденную информацию о событии без домыслов." if is_news else ""}"""
+- Оптимальный объем текста — от 600 до 1000 знаков. Пост должен быть логически завершен.
+- ЗАПРЕЩЕНО обрывать текст на полуслове. Если лимит символов исчерпан, сокращай вводную часть, но не финал.
+- Используй короткие абзацы для лучшей читаемости.
+{f"- РЕЖИМ НОВОСТИ: Для новостей ЗАПРЕЩЕНО выдумывать цифры и условия. Если точных данных в Базе Знаний нет, пиши только подтвержденную информацию о событии без домыслов." if is_news else ""}"""
 
         user_prompt = f"""Тема: {query}\nКонтекст: {kb_context}\nСоздай экспертный пост."""
 
         # Логика генерации (Yandex -> Router) остается прежней, но теперь с новым промптом
+        # max_tokens=800 для исключения технических обрывов
         try:
             response = await yandex_gpt.generate_response(
                 user_prompt=user_prompt,
                 system_prompt=system_prompt,
-                max_tokens=1000
+                max_tokens=800
             )
             if response:
                 return self._parse_response(response, query)
@@ -107,7 +118,7 @@ class CreativeAgent:
                 response = await router_ai.generate_response(
                     user_prompt=user_prompt,
                     system_prompt=system_prompt,
-                    max_tokens=1000
+                    max_tokens=800
                 )
                 if response:
                     return self._parse_response(response, query)
