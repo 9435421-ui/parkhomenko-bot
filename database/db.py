@@ -474,10 +474,19 @@ class Database:
         """Лиды за последние N часов (ревизия: кто попался, какие боли)."""
         async with self.conn.cursor() as cursor:
             await cursor.execute(
-                """SELECT id, source_type, source_name, author_id, username, profile_url, text, url, created_at
-                   FROM spy_leads WHERE created_at >= datetime('now', ?)
+                """SELECT * FROM spy_leads WHERE created_at >= datetime('now', ?)
                    ORDER BY created_at DESC""",
                 (f"-{since_hours} hours",),
+            )
+            rows = await cursor.fetchall()
+            return [dict(row) for row in rows]
+
+    async def get_latest_spy_leads(self, limit: int = 5) -> List[Dict]:
+        """Получить последние найденные лиды."""
+        async with self.conn.cursor() as cursor:
+            await cursor.execute(
+                "SELECT * FROM spy_leads ORDER BY created_at DESC LIMIT ?",
+                (limit,),
             )
             rows = await cursor.fetchall()
             return [dict(row) for row in rows]

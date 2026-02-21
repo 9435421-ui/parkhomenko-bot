@@ -11,7 +11,7 @@ def backup_database():
     """Создание бэкапа базы данных"""
     
     # Путь к базе данных
-    db_path = Path("database/bot.db")
+    db_path = Path("parkhomenko_bot.db")
     
     if not db_path.exists():
         print("❌ База данных не найдена. Возможно, бот ещё не запускался.")
@@ -74,7 +74,7 @@ def cleanup_old_backups(backup_dir: Path, days: int = 30):
 def restore_database(backup_file: str):
     """Восстановление базы данных из бэкапа"""
     backup_path = Path(backup_file)
-    db_path = Path("database/bot.db")
+    db_path = Path("parkhomenko_bot.db")
     
     if not backup_path.exists():
         print(f"❌ Файл бэкапа не найден: {backup_path}")

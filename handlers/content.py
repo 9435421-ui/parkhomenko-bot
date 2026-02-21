@@ -33,8 +33,7 @@ import io
 
 from database import db
 from services.publisher import publisher
-from content_agent import ContentAgent
-from hunter_standalone import HunterDatabase
+from utils import router_ai
 from config import (
     CONTENT_BOT_TOKEN,
     CHANNEL_ID_TERION,
@@ -1017,10 +1016,6 @@ async def ai_plan_handler(message: Message, state: FSMContext):
 
 # === 📰 НОВОСТЬ ===
 
-def _potential_leads_db_path() -> str:
-    return os.path.join(os.path.dirname(__file__), "..", "database", "potential_leads.db")
-
-
 async def _generate_news_by_topic(message_or_callback, state: FSMContext, topic: str, is_callback: bool = False):
     """Общая генерация новости по теме (вызов после выбора темы или ввода текста)."""
     if is_callback:
@@ -1053,17 +1048,11 @@ async def _generate_news_by_topic(message_or_callback, state: FSMContext, topic:
 
 
 async def news_start(message: Message, state: FSMContext):
-    db_path = os.path.abspath(_potential_leads_db_path())
     leads: list = []
     try:
-        if os.path.isfile(db_path):
-            hunter_db = HunterDatabase(db_path)
-            await hunter_db.connect()
-            leads = await hunter_db.get_latest_hot_leads(3)
-            if hunter_db.conn:
-                await hunter_db.conn.close()
+        leads = await db.get_latest_spy_leads(3)
     except Exception as e:
-        logger.warning("potential_leads.db для новостей: %s", e)
+        logger.warning("Ошибка получения лидов для новостей: %s", e)
     if leads:
         builder = InlineKeyboardBuilder()
         topics = []
@@ -1165,11 +1154,16 @@ async def holiday_rf_selected(callback: CallbackQuery, state: FSMContext):
     await callback.answer(f"Пишу поздравление: {label}...")
     await callback.message.edit_text(f"⏳ <b>Пишу поздравление с {label}...</b>", parse_mode="HTML")
     try:
-        agent = ContentAgent()
-        post = await agent.generate_greeting_post(person_name=None, occasion=occasion)
-        body = (post.get("title") or "") + "\n\n" + (post.get("body") or "")
-        if not body.strip():
-            body = f"🎉 С праздником — {label}! От имени TERION желаем мира, добра и уюта в вашем доме."
+        prompt = (
+            f"Напиши поздравительный пост для соцсетей компании TERION (согласование перепланировок). "
+            f"Повод: {occasion}. Стиль: теплый, профессиональный, экспертный. "
+            f"Упомяни, что мы заботимся о комфорте и безопасности домов наших клиентов. "
+            f"Формат: Заголовок и Текст поздравления. Хештеги: #праздник #TERION #москва"
+        )
+        body = await router_ai.generate(prompt)
+        if not body or len(body.strip()) < 20:
+            body = f"🎉 <b>С праздником — {label}!</b>\n\nОт имени TERION желаем мира, добра и уюта в вашем доме."
+
         if VK_QUIZ_LINK not in body:
             body += f"\n\n📍 <a href='{VK_QUIZ_LINK}'>Пройти квиз</a> @terion_bot\n#TERION #перепланировка #москва"
         post_id = await db.add_content_post(
@@ -1201,21 +1195,15 @@ async def quick_start(message: Message, state: FSMContext):
     await state.set_state(ContentStates.ai_text)
 
 
-# === 💡 ИНТЕРЕСНЫЙ ФАКТ (из реальных ситуаций potential_leads.db) ===
+# === 💡 ИНТЕРЕСНЫЙ ФАКТ (из реальных ситуаций spy_leads) ===
 
 async def fact_start(message: Message, state: FSMContext):
-    """Сначала предлагаем реальные ситуации из чатов (potential_leads.db), иначе — ввод темы."""
-    db_path = os.path.abspath(_potential_leads_db_path())
+    """Сначала предлагаем реальные ситуации из чатов (spy_leads), иначе — ввод темы."""
     leads: list = []
     try:
-        if os.path.isfile(db_path):
-            hunter_db = HunterDatabase(db_path)
-            await hunter_db.connect()
-            leads = await hunter_db.get_latest_hot_leads(3)
-            if hunter_db.conn:
-                await hunter_db.conn.close()
+        leads = await db.get_latest_spy_leads(3)
     except Exception as e:
-        logger.warning("potential_leads для фактов: %s", e)
+        logger.warning("Ошибка получения лидов для фактов: %s", e)
     if leads:
         builder = InlineKeyboardBuilder()
         situations = []
@@ -1525,7 +1513,7 @@ async def publish_vk_only(callback: CallbackQuery, state: FSMContext):
                 [{"action": {"type": "open_link", "link": "https://t.me/terion_bot?start=consult", "label": "💬 Консультация"}}]
             ]
         }
-        
+
         success = await publisher.publish_to_vk(text, image_bytes, keyboard=json.dumps(vk_buttons, ensure_ascii=False))
 
         if success:

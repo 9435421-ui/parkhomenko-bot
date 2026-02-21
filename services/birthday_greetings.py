@@ -16,17 +16,15 @@ async def send_birthday_greetings(bot: Bot):
         if not birthdays:
             logger.info("Поздравления с ДР: никого нет на сегодня")
             return
-        agent = None
         for row in birthdays:
             user_id = row.get("user_id")
             name = (row.get("name") or "друг").strip() or "друг"
             birthday_id = row.get("id")
             try:
                 try:
-                    from content_agent import ContentAgent
-                    agent = agent or ContentAgent()
-                    post = await agent.generate_greeting_post(person_name=name, occasion="день рождения")
-                    text = (post.get("title") or "") + "\n\n" + (post.get("body") or "")
+                    from utils import router_ai
+                    prompt = f"Напиши ОЧЕНЬ короткое и теплое поздравление с днем рождения для клиента компании TERION. Имя клиента: {name}. Стиль: дружелюбный, экспертный. Упомяни уют и безопасность дома. 1-2 предложения."
+                    text = await router_ai.generate(prompt)
                 except Exception:
                     text = f"🎂 {name}, с днём рождения! Желаем здоровья, счастья и уюта в вашем доме!"
                 if not text.strip():

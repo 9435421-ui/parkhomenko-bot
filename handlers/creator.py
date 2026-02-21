@@ -215,20 +215,21 @@ async def publish_creator_post(callback: types.CallbackQuery, state: FSMContext)
     if channel == "max":
         await callback.answer("📱 Публикация в MAX...")
         try:
-            from content_agent import ContentAgent
-            # Сохраняем пост в БД и публикуем в MAX
+            from services.publisher import publisher
             from database import db
-            post_id = await db.add_content_post(
-                title="Creator",
-                body=final_text,
-                cta="",
-                channel="creator",
-                status="draft",
-            )
-            agent = ContentAgent()
-            ok = await agent.post_to_max(post_id)
+
+            # Публикуем в MAX
+            ok = await publisher.publish_to_max(final_text, title="Новости TERION")
+
             if ok:
-                await db.update_content_post(post_id, status="published")
+                # Сохраняем запись в истории
+                await db.add_content_history(
+                    post_text=final_text,
+                    model_used="Creator",
+                    cost_rub=0,
+                    platform="MAX",
+                    channel="creator"
+                )
                 await callback.message.edit_text(
                     "✅ Пост опубликован в MAX",
                     reply_markup=get_creator_menu()
