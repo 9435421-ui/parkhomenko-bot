@@ -27,6 +27,8 @@ class Database:
         # Включаем WAL режим для поддержки параллельных чтений
         async with self.conn.cursor() as cursor:
             await cursor.execute("PRAGMA journal_mode=WAL")
+            await cursor.execute("PRAGMA busy_timeout=5000")  # Ожидание 5 секунд вместо блокировки
+            await cursor.execute("PRAGMA synchronous=NORMAL")  # Баланс между производительностью и надежностью
             await self.conn.commit()
         await self._create_tables()
         logger.info(f"✅ База данных подключена (WAL режим): {self.db_path}")
