@@ -52,15 +52,32 @@ async def run_main_bot():
 
 
 async def run_chat_parser():
-    """Запуск парсера чатов."""
-    logger.info("🚀 Запуск парсера TG чатов...")
+    """Запуск парсера чатов через LeadHunter."""
+    logger.info("🚀 Запуск парсера TG чатов через LeadHunter...")
     
     try:
-        # Импорт внутри функции, чтобы избежать циклических импортов
-        from chat_parser import start_monitoring
-        await start_monitoring()
+        # Используем новую структуру из services/lead_hunter/
+        from services.lead_hunter.hunter import LeadHunter
+        from database import db
+        
+        # Подключаем БД
+        await db.connect()
+        
+        # Создаем экземпляр LeadHunter
+        hunter = LeadHunter()
+        
+        # Запускаем поиск лидов (будет выполняться по расписанию через APScheduler)
+        # Для run_all.py запускаем один раз, затем периодически
+        logger.info("🔍 Запуск поиска лидов...")
+        await hunter.hunt()
+        
+        # Периодический запуск каждые 30 минут
+        import asyncio
+        while True:
+            await asyncio.sleep(1800)  # 30 минут
+            await hunter.hunt()
     except Exception as e:
-        logger.error(f"❌ Ошибка в chat parser: {e}")
+        logger.error(f"❌ Ошибка в LeadHunter: {e}", exc_info=True)
 
 
 async def run_vk_parser():
