@@ -141,10 +141,25 @@ class AutoPoster:
             return False
 
     def _format_post_text(self, post: dict) -> str:
-        """Форматирует текст поста"""
+        """Форматирует текст поста с обязательным футером и хэштегами"""
         title = post.get('title', '') or ''
         body = post.get('body', '') or ''
         cta = post.get('cta', '') or ''
+        
+        # Определяем канал для выбора хэштегов
+        channel_key = self._determine_channel(post)
+        
+        # Получаем ссылку на квиз из переменной окружения
+        quiz_link = os.getenv("VK_QUIZ_LINK", "https://t.me/Parkhovenko_i_kompaniya_bot?start=quiz")
+        
+        # Базовые хэштеги для TERION
+        base_hashtags = "#перепланировка #МЖИ #БТИ #TERION #согласование #Москва #МО"
+        
+        # Хэштеги для ДОМ ГРАНД
+        if channel_key == 'dom_grand':
+            hashtags = "#загородныйдом #строительство #коттедж #технадзор #ДОМГРАНД #Москва #МО"
+        else:
+            hashtags = base_hashtags
 
         parts = []
         if title:
@@ -153,6 +168,18 @@ class AutoPoster:
             parts.append(body)
         if cta:
             parts.append(cta)
+        
+        # Проверяем, есть ли ссылка на квиз в тексте
+        text_so_far = "\n\n".join(parts)
+        has_quiz_link = quiz_link in text_so_far or "квиз" in text_so_far.lower() or "quiz" in text_so_far.lower()
+        
+        # Добавляем обязательный футер, если ссылки на квиз нет
+        if not has_quiz_link:
+            footer = f"\n\n🧐 Узнайте стоимость вашей перепланировки за 1 минуту:\n👉 {quiz_link}"
+            parts.append(footer)
+        
+        # Добавляем хэштеги в конец
+        parts.append(hashtags)
 
         return "\n\n".join(parts)
 
