@@ -700,78 +700,85 @@ class ScoutParser:
                     iter_params["min_id"] = max_id
                     logger.debug(f"🔄 Инкрементальный поиск для {channel.get('name')}: min_id={max_id}")
                 
-                # ⚠️ ИГНОРИРУЕМ ОСНОВНОЙ КАНАЛ: парсим только комментарии от пользователей
-                # Основные посты от каналов (админов) пропускаем - нам нужны только сообщения от User
-                if isinstance(entity, Channel):
-                    logger.info(f"⏭️ Пропуск основного канала {channel.get('name')} - фокус на комментариях от пользователей в Discussion Group")
-                    # Не парсим основной канал, только Discussion Group (парсится ниже)
-                else:
-                    # Для групповых чатов (не каналов) парсим сообщения, но только от пользователей
-                    async for message in client.iter_messages(cid, **iter_params):
-                        if not message.text:
+                # ── ПАРСИНГ ОСНОВНОГО КАНАЛА: ищем сообщения от пользователей ─────────────────
+                # Парсим и основной канал, и Discussion Group
+                # Фильтруем: только сообщения от User, не от самого канала (Channel)
+                messages_list = []
+                async for message in client.iter_messages(cid, **iter_params):
+                    if not message.text:
+                        continue
+                    messages_list.append(message)
+                
+                logger.info(f'Проверено сообщений: {len(messages_list)}')
+                
+                for message in messages_list:
+                    # ── ФИЛЬТР: Пропускаем посты от самого канала (Admin/Channel ID) ─────────────
+                    # Это спасает от превращения постов Юлии в лидов
+                    sender_id = getattr(message, "sender_id", None)
+                    peer_id = getattr(message, "peer_id", None)
+                    
+                    # Проверяем, является ли отправитель самим каналом
+                    if sender_id and peer_id:
+                        # Если sender_id совпадает с ID канала - это пост от канала, пропускаем
+                        if hasattr(peer_id, "channel_id") and sender_id == peer_id.channel_id:
+                            logger.debug(f"⏭️ Пропущен пост от канала (sender_id={sender_id} == channel_id={peer_id.channel_id})")
                             continue
-                        
-                        # ── ФИЛЬТР: Пропускаем посты от каналов (админов) ────────────────────────
-                        sender_id = getattr(message, "sender_id", None)
-                        peer_id = getattr(message, "peer_id", None)
-                        
-                        # Проверяем, является ли отправитель каналом
-                        if sender_id and peer_id:
-                            # Если sender_id совпадает с ID канала - это пост от канала, пропускаем
-                            if hasattr(peer_id, "channel_id") and sender_id == peer_id.channel_id:
+                    
+                    # Проверяем тип отправителя - нам нужны только User, не Channel
+                    if message.sender:
+                        from telethon.tl.types import User, Channel
+                        if isinstance(message.sender, Channel):
+                            logger.debug(f"⏭️ Пропущен пост от канала (тип: Channel, sender_id={sender_id})")
+                            continue
+                        if not isinstance(message.sender, User):
+                            # Пропускаем ботов и другие типы
+                            continue
+                    
+                    if message.id > max_id:
+                        max_id = message.id
+                    scanned += 1
+                    
+                    # Ловля ссылок: ставим в очередь, обрабатываем по одной с паузой 60 сек (anti-flood)
+                    if db:
+                        for url in self._extract_tme_links(message.text):
+                            url_norm = url.rstrip("/")
+                            if url_norm in existing_links:
+                                continue
+                            if url_norm not in {u.rstrip("/") for u in new_links_queue}:
+                                new_links_queue.append(url_norm)
+                                print("[SCOUT] Найдена новая ссылка, поставлена в очередь на проверку через 60 сек.", flush=True)
+                                logger.info("[SCOUT] Найдена новая ссылка %s, поставлена в очередь на проверку через 60 сек.", url_norm)
+                    
+                    # ── ПРОВЕРКА КЛЮЧЕВЫХ СЛОВ: если сообщение от пользователя содержит ключевые слова — это лид ──
+                    if self.detect_lead(message.text):
+                        # Дополнительная проверка: убеждаемся, что это не пост от канала
+                        if sender_id and peer_id and hasattr(peer_id, "channel_id"):
+                            if sender_id == peer_id.channel_id:
+                                logger.debug(f"⏭️ Пропущен лид от канала (дополнительная проверка)")
                                 continue
                         
-                        # Проверяем тип отправителя - нам нужны только User, не Channel
-                        if message.sender:
-                            from telethon.tl.types import User, Channel
-                            if isinstance(message.sender, Channel):
-                                logger.debug(f"⏭️ Пропущен пост от канала (sender_id={sender_id})")
-                                continue
-                            if not isinstance(message.sender, User):
-                                # Пропускаем ботов и другие типы
-                                continue
+                        author_id = getattr(message, "sender_id", None)
+                        author_name = None
+                        if getattr(message, "sender", None):
+                            s = message.sender
+                            author_name = getattr(s, "username", None) or getattr(s, "first_name", None)
+                            if author_name and getattr(s, "last_name", None):
+                                author_name = f"{author_name} {s.last_name}".strip()
                         
-                        if message.id > max_id:
-                            max_id = message.id
-                        scanned += 1
-                        # Ловля ссылок: ставим в очередь, обрабатываем по одной с паузой 60 сек (anti-flood)
-                        if db:
-                            for url in self._extract_tme_links(message.text):
-                                url_norm = url.rstrip("/")
-                                if url_norm in existing_links:
-                                    continue
-                                if url_norm not in {u.rstrip("/") for u in new_links_queue}:
-                                    new_links_queue.append(url_norm)
-                                    print("[SCOUT] Найдена новая ссылка, поставлена в очередь на проверку через 60 сек.", flush=True)
-                                    logger.info("[SCOUT] Найдена новая ссылка %s, поставлена в очередь на проверку через 60 сек.", url_norm)
-                        if self.detect_lead(message.text):
-                            # ── Дополнительная проверка: пропускаем посты от канала (админов) ────────
-                            sender_id = getattr(message, "sender_id", None)
-                            peer_id = getattr(message, "peer_id", None)
-                            if sender_id and peer_id and hasattr(peer_id, "channel_id"):
-                                if sender_id == peer_id.channel_id:
-                                    continue  # Пропускаем посты от канала (админов)
-                            
-                            author_id = getattr(message, "sender_id", None)
-                            author_name = None
-                            if getattr(message, "sender", None):
-                                s = message.sender
-                                author_name = getattr(s, "username", None) or getattr(s, "first_name", None)
-                                if author_name and getattr(s, "last_name", None):
-                                    author_name = f"{author_name} {s.last_name}".strip()
-                            post = ScoutPost(
-                                source_type="telegram",
-                                source_name=channel['name'],
-                                source_id=str(channel['id']),
-                                post_id=str(message.id),
-                                text=message.text,
-                                author_id=author_id,
-                                author_name=author_name,
-                                url=self._tg_post_url(cid, message.id),
-                                source_link=channel.get("link") or "",
-                            )
-                            posts.append(post)
-                            count += 1
+                        post = ScoutPost(
+                            source_type="telegram",
+                            source_name=channel['name'],
+                            source_id=str(channel['id']),
+                            post_id=str(message.id),
+                            text=message.text,
+                            author_id=author_id,
+                            author_name=author_name,
+                            url=self._tg_post_url(cid, message.id),
+                            source_link=channel.get("link") or "",
+                        )
+                        posts.append(post)
+                        count += 1
+                        logger.debug(f"✅ Найден лид в основном канале {channel['name']}: {message.text[:50]}...")
                 self.last_scan_report.append({
                     "type": "telegram",
                     "name": channel["name"],
@@ -816,16 +823,30 @@ class ScoutParser:
                         discussion_scanned = 0
                         logger.info(f"💬 Парсинг комментариев из Discussion Group канала {channel.get('name')}...")
                         
+                        # Собираем все сообщения для логирования
+                        discussion_messages = []
                         async for message in client.iter_messages(discussion_group_id, limit=tg_limit):
                             if not message.text:
                                 continue
-                            
+                            discussion_messages.append(message)
+                        
+                        logger.info(f'Проверено сообщений в Discussion Group: {len(discussion_messages)}')
+                        
+                        for message in discussion_messages:
                             # ── ФИЛЬТР: Только сообщения от User, не от каналов ────────────────────
                             sender_id = getattr(message, "sender_id", None)
+                            peer_id = getattr(message, "peer_id", None)
+                            
+                            # Проверяем, является ли отправитель самим каналом
+                            if sender_id and peer_id:
+                                if hasattr(peer_id, "channel_id") and sender_id == peer_id.channel_id:
+                                    logger.debug(f"⏭️ Пропущен комментарий от канала в Discussion Group (sender_id={sender_id} == channel_id={peer_id.channel_id})")
+                                    continue
+                            
                             if message.sender:
                                 from telethon.tl.types import User, Channel
                                 if isinstance(message.sender, Channel):
-                                    logger.debug(f"⏭️ Пропущен комментарий от канала в Discussion Group")
+                                    logger.debug(f"⏭️ Пропущен комментарий от канала в Discussion Group (тип: Channel)")
                                     continue
                                 if not isinstance(message.sender, User):
                                     # Пропускаем ботов и другие типы
@@ -833,6 +854,7 @@ class ScoutParser:
                             
                             discussion_scanned += 1
                             
+                            # ── ПРОВЕРКА КЛЮЧЕВЫХ СЛОВ: если сообщение от пользователя содержит ключевые слова — это лид ──
                             # Проверяем, является ли сообщение комментарием к посту из основного канала
                             # (в Discussion Group сообщения могут быть связаны с постами через reply_to)
                             if self.detect_lead(message.text):

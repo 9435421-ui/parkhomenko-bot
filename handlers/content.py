@@ -37,6 +37,7 @@ from content_agent import ContentAgent
 from hunter_standalone import HunterDatabase
 from config import (
     CONTENT_BOT_TOKEN,
+    BOT_TOKEN,
     CHANNEL_ID_TERION,
     CHANNEL_ID_DOM_GRAD,
     LEADS_GROUP_CHAT_ID,
@@ -270,10 +271,29 @@ class RouterAIClient:
                         data = await resp.json()
                         return data["choices"][0]["message"]["content"]
                     else:
-                        logger.error(f"RouterAI HTTP {resp.status}: {await resp.text()}")
+                        error_text = await resp.text()
+                        error_msg = f"RouterAI HTTP {resp.status}: {error_text[:500]}"
+                        logger.error(error_msg)
+                        # Пробрасываем ошибку для обработки в вызывающем коде
+                        raise Exception(error_msg)
         except Exception as e:
-            logger.error(f"RouterAI error: {e}")
-        return None
+            error_msg = f"RouterAI error: {str(e)}"
+            logger.error(error_msg)
+            # Пробрасываем ошибку для обработки в вызывающем коде
+            raise Exception(error_msg)
+    
+    async def generate_response(
+        self,
+        user_prompt: str,
+        system_prompt: Optional[str] = None,
+        max_tokens: int = 2000,
+    ) -> Optional[str]:
+        """Алиас для generate с другим порядком параметров (совместимость с utils/router_ai.py)"""
+        return await self.generate(
+            prompt=user_prompt,
+            system_prompt=system_prompt,
+            max_tokens=max_tokens,
+        )
     
     async def analyze_image(self, image_b64: str, prompt: str) -> Optional[str]:
         """Анализ изображения через Gemini 1.5 Flash"""
@@ -286,7 +306,7 @@ class RouterAIClient:
                     {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{image_b64}"}}
                 ]
             }],
-            "max_tokens": 1500
+            "max_tokens": 2000  # Увеличено до 2000
         }
         
         try:
@@ -936,7 +956,32 @@ async def art_to_post_handler(callback: CallbackQuery, state: FSMContext):
         f"3) Призыв: 👉 Записаться на консультацию: @Parkhovenko_i_kompaniya_bot\n\n"
         f"Используй термины: МЖИ, несущие стены, трассировка, СНиП. Без общих фраз."
     )
-    text = await router_ai.generate(prompt, max_tokens=800)
+    text = None
+    error_message = None
+    try:
+        text = await router_ai.generate_response(
+            user_prompt=prompt,
+            max_tokens=2000,  # Увеличено до 2000
+        )
+    except Exception as e:
+        error_message = str(e)
+        logger.error("photo_to_post: router_ai error: %s", e)
+        # Отправляем ошибку в топик "Логи"
+        try:
+            from aiogram import Bot
+            from aiogram.client.default import DefaultBotProperties
+            bot = Bot(token=BOT_TOKEN, default=DefaultBotProperties(parse_mode="HTML"))
+            await bot.send_message(
+                LEADS_GROUP_CHAT_ID,
+                f"⚠️ <b>Ошибка нейросети</b>\n\n"
+                f"Тема: <code>{actual_topic[:100]}</code>\n"
+                f"Ошибка: <code>{error_message[:500]}</code>",
+                message_thread_id=THREAD_ID_LOGS,
+            )
+            await bot.session.close()
+        except Exception as notify_err:
+            logger.error("Не удалось отправить ошибку в топик: %s", notify_err)
+    
     if not text:
         text = (
             f"<b>🏠 Перепланировка по теме: {actual_topic}</b>\n\n"
@@ -1009,20 +1054,55 @@ async def ai_series_handler(message: Message, state: FSMContext):
     if "{cases}" in prompt:
         prompt = prompt.replace("{cases}", cases_content)
 
-    result = await router_ai.generate(prompt, max_tokens=4000)
+    result = None
+    error_message = None
+    try:
+        result = await router_ai.generate_response(
+            user_prompt=prompt,
+            max_tokens=2000,  # Увеличено до 2000 (было 4000, но 2000 достаточно)
+        )
+    except Exception as e:
+        error_message = str(e)
+        logger.error("ai_series_handler: router_ai error: %s", e)
+        # Отправляем ошибку в топик "Логи"
+        try:
+            from aiogram import Bot
+            from aiogram.client.default import DefaultBotProperties
+            bot = Bot(token=BOT_TOKEN, default=DefaultBotProperties(parse_mode="HTML"))
+            await bot.send_message(
+                LEADS_GROUP_CHAT_ID,
+                f"⚠️ <b>Ошибка нейросети</b>\n\n"
+                f"Серия: <code>{days} дней, {topic[:100]}</code>\n"
+                f"Ошибка: <code>{error_message[:500]}</code>",
+                message_thread_id=THREAD_ID_LOGS,
+            )
+            await bot.session.close()
+        except Exception as notify_err:
+            logger.error("Не удалось отправить ошибку в топик: %s", notify_err)
     
     if not result:
-        await message.answer("❌ Ошибка генерации", reply_markup=get_back_btn())
-        await state.clear()
-        return
-    
-    post_id = await db.add_content_post(
-        title=f"Серия {days} дней: {topic[:40]}",
-        body=result,
-        cta="",
-        channel="series",
-        status="draft"
-    )
+        # Даже при ошибке создаем черновик с fallback текстом и показываем кнопки публикации
+        fallback_text = (
+            f"<b>🏠 Серия постов: {topic}</b>\n\n"
+            f"Каждый объект уникален. Правильный подход — согласование с МЖИ, "
+            f"расчёт несущих конструкций и трассировка изменений по СНиП.\n\n"
+            f"👉 Записаться на консультацию: @Parkhovenko_i_kompaniya_bot"
+        )
+        post_id = await db.add_content_post(
+            title=f"Серия {days} дней: {topic[:40]}",
+            body=fallback_text,
+            cta="",
+            channel="series",
+            status="draft"
+        )
+    else:
+        post_id = await db.add_content_post(
+            title=f"Серия {days} дней: {topic[:40]}",
+            body=result,
+            cta="",
+            channel="series",
+            status="draft"
+        )
     
     await message.bot.send_message(
         chat_id=LEADS_GROUP_CHAT_ID,
@@ -1151,10 +1231,39 @@ async def ai_plan_handler(message: Message, state: FSMContext):
         f"Аудитория: владельцы квартир в Москве, которые думают о перепланировке или уже начали её."
     )
 
-    plan = await router_ai.generate(user_prompt, system_prompt=_PLAN_SYSTEM, max_tokens=3000)
-
+    plan = None
+    error_message = None
+    try:
+        plan = await router_ai.generate_response(
+            user_prompt=user_prompt,
+            system_prompt=_PLAN_SYSTEM,
+            max_tokens=2000,  # Увеличено до 2000
+        )
+    except Exception as e:
+        error_message = str(e)
+        logger.error("ai_plan_handler: router_ai error: %s", e)
+        # Отправляем ошибку в топик "Логи"
+        try:
+            bot = Bot(token=BOT_TOKEN)
+            await bot.send_message(
+                LEADS_GROUP_CHAT_ID,
+                f"⚠️ <b>Ошибка нейросети</b>\n\n"
+                f"Тема: <code>{topic[:100]}</code>\n"
+                f"Ошибка: <code>{error_message[:500]}</code>",
+                message_thread_id=THREAD_ID_LOGS,
+                parse_mode="HTML",
+            )
+            await bot.session.close()
+        except Exception as notify_err:
+            logger.error("Не удалось отправить ошибку в топик: %s", notify_err)
+    
     if not plan:
-        await message.answer("❌ Ошибка генерации", reply_markup=get_back_btn())
+        await message.answer(
+            f"⚠️ <b>Ошибка генерации</b>\n\n"
+            f"{f'Ошибка: {error_message[:200]}' if error_message else 'Попробуйте ещё раз.'}",
+            reply_markup=get_back_btn(),
+            parse_mode="HTML",
+        )
         await state.clear()
         return
 
@@ -1257,11 +1366,36 @@ async def _generate_news_by_topic(message_or_callback, state: FSMContext, topic:
     if hint:
         user_prompt += f"\nАкцент: {hint}"
 
-    news = await router_ai.generate(user_prompt, system_prompt=_NEWS_SYSTEM)
+    news = None
+    error_message = None
+    try:
+        news = await router_ai.generate_response(
+            user_prompt=user_prompt,
+            system_prompt=_NEWS_SYSTEM,
+            max_tokens=2000,  # Увеличено до 2000
+        )
+    except Exception as e:
+        error_message = str(e)
+        logger.error("news_handler: router_ai error: %s", e)
+        # Отправляем ошибку в топик "Логи"
+        try:
+            bot = Bot(token=BOT_TOKEN)
+            await bot.send_message(
+                LEADS_GROUP_CHAT_ID,
+                f"⚠️ <b>Ошибка нейросети</b>\n\n"
+                f"Тема новости: <code>{topic[:100]}</code>\n"
+                f"Ошибка: <code>{error_message[:500]}</code>",
+                message_thread_id=THREAD_ID_LOGS,
+                parse_mode="HTML",
+            )
+            await bot.session.close()
+        except Exception as notify_err:
+            logger.error("Не удалось отправить ошибку в топик: %s", notify_err)
+    
     if not news:
-        err_msg = "❌ Не удалось сгенерировать новость. Попробуйте другую тему."
+        err_msg = f"⚠️ <b>Не удалось сгенерировать новость</b>\n\n{f'Ошибка: {error_message[:200]}' if error_message else 'Попробуйте другую тему.'}"
         if is_callback:
-            await message_or_callback.message.edit_text(err_msg, reply_markup=get_back_btn())
+            await message_or_callback.message.edit_text(err_msg, reply_markup=get_back_btn(), parse_mode="HTML")
         else:
             await message_or_callback.answer(err_msg, reply_markup=get_back_btn())
         await state.clear()
@@ -1371,7 +1505,32 @@ async def holiday_rf_selected(callback: CallbackQuery, state: FSMContext):
         user_prompt = (
             f"Напиши поздравление с праздником «{occasion}» для подписчиков Telegram-канала TERION."
         )
-        body = await router_ai.generate(user_prompt, system_prompt=_HOLIDAY_SYSTEM)
+        body = None
+        error_message = None
+        try:
+            body = await router_ai.generate_response(
+                user_prompt=user_prompt,
+                system_prompt=_HOLIDAY_SYSTEM,
+                max_tokens=2000,  # Увеличено до 2000
+            )
+        except Exception as e:
+            error_message = str(e)
+            logger.error("holiday_handler: router_ai error: %s", e)
+            # Отправляем ошибку в топик "Логи"
+            try:
+                bot = Bot(token=BOT_TOKEN)
+                await bot.send_message(
+                    LEADS_GROUP_CHAT_ID,
+                    f"⚠️ <b>Ошибка нейросети</b>\n\n"
+                    f"Праздник: <code>{label}</code>\n"
+                    f"Ошибка: <code>{error_message[:500]}</code>",
+                    message_thread_id=THREAD_ID_LOGS,
+                    parse_mode="HTML",
+                )
+                await bot.session.close()
+            except Exception as notify_err:
+                logger.error("Не удалось отправить ошибку в топик: %s", notify_err)
+        
         if not body or not body.strip():
             body = f"🎉 С праздником — {label}!\n\nПусть ваш дом всегда будет местом, где хочется возвращаться. Уюта, тепла и вдохновения!"
         post_id = await db.add_content_post(
@@ -1456,7 +1615,29 @@ async def _generate_fact(topic_hint: str) -> str:
         f"Напиши интересный факт на тему: «{topic_hint}».\n\n"
         f"Формат: один короткий пост для Telegram, 60-90 слов."
     )
-    return await router_ai.generate(prompt, system_prompt=_FACT_SYSTEM, max_tokens=400) or ""
+    try:
+        return await router_ai.generate_response(
+            user_prompt=prompt,
+            system_prompt=_FACT_SYSTEM,
+            max_tokens=2000,  # Увеличено до 2000
+        ) or ""
+    except Exception as e:
+        logger.error("generate_fact: router_ai error: %s", e)
+        # Отправляем ошибку в топик "Логи"
+        try:
+            bot = Bot(token=BOT_TOKEN)
+            await bot.send_message(
+                LEADS_GROUP_CHAT_ID,
+                f"⚠️ <b>Ошибка нейросети</b>\n\n"
+                f"Тема факта: <code>{topic_hint[:100]}</code>\n"
+                f"Ошибка: <code>{str(e)[:500]}</code>",
+                message_thread_id=THREAD_ID_LOGS,
+                parse_mode="HTML",
+            )
+            await bot.session.close()
+        except Exception as notify_err:
+            logger.error("Не удалось отправить ошибку в топик: %s", notify_err)
+        return ""
 
 
 async def fact_start(message: Message, state: FSMContext):
@@ -1523,11 +1704,52 @@ async def ai_text_handler(message: Message, state: FSMContext):
     if is_fact:
         # Своя тема для интересного факта — живой и короткий формат без навязанного жаргона
         prompt = f"Напиши интересный факт на тему: «{topic}».\n\nФормат: один короткий пост для Telegram, 60-90 слов."
-        text = await router_ai.generate(prompt, system_prompt=_FACT_SYSTEM, max_tokens=400)
+        text = None
+        error_message = None
+        try:
+            text = await router_ai.generate_response(
+                user_prompt=prompt,
+                system_prompt=_FACT_SYSTEM,
+                max_tokens=2000,  # Увеличено до 2000
+            )
+        except Exception as e:
+            error_message = str(e)
+            logger.error("quick_text_handler (fact): router_ai error: %s", e)
+            # Отправляем ошибку в топик "Логи"
+            try:
+                bot = Bot(token=BOT_TOKEN)
+                await bot.send_message(
+                    LEADS_GROUP_CHAT_ID,
+                    f"⚠️ <b>Ошибка нейросети</b>\n\n"
+                    f"Тема факта: <code>{topic[:100]}</code>\n"
+                    f"Ошибка: <code>{error_message[:500]}</code>",
+                    message_thread_id=THREAD_ID_LOGS,
+                    parse_mode="HTML",
+                )
+                await bot.session.close()
+            except Exception as notify_err:
+                logger.error("Не удалось отправить ошибку в топик: %s", notify_err)
+        
         if not text:
-            await message.answer("❌ Ошибка генерации", reply_markup=get_back_btn())
-            await state.clear()
+            # Даже при ошибке показываем кнопки публикации с fallback текстом
+            fallback_text = (
+                f"<b>🏠 Перепланировка по теме: {topic}</b>\n\n"
+                f"Каждый объект уникален. Правильный подход — согласование с МЖИ, "
+                f"расчёт несущих конструкций и трассировка изменений по СНиП.\n\n"
+                f"👉 Записаться на консультацию: @Parkhovenko_i_kompaniya_bot"
+            )
+            post_id = await db.add_content_post(
+                title=f"Факт: {topic[:40]}",
+                body=fallback_text,
+                cta="",
+                channel="preview",
+                status="preview"
+            )
+            await show_preview(message, fallback_text, post_id=post_id)
+            await state.set_state(ContentStates.preview_mode)
+            await state.update_data(post_id=post_id)
             return
+        
         post_id = await show_preview(message, text)
         await state.set_state(ContentStates.preview_mode)
         await state.update_data(post_id=post_id)
@@ -1539,11 +1761,49 @@ async def ai_text_handler(message: Message, state: FSMContext):
             f"Эмодзи + призыв к консультации @terion_bot"
         )
     
-    text = await router_ai.generate(prompt)
+    text = None
+    error_message = None
+    try:
+        text = await router_ai.generate_response(
+            user_prompt=prompt,
+            max_tokens=2000,  # Увеличено до 2000
+        )
+    except Exception as e:
+        error_message = str(e)
+        logger.error("quick_text_handler: router_ai error: %s", e)
+        # Отправляем ошибку в топик "Логи"
+        try:
+            bot = Bot(token=BOT_TOKEN)
+            await bot.send_message(
+                LEADS_GROUP_CHAT_ID,
+                f"⚠️ <b>Ошибка нейросети</b>\n\n"
+                f"Тема: <code>{topic[:100]}</code>\n"
+                f"Ошибка: <code>{error_message[:500]}</code>",
+                message_thread_id=THREAD_ID_LOGS,
+                parse_mode="HTML",
+            )
+            await bot.session.close()
+        except Exception as notify_err:
+            logger.error("Не удалось отправить ошибку в топик: %s", notify_err)
 
     if not text:
-        await message.answer("❌ Ошибка", reply_markup=get_back_btn())
-        await state.clear()
+        # Даже при ошибке показываем кнопки публикации с fallback текстом
+        fallback_text = (
+            f"<b>🏠 Перепланировка по теме: {topic}</b>\n\n"
+            f"Каждый объект уникален. Правильный подход — согласование с МЖИ, "
+            f"расчёт несущих конструкций и трассировка изменений по СНиП.\n\n"
+            f"👉 Записаться на консультацию: @Parkhovenko_i_kompaniya_bot"
+        )
+        post_id = await db.add_content_post(
+            title=f"Быстрый текст: {topic[:40]}",
+            body=fallback_text,
+            cta="",
+            channel="preview",
+            status="preview"
+        )
+        await show_preview(message, fallback_text, post_id=post_id)
+        await state.set_state(ContentStates.preview_mode)
+        await state.update_data(post_id=post_id, text=fallback_text)
         return
 
     post_id = await show_preview(message, text)

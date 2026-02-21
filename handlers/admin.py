@@ -13,7 +13,7 @@ import logging
 from database import db
 from config import (
     ADMIN_ID, JULIA_USER_ID, NOTIFICATIONS_CHANNEL_ID, THREAD_ID_LOGS,
-    LEADS_GROUP_CHAT_ID, THREAD_ID_DRAFTS,
+    LEADS_GROUP_CHAT_ID, THREAD_ID_DRAFTS, BOT_TOKEN,
 )
 from services.scout_parser import scout_parser
 
@@ -164,21 +164,44 @@ async def draft_gen_post_handler(callback: CallbackQuery):
     title = (post.get("title") or "").strip()
     body = (post.get("body") or title).strip()
 
+    post_text = None
+    error_message = None
+    
     try:
-        from services.router_ai import RouterAIClient
-        router_ai = RouterAIClient()
+        # Используем локальный RouterAIClient из handlers/content.py
+        from handlers.content import router_ai
         post_text = await router_ai.generate(
-            f"Напиши экспертный пост для Telegram-канала TERION на тему:\n«{title}»\n\nКонтекст: {body[:400]}",
+            prompt=f"Напиши экспертный пост для Telegram-канала TERION на тему:\n«{title}»\n\nКонтекст: {body[:400]}",
             system_prompt=_DRAFT_POST_SYSTEM,
+            max_tokens=2000,  # Увеличено до 2000
         )
     except Exception as e:
+        error_message = str(e)
         logger.error("draft_gen: router_ai error: %s", e)
-        post_text = None
+        # Отправляем ошибку в топик "Логи"
+        try:
+            from aiogram import Bot
+            from aiogram.client.default import DefaultBotProperties
+            bot = Bot(token=BOT_TOKEN, default=DefaultBotProperties(parse_mode="HTML"))
+            await bot.send_message(
+                LEADS_GROUP_CHAT_ID,
+                f"⚠️ <b>Ошибка нейросети</b>\n\n"
+                f"Тема: <code>{title[:100]}</code>\n"
+                f"Ошибка: <code>{error_message[:500]}</code>",
+                message_thread_id=THREAD_ID_LOGS,
+            )
+            await bot.session.close()
+        except Exception as notify_err:
+            logger.error("Не удалось отправить ошибку в топик: %s", notify_err)
 
     if not post_text:
+        # Возвращаем кнопки публикации даже при ошибке
         await callback.message.edit_text(
-            "❌ Не удалось сгенерировать текст. Попробуйте ещё раз.",
+            f"⚠️ <b>Не удалось сгенерировать текст</b>\n\n"
+            f"Тема: <code>{title[:100]}</code>\n"
+            f"{f'Ошибка: {error_message[:200]}' if error_message else 'Попробуйте ещё раз.'}",
             reply_markup=get_draft_card_keyboard(post_id),
+            parse_mode="HTML",
         )
         return
 

@@ -26,7 +26,7 @@ class RouterAIClient:
         user_prompt: str,
         system_prompt: Optional[str] = None,
         temperature: float = 0.2,
-        max_tokens: int = 500,
+        max_tokens: int = 2000,  # Увеличено до 2000 по умолчанию
         model: Optional[str] = None
     ) -> Optional[str]:
         """
@@ -88,6 +88,8 @@ class RouterAIClient:
                         return result["choices"][0]["message"]["content"]
                     else:
                         error_text = await response.text()
+                        error_msg = f"Router AI API error {response.status}: {error_text[:500]}"
+                        print(f"⚠️ {error_msg}")
                         # Пробуем fallback модель
                         if response.status == 429 and model != self.fallback_model:
                             print("⚠️ Rate limit, пробуем Qwen...")
@@ -98,12 +100,13 @@ class RouterAIClient:
                                 max_tokens=max_tokens,
                                 model=self.fallback_model
                             )
-                        # Возвращаем None для переключения на резерв (Яндекс)
-                        return None
+                        # Пробрасываем ошибку дальше для обработки в вызывающем коде
+                        raise Exception(error_msg)
         except Exception as e:
-            print(f"⚠️ Ошибка подключения к Router AI: {str(e)}")
-            # Возвращаем None для переключения на резерв (Яндекс)
-            return None
+            error_msg = f"Ошибка подключения к Router AI: {str(e)}"
+            print(f"⚠️ {error_msg}")
+            # Пробрасываем ошибку дальше для обработки в вызывающем коде
+            raise Exception(error_msg)
     
     async def generate_with_context(
         self,
@@ -189,7 +192,7 @@ class RouterAIClient:
 router_ai = RouterAIClient()
 
 # Alias для совместимости
-async def generate(system_prompt: str = "", user_message: str = "", max_tokens: int = 500) -> Optional[str]:
+async def generate(system_prompt: str = "", user_message: str = "", max_tokens: int = 2000) -> Optional[str]:
     """Удобная функция-алиас для generate_response"""
     return await router_ai.generate_response(
         user_prompt=user_message or system_prompt,
