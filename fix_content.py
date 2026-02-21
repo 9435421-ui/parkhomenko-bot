@@ -32,22 +32,20 @@ async def reset_posts():
     conn = sqlite3.connect(db_path)
     cursor = conn.cursor()
     
-    # Проверяем, какая таблица существует: content_plan или posts
-    cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND (name='content_plan' OR name='posts')")
-    tables = cursor.fetchall()
+    # Используем таблицу content_plan (основная таблица для контент-плана)
+    table_name = 'content_plan'
     
-    table_name = None
-    if tables:
-        # Берем первую найденную таблицу
-        table_name = tables[0][0]
-        print(f"📋 Найдена таблица: {table_name}")
-    else:
-        print("❌ Таблицы content_plan или posts не найдены")
+    # Проверяем существование таблицы
+    cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name=?", (table_name,))
+    if not cursor.fetchone():
+        print(f"❌ Таблица {table_name} не найдена")
         conn.close()
         return
     
-    # 1. Находим посты, которые были опубликованы за последние 5 часов без изображений
-    # Или все опубликованные посты за последние 5 часов (для безопасности)
+    print(f"📋 Используется таблица: {table_name}")
+    
+    # 1. Находим посты, которые были опубликованы за последние 5 часов
+    # (включая те, что улетели без изображений)
     cutoff_time = (datetime.now() - timedelta(hours=5)).isoformat()
     
     cursor.execute(f"""
@@ -67,8 +65,8 @@ async def reset_posts():
     
     print(f"📊 Найдено постов для сброса: {len(posts_to_reset)}")
     
-    # 2. Сбрасываем их статус на 'draft' (или 'ready_to_publish', если такой статус используется)
-    # Также очищаем published_at
+    # 2. Сбрасываем их статус на 'approved' (готов к публикации)
+    # Также очищаем published_at, чтобы AutoPoster мог их обработать заново
     reset_count = 0
     for post in posts_to_reset:
         post_id, title, status, published_at, image_url = post
@@ -76,7 +74,7 @@ async def reset_posts():
         
         cursor.execute(f"""
             UPDATE {table_name} 
-            SET status = 'draft', 
+            SET status = 'approved', 
                 published_at = NULL 
             WHERE id = ?
         """, (post_id,))
