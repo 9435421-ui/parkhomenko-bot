@@ -764,20 +764,76 @@ class ScoutParser:
                     iter_params["min_id"] = max_id
                     logger.debug(f"🔄 Инкрементальный поиск для {channel.get('name')}: min_id={max_id}")
                 
-                # ── ПАРСИНГ ОСНОВНОГО КАНАЛА: ищем сообщения от пользователей ─────────────────
-                # Парсим и основной канал, и Discussion Group
-                # Фильтруем: только сообщения от User, не от самого канала (Channel)
+                # ── ПАРСИНГ ОСНОВНОГО КАНАЛА: используем SearchRequest для "тихого" просмотра ────────
+                # SearchRequest позволяет обходить некоторые ограничения на просмотр открытых чатов
+                # и более эффективно искать сообщения по ключевым словам
                 messages_list = []
                 debug_count = 0
-                async for message in client.iter_messages(cid, **iter_params):
-                    if not message.text:
-                        continue
-                    messages_list.append(message)
+                
+                try:
+                    # Пробуем использовать SearchRequest для поиска по ключевым словам
+                    from telethon.tl.functions.messages import SearchRequest
                     
-                    # Отладочный режим: логируем первые N сообщений
-                    if self.debug_mode and debug_count < self.debug_limit:
-                        debug_count += 1
-                        logger.debug(f"[DEBUG] Сообщение #{debug_count} из {channel.get('name')}: {message.text[:100]}...")
+                    # Используем первые 3 ключевых слова для поиска
+                    search_keywords = self._load_keywords()[:3]
+                    
+                    for keyword in search_keywords:
+                        try:
+                            search_results = await client(SearchRequest(
+                                peer=cid,
+                                q=keyword,
+                                filter=None,
+                                min_date=None,
+                                max_date=None,
+                                offset_id=0,
+                                add_offset=0,
+                                limit=20,  # Максимум 20 сообщений на ключевое слово
+                                max_id=0,
+                                min_id=max_id if max_id > 0 else 0,  # Инкрементальный поиск
+                                hash=0
+                            ))
+                            
+                            if search_results and hasattr(search_results, "messages"):
+                                for msg in search_results.messages:
+                                    if not hasattr(msg, "message") or not msg.message:
+                                        continue
+                                    messages_list.append(msg)
+                                    
+                                    # Отладочный режим
+                                    if self.debug_mode and debug_count < self.debug_limit:
+                                        debug_count += 1
+                                        logger.debug(f"[DEBUG] Сообщение #{debug_count} из {channel.get('name')} (SearchRequest '{keyword}'): {msg.message[:100]}...")
+                            
+                            await asyncio.sleep(0.3)  # Антифлуд между запросами
+                        except Exception as search_err:
+                            logger.debug(f"⚠️ SearchRequest не удался для '{keyword}' в канале {cid}: {search_err}. Используем iter_messages.")
+                            # Fallback на iter_messages если SearchRequest не работает
+                            break
+                    
+                    # Если SearchRequest не дал результатов или упал, используем iter_messages как fallback
+                    if not messages_list:
+                        logger.debug(f"SearchRequest не дал результатов для {channel.get('name')}. Используем iter_messages.")
+                        async for message in client.iter_messages(cid, **iter_params):
+                            if not message.text:
+                                continue
+                            messages_list.append(message)
+                            
+                            # Отладочный режим
+                            if self.debug_mode and debug_count < self.debug_limit:
+                                debug_count += 1
+                                logger.debug(f"[DEBUG] Сообщение #{debug_count} из {channel.get('name')}: {message.text[:100]}...")
+                except Exception as search_fallback_error:
+                    # Если SearchRequest полностью не работает, используем iter_messages
+                    logger.debug(f"⚠️ SearchRequest недоступен для канала {cid}: {search_fallback_error}. Используем iter_messages.")
+                    async for message in client.iter_messages(cid, **iter_params):
+                        if not message.text:
+                            continue
+                        messages_list.append(message)
+                        
+                        # Отладочный режим
+                        if self.debug_mode and debug_count < self.debug_limit:
+                            debug_count += 1
+                            logger.debug(f"[DEBUG] Сообщение #{debug_count} из {channel.get('name')}: {message.text[:100]}...")
                 
                 logger.info(f'📊 Канал {channel.get("name")}: проверено сообщений: {len(messages_list)}')
                 self.total_scanned += len(messages_list)

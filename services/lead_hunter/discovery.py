@@ -194,25 +194,37 @@ class Discovery:
             for keyword in search_keywords:
                 try:
                     # Глобальный поиск по ключевому слову
-                    results = await client(SearchGlobalRequest(
-                        q=keyword,
-                        filter=InputMessagesFilterEmpty(),
-                        min_date=None,
-                        max_date=None,
-                        offset_rate=0,
-                        offset_peer=None,
-                        offset_id=0,
-                        limit=20  # Максимум 20 результатов на запрос
-                    ))
+                    results = None
+                    try:
+                        results = await client(SearchGlobalRequest(
+                            q=keyword,
+                            filter=InputMessagesFilterEmpty(),
+                            min_date=None,
+                            max_date=None,
+                            offset_rate=0,
+                            offset_peer=None,
+                            offset_id=0,
+                            limit=20  # Максимум 20 результатов на запрос
+                        ))
+                    except TypeError as te:
+                        # Обработка ошибки "Cannot cast NoneType"
+                        if "NoneType" in str(te) or "cast" in str(te).lower():
+                            logger.debug(f"⚠️ Ошибка типа при поиске '{keyword}': {te}. Переходим к следующему ключевому слову.")
+                            continue
+                        raise
+                    except Exception as search_error:
+                        # Другие ошибки поиска - логируем и продолжаем
+                        logger.debug(f"⚠️ Ошибка поиска для '{keyword}': {search_error}. Переходим к следующему ключевому слову.")
+                        continue
                     
                     # ── ИСПРАВЛЕНИЕ: Итерируемся напрямую по search_result.chats ────────
                     # Исключаем get_entity для каждого чата - используем данные из results.chats
                     if results is None:
-                        logger.debug(f"Пустой результат поиска для '{keyword}'")
+                        logger.debug(f"Пустой результат поиска для '{keyword}' - переходим к следующему")
                         continue
                     
                     if not hasattr(results, "chats") or results.chats is None:
-                        logger.debug(f"Нет атрибута chats в результатах для '{keyword}'")
+                        logger.debug(f"Нет атрибута chats в результатах для '{keyword}' - переходим к следующему")
                         continue
                     
                     seen_channels = set()
@@ -287,6 +299,137 @@ class Discovery:
                 pass
         
         logger.info(f"🔍 Global Telegram Search: найдено {len(found_channels)} новых каналов")
+        
+        # ── ДОПОЛНИТЕЛЬНЫЙ ПОИСК: Если найдено 0 каналов, ищем в сообщениях ────────
+        if len(found_channels) == 0:
+            logger.info("🔍 Найдено 0 каналов через глобальный поиск. Пробуем поиск в сообщениях по ключевым словам...")
+            message_channels = await self._search_channels_in_messages(search_keywords[:5])  # Ограничиваем до 5 запросов
+            if message_channels:
+                logger.info(f"✅ Поиск в сообщениях: найдено {len(message_channels)} каналов")
+                found_channels.extend(message_channels)
+        
+        return found_channels
+
+    async def _search_channels_in_messages(self, keywords: List[str]) -> List[Dict]:
+        """Поиск ссылок на открытые чаты внутри сообщений других групп по ключевым словам.
+        
+        Это позволяет находить ссылки на открытые чаты, которые упоминаются в других группах.
+        
+        Args:
+            keywords: Список ключевых слов для поиска в сообщениях.
+        
+        Returns:
+            Список словарей с полями: link, title, type='telegram', participants_count
+        """
+        from telethon import TelegramClient
+        from telethon.tl.functions.messages import SearchRequest
+        from telethon.tl.types import MessageEntityUrl, MessageEntityTextUrl
+        from telethon.tl.types import Channel, Chat
+        from config import API_ID, API_HASH
+        import re
+        
+        found_channels = []
+        client = TelegramClient('anton_parser', API_ID, API_HASH)
+        
+        try:
+            await client.connect()
+            if not await client.is_user_authorized():
+                logger.warning("⚠️ Telethon не авторизован для поиска в сообщениях")
+                return []
+            
+            # Используем известные открытые каналы как отправную точку для поиска
+            known_channels = [
+                "novostroyki_moscow",
+                "realtymoscow",
+                "pereplanirovka_msk",
+                "remont_kvartir_moskva",
+            ]
+            
+            for channel_username in known_channels:
+                try:
+                    entity = await client.get_entity(channel_username)
+                    if not isinstance(entity, Channel):
+                        continue
+                    
+                    # Ищем сообщения с ключевыми словами в этом канале
+                    for keyword in keywords[:3]:  # Ограничиваем до 3 ключевых слов на канал
+                        try:
+                            messages = await client(SearchRequest(
+                                peer=entity,
+                                q=keyword,
+                                filter=None,
+                                min_date=None,
+                                max_date=None,
+                                offset_id=0,
+                                add_offset=0,
+                                limit=10,  # Максимум 10 сообщений на запрос
+                                max_id=0,
+                                min_id=0,
+                                hash=0
+                            ))
+                            
+                            if not messages or not hasattr(messages, "messages"):
+                                continue
+                            
+                            # Извлекаем ссылки на каналы из сообщений
+                            for msg in messages.messages:
+                                if not hasattr(msg, "message"):
+                                    continue
+                                
+                                text = msg.message or ""
+                                
+                                # Ищем ссылки t.me/ в тексте
+                                telegram_links = re.findall(r't\.me/([a-zA-Z0-9_]+)', text)
+                                
+                                for link_username in telegram_links:
+                                    if link_username in known_channels:
+                                        continue  # Пропускаем уже известные каналы
+                                    
+                                    try:
+                                        # Пробуем получить информацию о канале по ссылке
+                                        link_entity = await client.get_entity(f"t.me/{link_username}")
+                                        
+                                        if isinstance(link_entity, Channel):
+                                            if hasattr(link_entity, "access_hash") and link_entity.access_hash:
+                                                username = getattr(link_entity, "username", None)
+                                                if username:
+                                                    link = f"https://t.me/{username}"
+                                                    title = getattr(link_entity, "title", "") or username
+                                                    participants_count = getattr(link_entity, "participants_count", 0)
+                                                    
+                                                    # Проверяем на дубликаты
+                                                    if not any(c.get("link") == link for c in found_channels):
+                                                        found_channels.append({
+                                                            "link": link,
+                                                            "title": title,
+                                                            "type": "telegram",
+                                                            "participants_count": participants_count,
+                                                            "geo_tag": "Москва/МО",
+                                                        })
+                                                        logger.debug(f"✅ Найден канал через поиск в сообщениях: {link}")
+                                    except Exception as link_error:
+                                        # Игнорируем ошибки получения канала (приватный, не существует и т.д.)
+                                        logger.debug(f"⚠️ Не удалось получить канал t.me/{link_username}: {link_error}")
+                                        continue
+                            
+                            await asyncio.sleep(0.5)  # Антифлуд
+                        except Exception as search_error:
+                            logger.debug(f"⚠️ Ошибка поиска в сообщениях канала {channel_username} по '{keyword}': {search_error}")
+                            continue
+                    
+                    await asyncio.sleep(1)  # Задержка между каналами
+                except Exception as channel_error:
+                    logger.debug(f"⚠️ Ошибка доступа к каналу {channel_username}: {channel_error}")
+                    continue
+            
+        except Exception as e:
+            logger.warning(f"⚠️ Ошибка при поиске каналов в сообщениях: {e}")
+        finally:
+            try:
+                await client.disconnect()
+            except Exception:
+                pass
+        
         return found_channels
 
     async def find_new_sources(self, keywords: List[str] = None) -> List[Dict]:
