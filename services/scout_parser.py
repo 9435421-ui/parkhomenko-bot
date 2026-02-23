@@ -1319,7 +1319,7 @@ class ScoutParser:
                     pass
 
             stored_link = self._channel_id_to_link(cid) if cid else link
-            return {"id": cid, "title": title, "link": stored_link, "participants_count": participants}
+            return {"id": cid, "title": title, "link": stored_link, "participants": participants}
         except Exception as e:
             logger.warning("resolve_telegram_link %s: %s", link, e)
             return None
