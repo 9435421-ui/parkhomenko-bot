@@ -294,8 +294,11 @@ class ScoutParser:
         if not self.tg_channels:
             self.tg_channels = self.TG_CHANNELS
 
-        self.vk_groups = self._load_vk_groups()
-        if not self.vk_groups and SCOUT_VK_GROUPS:
+        # ── VK ГРУППЫ: Инициализация пустым списком ────────────────────────────────────
+        # Реальная загрузка из БД происходит асинхронно в parse_vk() через _load_vk_groups(db=db)
+        # Здесь инициализируем fallback из .env для обратной совместимости
+        self.vk_groups = []
+        if SCOUT_VK_GROUPS:
             self.vk_groups = [{"id": g.strip(), "name": g.strip(), "geo": "Москва/МО"} for g in SCOUT_VK_GROUPS if g and g.strip()]
         if not self.vk_groups:
             self.vk_groups = self.VK_GROUPS
@@ -315,7 +318,10 @@ class ScoutParser:
         self._get_entity_interval = 60.0
         self._last_get_entity_at = 0.0
 
-        logger.info(f"🔍 ScoutParser инициализирован. Включен: {'✅' if self.enabled else '❌'}. TG каналов: {len(self.tg_channels)}, VK групп: {len(self.vk_groups)}. Debug: {'✅' if self.debug_mode else '❌'}")
+        # ── ЛОГИРОВАНИЕ: Используем fallback из .env для подсчёта VK групп ─────────────
+        # Реальная загрузка из БД произойдёт в parse_vk(), здесь показываем только fallback
+        vk_groups_count = len(self.vk_groups) if isinstance(self.vk_groups, list) else 0
+        logger.info(f"🔍 ScoutParser инициализирован. Включен: {'✅' if self.enabled else '❌'}. TG каналов: {len(self.tg_channels)}, VK групп (fallback из .env): {vk_groups_count}. Debug: {'✅' if self.debug_mode else '❌'}")
 
     def _load_tg_channels(self) -> List[Dict]:
         """Загрузка TG каналов из .env"""
