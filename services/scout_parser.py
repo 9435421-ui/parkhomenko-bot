@@ -333,19 +333,70 @@ class ScoutParser:
         
         return channels
 
-    def _load_vk_groups(self) -> List[Dict]:
-        """Загрузка VK групп из .env"""
-        groups = []
-        for i in range(1, 11):
-            group_id = os.getenv(f"SCOUT_VK_GROUP_{i}_ID", "")
-            group_name = os.getenv(f"SCOUT_VK_GROUP_{i}_NAME", "")
-            group_geo = os.getenv(f"SCOUT_VK_GROUP_{i}_GEO", "")
-            if group_id and group_name:
-                groups.append({"id": group_id, "name": group_name, "geo": group_geo or "Москва/МО"})
+    async def _load_vk_groups(self, db=None) -> List[Dict]:
+        """Загрузка VK групп из БД target_resources (приоритет) или .env (fallback).
         
-        # Дефолтные группы если не настроены
+        Args:
+            db: Опциональный объект БД для загрузки из target_resources
+        
+        Returns:
+            List[Dict]: Список групп с полями id, name, geo
+        """
+        groups = []
+        
+        # ── ПРИОРИТЕТ: Загрузка из БД target_resources ────────────────────────────
+        if db:
+            try:
+                vk_resources = await db.get_target_resources(resource_type="vk", active_only=True)
+                for resource in vk_resources:
+                    # Извлекаем ID группы из link (может быть числом или ссылкой vk.com/club123)
+                    link = resource.get("link", "").strip()
+                    group_id = None
+                    
+                    # Парсим ID из разных форматов ссылок
+                    if link.isdigit():
+                        group_id = link
+                    elif "vk.com" in link or "vk.ru" in link:
+                        # Извлекаем ID из ссылки типа vk.com/club123 или vk.com/group123
+                        import re
+                        match = re.search(r'(?:club|group|public)(\d+)', link)
+                        if match:
+                            group_id = match.group(1)
+                        else:
+                            # Пробуем извлечь числовой ID из пути
+                            match = re.search(r'/(\d+)', link)
+                            if match:
+                                group_id = match.group(1)
+                    elif link:
+                        # Если link не ссылка, возможно это уже ID
+                        group_id = link.lstrip("-")
+                    
+                    if group_id:
+                        title = resource.get("title") or resource.get("name") or link
+                        geo = resource.get("geo_tag") or "Москва/МО"
+                        groups.append({
+                            "id": group_id,
+                            "name": title,
+                            "geo": geo
+                        })
+                
+                if groups:
+                    logger.info(f"📊 Загружено {len(groups)} VK групп из БД target_resources")
+            except Exception as e:
+                logger.warning(f"⚠️ Ошибка загрузки VK групп из БД: {e}. Используем .env fallback.")
+        
+        # ── FALLBACK: Загрузка из .env ─────────────────────────────────────────────
         if not groups:
-            groups = self.VK_GROUPS
+            for i in range(1, 11):
+                group_id = os.getenv(f"SCOUT_VK_GROUP_{i}_ID", "")
+                group_name = os.getenv(f"SCOUT_VK_GROUP_{i}_NAME", "")
+                group_geo = os.getenv(f"SCOUT_VK_GROUP_{i}_GEO", "")
+                if group_id and group_name:
+                    groups.append({"id": group_id, "name": group_name, "geo": group_geo or "Москва/МО"})
+            
+            # Дефолтные группы если не настроены
+            if not groups:
+                groups = self.VK_GROUPS
         
         return groups
 
@@ -1207,7 +1258,11 @@ class ScoutParser:
     # === VK PARSING ===
 
     async def _vk_request(self, method: str, params: dict) -> Optional[dict]:
-        """Выполнение запроса к VK API"""
+        """Выполнение запроса к VK API с обработкой ошибок.
+        
+        Returns:
+            dict: Ответ от VK API или None в случае ошибки
+        """
         if not self.vk_token:
             logger.error("❌ VK_TOKEN не настроен")
             return None
@@ -1223,18 +1278,32 @@ class ScoutParser:
                 ) as resp:
                     data = await resp.json()
                     if "error" in data:
-                        logger.error(f"❌ VK API error: {data['error']}")
+                        error_info = data["error"]
+                        error_code = error_info.get("error_code", 0)
+                        error_msg = error_info.get("error_msg", "Unknown error")
+                        
+                        # Специальная обработка ошибок доступа
+                        if error_code in [15, 18, 30]:  # 15=Access denied, 18=Deleted/banned, 30=Private
+                            logger.debug(f"⚠️ VK API access error (code {error_code}): {error_msg}")
+                        else:
+                            logger.error(f"❌ VK API error (code {error_code}): {error_msg}")
                         return None
                     return data.get("response")
         except Exception as e:
             logger.error(f"❌ VK request error: {e}")
             return None
 
-    async def parse_vk(self) -> List[ScoutPost]:
+    async def parse_vk(self, db=None) -> List[ScoutPost]:
         """
-        Парсинг VK групп.
+        Парсинг VK групп из БД target_resources (приоритет) или из .env (fallback).
         
         Ищет посты по ключевым словам, оставляет комментарии.
+        
+        Args:
+            db: Опциональный объект БД для загрузки групп из target_resources
+        
+        Returns:
+            List[ScoutPost]: Список найденных лидов
         """
         if not self.enabled:
             logger.info("🔍 Scout VK: выключен")
@@ -1244,7 +1313,14 @@ class ScoutParser:
             logger.error("❌ VK_TOKEN не настроен")
             return []
         
-        logger.info(f"🔍 Сканирование {len(self.vk_groups)} VK групп...")
+        # ── ЗАГРУЗКА ГРУПП ИЗ БД (ПРИОРИТЕТ) ──────────────────────────────────────
+        vk_groups = await self._load_vk_groups(db=db)
+        
+        if not vk_groups:
+            logger.warning("⚠️ VK группы не найдены ни в БД, ни в .env")
+            return []
+        
+        logger.info(f"🔍 Сканирование {len(vk_groups)} VK групп из БД target_resources...")
 
         posts = []
         keywords = self._load_keywords()
@@ -1255,24 +1331,63 @@ class ScoutParser:
         vk_posts_to_scan = int(os.getenv("SCOUT_VK_POSTS_FOR_COMMENTS", str(min(SCAN_LIMIT // 10, 20))))  # Адаптивно: до 20 постов
         vk_comments_per_post = int(os.getenv("SCOUT_VK_COMMENTS_PER_POST", str(min(SCAN_LIMIT // 3, 50))))  # Адаптивно: до 50 комментариев
 
-        for group in self.vk_groups:
+        for group in vk_groups:
             count = 0
             scanned_wall = 0
             scanned_comments = 0
+            group_id = group["id"]
+            group_name = group["name"]
+            
             try:
-                # Используем глобальный SCAN_LIMIT из config.py для VK wall.get
+                # ── БЕЗОПАСНЫЙ ЗАПРОС: Обёртка try/except для приватных/забаненных групп ────
                 from config import SCAN_LIMIT
-                wall_posts = await self._vk_request("wall.get", {
-                    "owner_id": -int(group["id"]),
-                    "count": min(SCAN_LIMIT, 100),  # Максимум 100 постов (лимит VK API)
-                    "extended": 0
-                })
-
-                if not wall_posts or "items" not in wall_posts:
+                wall_posts = None
+                
+                try:
+                    wall_posts = await self._vk_request("wall.get", {
+                        "owner_id": -int(group_id),
+                        "count": min(SCAN_LIMIT, 100),  # Максимум 100 постов (лимит VK API)
+                        "extended": 0
+                    })
+                except Exception as api_error:
+                    # Пропускаем приватные/забаненные группы без краша всего цикла
+                    error_msg = str(api_error)
+                    if "access denied" in error_msg.lower() or "private" in error_msg.lower() or "banned" in error_msg.lower():
+                        logger.warning(f"⚠️ VK группа '{group_name}' ({group_id}): приватная/забаненная — пропущена")
+                    else:
+                        logger.warning(f"⚠️ VK группа '{group_name}' ({group_id}): ошибка API — {error_msg}")
+                    
                     self.last_scan_report.append({
                         "type": "vk",
-                        "name": group["name"],
-                        "id": group["id"],
+                        "name": group_name,
+                        "id": group_id,
+                        "status": "error",
+                        "posts": 0,
+                        "scanned": 0,
+                        "error": f"API error: {error_msg[:100]}",
+                    })
+                    continue
+
+                # Проверка на ошибки VK API (например, группа удалена или недоступна)
+                if not wall_posts:
+                    logger.warning(f"⚠️ VK группа '{group_name}' ({group_id}): wall.get вернул None — пропущена")
+                    self.last_scan_report.append({
+                        "type": "vk",
+                        "name": group_name,
+                        "id": group_id,
+                        "status": "error",
+                        "posts": 0,
+                        "scanned": 0,
+                        "error": "wall.get вернул None",
+                    })
+                    continue
+
+                if "items" not in wall_posts:
+                    logger.warning(f"⚠️ VK группа '{group_name}' ({group_id}): нет поля 'items' в ответе — пропущена")
+                    self.last_scan_report.append({
+                        "type": "vk",
+                        "name": group_name,
+                        "id": group_id,
                         "status": "ok",
                         "posts": 0,
                         "scanned": 0,
@@ -1283,7 +1398,9 @@ class ScoutParser:
                 items = wall_posts["items"]
                 scanned_wall = len(items)
                 self.total_scanned += scanned_wall
-                logger.info(f"📊 VK группа {group['name']}: проверено постов на стене: {scanned_wall}")
+                
+                # ── ЛОГИРОВАНИЕ: "VK Scan: Processing [Group Name] ([ID]) - [N] new posts found" ────
+                logger.info(f"📘 VK Scan: Processing {group_name} ({group_id}) - {scanned_wall} new posts found")
 
                 # Посты на стене
                 item_count = 0
@@ -1389,30 +1506,34 @@ class ScoutParser:
                 total_scanned_group = scanned_wall + scanned_comments
                 self.last_scan_report.append({
                     "type": "vk",
-                    "name": group["name"],
-                    "id": group["id"],
+                    "name": group_name,
+                    "id": group_id,
                     "status": "ok",
                     "posts": count,
                     "scanned": total_scanned_group,
                     "error": None,
                 })
-                logger.info(f"📊 VK группа {group['name']}: всего просмотрено {total_scanned_group} (посты: {scanned_wall}, комментарии: {scanned_comments}), найдено лидов: {count}")
+                logger.info(f"📊 VK группа {group_name}: всего просмотрено {total_scanned_group} (посты: {scanned_wall}, комментарии: {scanned_comments}), найдено лидов: {count}")
                 if count > 0 and db:
                     try:
                         await db.set_setting("scout_vk_lead_" + str(group["id"]), datetime.now().isoformat())
                     except Exception:
                         pass
             except Exception as e:
-                logger.error(f"❌ Ошибка группы {group['name']}: {e}")
+                # Безопасная обработка ошибок: логируем и продолжаем цикл
+                error_msg = str(e)[:200]
+                logger.error(f"❌ Ошибка группы {group_name} ({group_id}): {error_msg}")
                 self.last_scan_report.append({
                     "type": "vk",
-                    "name": group["name"],
-                    "id": group["id"],
+                    "name": group_name,
+                    "id": group_id,
                     "status": "error",
                     "posts": 0,
                     "scanned": 0,
-                    "error": str(e)[:200],
+                    "error": error_msg,
                 })
+                # Продолжаем цикл — не падаем на одной группе
+                continue
         
         logger.info(f"🔍 VK: найдено {len(posts)} постов с лидами")
         return posts
@@ -1478,8 +1599,12 @@ class ScoutParser:
 
     # === FULL SCAN ===
 
-    async def scan_all(self) -> List[ScoutPost]:
-        """Полное сканирование всех источников. Заполняет last_scan_report."""
+    async def scan_all(self, db=None) -> List[ScoutPost]:
+        """Полное сканирование всех источников. Заполняет last_scan_report.
+        
+        Args:
+            db: Опциональный объект БД для загрузки ресурсов из target_resources
+        """
         self.last_scan_report = []
         self.last_scan_at = datetime.now()
         # Сбрасываем статистику перед новым сканом
@@ -1490,13 +1615,13 @@ class ScoutParser:
         all_posts = []
 
         try:
-            tg_posts = await self.parse_telegram()
+            tg_posts = await self.parse_telegram(db=db)
             all_posts.extend(tg_posts)
         except Exception as e:
             logger.error(f"❌ TG scan error: {e}")
 
         try:
-            vk_posts = await self.parse_vk()
+            vk_posts = await self.parse_vk(db=db)  # Передаём БД для загрузки VK групп из target_resources
             all_posts.extend(vk_posts)
         except Exception as e:
             logger.error(f"❌ VK scan error: {e}")

@@ -639,7 +639,7 @@ class LeadHunter:
         main_db = await self._ensure_db_connected()
         
         tg_posts = await self.parser.parse_telegram(db=main_db)
-        vk_posts = await self.parser.parse_vk()
+        vk_posts = await self.parser.parse_vk(db=main_db)  # Передаём БД для загрузки групп из target_resources
         all_posts = tg_posts + vk_posts
 
         # Если лидов не найдено, пробуем найти новые источники через Discovery
