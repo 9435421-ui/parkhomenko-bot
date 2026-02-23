@@ -331,9 +331,12 @@ class ScoutParser:
         self.total_leads = 0  # Найдено лидов
         self.total_hot_leads = 0  # Горячих лидов
 
-        # Anti-Flood: не более одного get_entity в 60 секунд (защита сессии от бана)
-        self._get_entity_interval = 60.0
+        # Anti-Flood: разные интервалы для проверенных и новых источников
+        self._get_entity_interval_verified = 5.0  # 5 секунд для проверенных источников (из БД)
+        self._get_entity_interval_new = 60.0  # 60 секунд для новых источников (Discovery)
+        self._get_entity_interval = self._get_entity_interval_verified  # По умолчанию используем короткий интервал
         self._last_get_entity_at = 0.0
+        self._is_verified_source = False  # Флаг для определения типа источника
 
         # ── ЛОГИРОВАНИЕ: Используем fallback из .env для подсчёта VK групп ─────────────
         # Реальная загрузка из БД произойдёт в parse_vk(), здесь показываем только fallback
@@ -519,6 +522,9 @@ class ScoutParser:
         - Смягченные фильтры: лид = [Тех. термин] + [Вопрос ИЛИ Коммерческий маркер]
         Отсекаем мусор: «продам», «услуги сантехника», «ремонт под ключ» и т.п.
         """
+        # ── ЛОГИРОВАНИЕ: Отслеживание анализа текста в реальном времени ─────────────
+        logger.info(f"--- Начинаю анализ текста: {text[:50]}...")
+        
         if not text or not self._is_relevant_post(text):
             return False
         
@@ -618,18 +624,32 @@ class ScoutParser:
             return f"https://t.me/c/{sid.replace('-100', '')}"
         return f"https://t.me/{sid}"
 
-    async def _wait_get_entity_throttle(self) -> None:
-        """Ждать до истечения интервала с последнего get_entity (Anti-Flood: 1 запрос / 60 сек)."""
+    async def _wait_get_entity_throttle(self, is_verified: bool = False) -> None:
+        """Ждать до истечения интервала с последнего get_entity.
+        
+        Args:
+            is_verified: True если источник проверенный (из БД), False если новый (Discovery)
+        """
+        # Выбираем интервал в зависимости от типа источника
+        interval = self._get_entity_interval_verified if is_verified else self._get_entity_interval_new
+        
         now = time.monotonic()
         elapsed = now - self._last_get_entity_at
-        if elapsed < self._get_entity_interval and self._last_get_entity_at > 0:
-            wait = self._get_entity_interval - elapsed
-            logger.info("[SCOUT] Пауза %.0f сек до следующей проверки ссылки (anti-flood).", wait)
+        if elapsed < interval and self._last_get_entity_at > 0:
+            wait = interval - elapsed
+            source_type = "проверенный" if is_verified else "новый"
+            logger.info("[SCOUT] Пауза %.0f сек до следующей проверки ссылки (%s источник, anti-flood).", wait, source_type)
             await asyncio.sleep(wait)
 
-    async def _throttled_get_entity(self, client, peer):
-        """Вызов get_entity с лимитом не чаще 1 раз в 60 секунд."""
-        await self._wait_get_entity_throttle()
+    async def _throttled_get_entity(self, client, peer, is_verified: bool = False):
+        """Вызов get_entity с лимитом (5 сек для проверенных, 60 сек для новых).
+        
+        Args:
+            client: Telethon client
+            peer: Peer для получения entity
+            is_verified: True если источник проверенный (из БД), False если новый (Discovery)
+        """
+        await self._wait_get_entity_throttle(is_verified=is_verified)
         entity = await client.get_entity(peer)
         self._last_get_entity_at = time.monotonic()
         return entity
@@ -746,7 +766,9 @@ class ScoutParser:
                     if not link:
                         continue
                     try:
-                        entity = await self._throttled_get_entity(client, link)
+                        # Проверенные источники из БД: используем короткий интервал (5 сек)
+                        is_verified = t.get("db_id") is not None  # Если есть db_id - это проверенный источник
+                        entity = await self._throttled_get_entity(client, link, is_verified=is_verified)
                         cid = getattr(entity, "id", None)
                         if cid is None:
                             logger.warning(
@@ -833,7 +855,9 @@ class ScoutParser:
                 from telethon.tl.functions.channels import GetFullChannelRequest
                 from telethon.tl.types import Channel
                 
-                entity = await self._throttled_get_entity(client, cid)
+                # Проверенные источники из БД: используем короткий интервал (5 сек)
+                is_verified = channel.get("db_id") is not None
+                entity = await self._throttled_get_entity(client, cid, is_verified=is_verified)
                 if isinstance(entity, Channel):
                     full_channel = await client(GetFullChannelRequest(entity))
                     if full_channel.full_chat.linked_chat_id:
@@ -1049,7 +1073,9 @@ class ScoutParser:
                         try:
                             participants = None
                             try:
-                                ent = await self._throttled_get_entity(client, cid)
+                                # Проверенные источники из БД: используем короткий интервал (5 сек)
+                                is_verified = channel.get("db_id") is not None
+                                ent = await self._throttled_get_entity(client, cid, is_verified=is_verified)
                                 participants = getattr(ent, "participants_count", None)
                             except Exception:
                                 pass
@@ -1172,15 +1198,16 @@ class ScoutParser:
                     "error": str(e)[:200],
                 })
 
-        # Режим «Тишины»: перед проверкой новых ссылок — пауза 60 сек (защита сессии)
+        # Режим «Тишины»: перед проверкой новых ссылок — пауза 10 сек (для новых источников)
         if new_links_queue:
-            logger.info("[SCOUT] Режим тишины: пауза 60 сек перед проверкой %s новых ссылок.", len(new_links_queue))
-            print("[SCOUT] Режим тишины: пауза 60 сек перед проверкой новых ссылок.", flush=True)
-            await asyncio.sleep(60)
-        # Обработка очереди: строго по одной с паузой 60 сек между запросами (anti-flood)
+            logger.info("[SCOUT] Режим тишины: пауза 10 сек перед проверкой %s новых ссылок (Discovery).", len(new_links_queue))
+            print("[SCOUT] Режим тишины: пауза 10 сек перед проверкой новых ссылок.", flush=True)
+            await asyncio.sleep(10)
+        # Обработка очереди: строго по одной с паузой 60 сек между запросами (anti-flood для новых источников)
         for url in new_links_queue:
             try:
-                entity = await self._throttled_get_entity(client, url)
+                # Новые ссылки из Discovery: используем длинный интервал (60 сек)
+                entity = await self._throttled_get_entity(client, url, is_verified=False)
                 if isinstance(entity, (Channel, Chat)):
                     title = getattr(entity, "title", None) or getattr(entity, "username", None) or str(entity.id)
                     if entity.id:
@@ -1270,18 +1297,20 @@ class ScoutParser:
             await client.disconnect()
             return None
         try:
-            await self._wait_get_entity_throttle()
+            # resolve_telegram_link используется для новых ссылок (Discovery), используем длинный интервал
+            await self._wait_get_entity_throttle(is_verified=False)
             entity = await client.get_entity(link)
             self._last_get_entity_at = time.monotonic()
             cid = getattr(entity, "id", None)
             title = getattr(entity, "title", None) or getattr(entity, "username", None) or (str(cid) if cid else link)
             participants = getattr(entity, "participants_count", None)
             if participants is None and isinstance(entity, (Channel, Chat)):
-                try:
-                    await self._wait_get_entity_throttle()
-                    full = await client.get_entity(entity)
-                    self._last_get_entity_at = time.monotonic()
-                    participants = getattr(full, "participants_count", None)
+                                try:
+                                    # Новые ссылки из Discovery: используем длинный интервал (60 сек)
+                                    await self._wait_get_entity_throttle(is_verified=False)
+                                    full = await client.get_entity(entity)
+                                    self._last_get_entity_at = time.monotonic()
+                                    participants = getattr(full, "participants_count", None)
                 except Exception:
                     pass
             stored_link = self._channel_id_to_link(cid) if cid else link
