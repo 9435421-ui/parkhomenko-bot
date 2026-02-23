@@ -1306,12 +1306,12 @@ class ScoutParser:
             title = getattr(entity, "title", None) or getattr(entity, "username", None) or (str(cid) if cid else link)
             participants = getattr(entity, "participants_count", None)
             if participants is None and isinstance(entity, (Channel, Chat)):
-                                try:
-                                    # Новые ссылки из Discovery: используем длинный интервал (60 сек)
-                                    await self._wait_get_entity_throttle(is_verified=False)
-                                    full = await client.get_entity(entity)
-                                    self._last_get_entity_at = time.monotonic()
-                                    participants = getattr(full, "participants_count", None)
+                try:
+                    # Новые ссылки из Discovery: используем длинный интервал (60 сек)
+                    await self._wait_get_entity_throttle(is_verified=False)
+                    full = await client.get_entity(entity)
+                    self._last_get_entity_at = time.monotonic()
+                    participants = getattr(full, "participants_count", None)
                 except Exception:
                     pass
             stored_link = self._channel_id_to_link(cid) if cid else link
