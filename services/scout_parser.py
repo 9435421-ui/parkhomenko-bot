@@ -1301,7 +1301,6 @@ class ScoutParser:
             await self._wait_get_entity_throttle(is_verified=False)
             entity = await client.get_entity(link)
             self._last_get_entity_at = time.monotonic()
-            
             cid = getattr(entity, "id", None)
             title = getattr(entity, "title", None) or getattr(entity, "username", None)
             participants = getattr(entity, "participants_count", None)
