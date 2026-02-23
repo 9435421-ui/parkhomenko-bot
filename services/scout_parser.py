@@ -66,6 +66,23 @@ class ScoutParser:
     # Добавьте сюда VK-группы ЖК или тематические сообщества если нужно.
     VK_GROUPS: list = []
 
+    # === STOP_KEYWORDS: Черный список для жесткой фильтрации (до отправки в ИИ) ===
+    # Если любое из этих слов встречается в тексте — пост/комментарий удаляется до этапа отправки в нейросеть (экономия токенов)
+    STOP_KEYWORDS = [
+        "генеалогия",
+        "РГАДА",
+        "архив",
+        "архивные документы",
+        "съезд партии",
+        "партия",
+        "волейбол",
+        "волейбольный турнир",
+        "футбол",
+        "вакансия",
+        "аренда",
+        "съезд",
+    ]
+    
     # === КЛЮЧЕВЫЕ СЛОВА (в т.ч. боли жильцов) ===
     KEYWORDS = [
         "перепланировка",
@@ -380,10 +397,13 @@ class ScoutParser:
                     if group_id:
                         title = resource.get("title") or resource.get("name") or link
                         geo = resource.get("geo_tag") or "Москва/МО"
+                        is_high_priority = resource.get("is_high_priority") or 0
                         groups.append({
                             "id": group_id,
                             "name": title,
-                            "geo": geo
+                            "geo": geo,
+                            "is_high_priority": bool(is_high_priority),  # Приоритетный ЖК из БД
+                            "db_id": resource.get("id"),  # ID записи в БД для обновления
                         })
                 
                 if groups:
@@ -398,11 +418,21 @@ class ScoutParser:
                 group_name = os.getenv(f"SCOUT_VK_GROUP_{i}_NAME", "")
                 group_geo = os.getenv(f"SCOUT_VK_GROUP_{i}_GEO", "")
                 if group_id and group_name:
-                    groups.append({"id": group_id, "name": group_name, "geo": group_geo or "Москва/МО"})
+                    groups.append({
+                        "id": group_id,
+                        "name": group_name,
+                        "geo": group_geo or "Москва/МО",
+                        "is_high_priority": False,  # По умолчанию не приоритетный
+                        "db_id": None,
+                    })
             
             # Дефолтные группы если не настроены
             if not groups:
-                groups = self.VK_GROUPS
+                groups = [{
+                    **g,
+                    "is_high_priority": False,
+                    "db_id": None,
+                } for g in self.VK_GROUPS]
         
         return groups
 
@@ -484,6 +514,7 @@ class ScoutParser:
     def detect_lead(self, text: str) -> bool:
         """
         Умный поиск лидов (Intent v3.0): 
+        - STOP_KEYWORDS: жесткая фильтрация до отправки в ИИ (экономия токенов)
         - HOT_TRIGGERS: если найдена критическая фраза - лид сразу
         - Смягченные фильтры: лид = [Тех. термин] + [Вопрос ИЛИ Коммерческий маркер]
         Отсекаем мусор: «продам», «услуги сантехника», «ремонт под ключ» и т.п.
@@ -492,6 +523,12 @@ class ScoutParser:
             return False
         
         text_lower = text.lower()
+        
+        # ── STOP_KEYWORDS: Жесткая фильтрация до отправки в ИИ ──────────────────────
+        for stop_keyword in self.STOP_KEYWORDS:
+            if stop_keyword.lower() in text_lower:
+                logger.debug(f"🚫 STOP_KEYWORD обнаружен: '{stop_keyword}' → пост отфильтрован до отправки в ИИ")
+                return False
         
         # ── HOT_TRIGGERS: Критические фразы - лид сразу ──────────────────────────────
         for hot_trigger in self.HOT_TRIGGERS:
@@ -1337,12 +1374,24 @@ class ScoutParser:
         vk_posts_to_scan = int(os.getenv("SCOUT_VK_POSTS_FOR_COMMENTS", str(min(SCAN_LIMIT // 10, 20))))  # Адаптивно: до 20 постов
         vk_comments_per_post = int(os.getenv("SCOUT_VK_COMMENTS_PER_POST", str(min(SCAN_LIMIT // 3, 50))))  # Адаптивно: до 50 комментариев
 
+        # ── ПРИОРИТЕТНЫЕ ЖК: Перемещаем в начало списка для приоритетной обработки ────
+        priority_groups = [g for g in vk_groups if g.get("is_high_priority")]
+        regular_groups = [g for g in vk_groups if not g.get("is_high_priority")]
+        vk_groups = priority_groups + regular_groups
+        
+        if priority_groups:
+            logger.info(f"⭐ Приоритетных ЖК найдено: {len(priority_groups)} (будут обработаны первыми)")
+        
         for group in vk_groups:
             count = 0
             scanned_wall = 0
             scanned_comments = 0
             group_id = group["id"]
             group_name = group["name"]
+            is_priority = group.get("is_high_priority", False)
+            
+            if is_priority:
+                logger.info(f"⭐ Обработка ПРИОРИТЕТНОГО ЖК: {group_name} ({group_id})")
             
             try:
                 # ── БЕЗОПАСНЫЙ ЗАПРОС: Обёртка try/except для приватных/забаненных групп ────
@@ -1424,10 +1473,22 @@ class ScoutParser:
                     if item_count % 20 == 0:
                         await asyncio.sleep(0.5)
                     
+                    # ── STOP_KEYWORDS: Фильтрация до отправки в ИИ ─────────────────────
+                    text_lower = text.lower()
+                    has_stop_keyword = any(stop_kw.lower() in text_lower for stop_kw in self.STOP_KEYWORDS)
+                    if has_stop_keyword:
+                        logger.debug(f"🚫 Пост отфильтрован по STOP_KEYWORD: {text[:50]}...")
+                        continue
+                    
                     if self.detect_lead(text):
+                        # ── ПРИОРИТЕТНЫЙ ЖК: Добавляем маркер в source_name ────────────
+                        source_name_display = group["name"]
+                        if is_priority:
+                            source_name_display = f"⭐ ПРИОРИТЕТНЫЙ ЖК: {group['name']}"
+                        
                         post = ScoutPost(
                             source_type="vk",
-                            source_name=group["name"],
+                            source_name=source_name_display,
                             source_id=group["id"],
                             post_id=str(item["id"]),
                             text=text,
@@ -1451,73 +1512,37 @@ class ScoutParser:
                                 self.generate_outreach_message("vk", group["geo"])
                             )
 
+                # ── ПАРСИНГ КОММЕНТАРИЕВ ПОД ПОСТАМИ (wall.getComments) ────────────────
                 # Комментарии к постам — там чаще пишут люди «посоветуйте мастера», «как узаконить»
-                comment_post_count = 0
-                for item in items[:vk_posts_to_scan]:
-                    comment_post_count += 1
-                    comments_data = await self._vk_request("wall.getComments", {
-                        "owner_id": -int(group["id"]),
-                        "post_id": item["id"],
-                        "count": vk_comments_per_post,
-                        "need_likes": 0,
-                        "extended": 0,
-                    })
-                    if not comments_data or "items" not in comments_data:
-                        continue
-                    comment_count = 0
-                    for comm in comments_data.get("items", []):
-                        comment_count += 1
-                        scanned_comments += 1
-                        self.total_scanned += 1
-                        ctext = comm.get("text", "")
-                        if not ctext:
-                            continue
-                        # Проверяем наличие ключевых слов
-                        has_keywords = any(kw.lower() in ctext.lower() for kw in keywords)
-                        if has_keywords:
-                            self.total_with_keywords += 1
-                        
-                        # Умная задержка: каждые 20 комментариев делаем паузу 0.5 сек для избежания FloodWait
-                        if comment_count % 20 == 0:
-                            await asyncio.sleep(0.5)
-                        
-                        if not self.detect_lead(ctext):
-                            continue
-                        post = ScoutPost(
-                            source_type="vk",
-                            source_name=group["name"] + " (коммент)",
-                            source_id=group["id"],
-                            post_id=f"{item['id']}_c{comm.get('id', 0)}",
-                            text=ctext,
-                            author_id=comm.get("from_id"),
-                            url=f"https://vk.com/wall-{group['id']}_{item['id']}?reply={comm.get('id', 0)}",
-                            published_at=datetime.fromtimestamp(comm.get("date", 0)) if comm.get("date") else None,
-                            likes=0,
-                            comments=0,
-                        )
-                        posts.append(post)
-                        count += 1
-                        self.total_leads += 1
-                        logger.info(f"✅ Найден лид в комментариях VK группы {group['name']}: {ctext[:80]}...")
-                        if comm.get("from_id"):
-                            await self.send_vk_message(
-                                comm["from_id"],
-                                self.generate_outreach_message("vk", group["geo"])
-                            )
-                    
-                    # Умная задержка: каждые 5 постов с комментариями делаем паузу 0.5 сек
-                    if comment_post_count % 5 == 0:
-                        await asyncio.sleep(0.5)
+                comment_posts = await self.parse_vk_comments(group, items[:vk_posts_to_scan], keywords, db)
+                posts.extend(comment_posts)
+                scanned_comments += len(comment_posts)
+                count += len(comment_posts)
+                
+                # ── ПАРСИНГ ОБСУЖДЕНИЙ (board.getComments) ──────────────────────────────
+                # Обсуждения (Discussions) — отдельные темы в группе, где люди задают вопросы
+                board_posts = await self.parse_vk_boards(group, keywords, db)
+                posts.extend(board_posts)
+                scanned_comments += len(board_posts)
+                count += len(board_posts)
 
+                # Подсчитываем общее количество отсканированных элементов
                 total_scanned_group = scanned_wall + scanned_comments
+                
+                # Добавляем маркер приоритета в отчет
+                report_name = group_name
+                if is_priority:
+                    report_name = f"⭐ {group_name}"
+                
                 self.last_scan_report.append({
                     "type": "vk",
-                    "name": group_name,
+                    "name": report_name,
                     "id": group_id,
                     "status": "ok",
                     "posts": count,
                     "scanned": total_scanned_group,
                     "error": None,
+                    "is_priority": is_priority,  # Маркер приоритета для отчетов
                 })
                 logger.info(f"📊 VK группа {group_name}: всего просмотрено {total_scanned_group} (посты: {scanned_wall}, комментарии: {scanned_comments}), найдено лидов: {count}")
                 if count > 0 and db:
@@ -1572,6 +1597,225 @@ class ScoutParser:
         except Exception as e:
             logger.error(f"❌ Ошибка VK комментария: {e}")
             return False
+
+    async def parse_vk_comments(self, group: dict, wall_items: list, keywords: list, db=None) -> List[ScoutPost]:
+        """
+        Парсинг комментариев под постами VK (wall.getComments).
+        
+        Args:
+            group: Словарь с данными группы (id, name, geo)
+            wall_items: Список постов со стены для проверки комментариев
+            keywords: Список ключевых слов для фильтрации
+            db: Опциональный объект БД для проверки приоритетов
+        
+        Returns:
+            List[ScoutPost]: Список найденных лидов из комментариев
+        """
+        posts = []
+        from config import SCAN_LIMIT
+        vk_comments_per_post = int(os.getenv("SCOUT_VK_COMMENTS_PER_POST", str(min(SCAN_LIMIT // 3, 50))))
+        
+        comment_post_count = 0
+        for item in wall_items:
+            comment_post_count += 1
+            
+            try:
+                comments_data = await self._vk_request("wall.getComments", {
+                    "owner_id": -int(group["id"]),
+                    "post_id": item["id"],
+                    "count": vk_comments_per_post,
+                    "need_likes": 0,
+                    "extended": 0,
+                })
+                
+                if not comments_data or "items" not in comments_data:
+                    continue
+                
+                comment_count = 0
+                for comm in comments_data.get("items", []):
+                    comment_count += 1
+                    ctext = comm.get("text", "")
+                    if not ctext:
+                        continue
+                    
+                    # ── STOP_KEYWORDS: Фильтрация до отправки в ИИ ─────────────────────
+                    text_lower = ctext.lower()
+                    has_stop_keyword = any(stop_kw.lower() in text_lower for stop_kw in self.STOP_KEYWORDS)
+                    if has_stop_keyword:
+                        logger.debug(f"🚫 Комментарий отфильтрован по STOP_KEYWORD: {ctext[:50]}...")
+                        continue
+                    
+                    # Проверяем наличие ключевых слов
+                    has_keywords = any(kw.lower() in text_lower for kw in keywords)
+                    if has_keywords:
+                        self.total_with_keywords += 1
+                    
+                    # Умная задержка: каждые 20 комментариев делаем паузу 0.5 сек для избежания FloodWait
+                    if comment_count % 20 == 0:
+                        await asyncio.sleep(0.5)
+                    
+                    if not self.detect_lead(ctext):
+                        continue
+                    
+                        # ── ПРИОРИТЕТНЫЙ ЖК: Добавляем маркер в source_name ────────────
+                        is_priority = group.get("is_high_priority", False)
+                        source_name_display = group["name"] + " (коммент)"
+                        if is_priority:
+                            source_name_display = f"⭐ ПРИОРИТЕТНЫЙ ЖК: {group['name']} (коммент)"
+                        
+                        post = ScoutPost(
+                            source_type="vk",
+                            source_name=source_name_display,
+                            source_id=group["id"],
+                            post_id=f"{item['id']}_c{comm.get('id', 0)}",
+                            text=ctext,
+                            author_id=comm.get("from_id"),
+                            url=f"https://vk.com/wall-{group['id']}_{item['id']}?reply={comm.get('id', 0)}",
+                            published_at=datetime.fromtimestamp(comm.get("date", 0)) if comm.get("date") else None,
+                            likes=0,
+                            comments=0,
+                            is_comment=True,  # Помечаем как комментарий
+                        )
+                    posts.append(post)
+                    self.total_leads += 1
+                    logger.info(f"✅ Найден лид в комментариях VK группы {group['name']}: {ctext[:80]}...")
+                    
+                    if comm.get("from_id"):
+                        await self.send_vk_message(
+                            comm["from_id"],
+                            self.generate_outreach_message("vk", group["geo"])
+                        )
+                
+                # Умная задержка: каждые 5 постов с комментариями делаем паузу 0.5 сек
+                if comment_post_count % 5 == 0:
+                    await asyncio.sleep(0.5)
+                    
+            except Exception as e:
+                logger.warning(f"⚠️ Ошибка парсинга комментариев к посту {item.get('id')}: {e}")
+                continue
+        
+        return posts
+    
+    async def parse_vk_boards(self, group: dict, keywords: list, db=None) -> List[ScoutPost]:
+        """
+        Парсинг обсуждений VK (board.getComments для тем в разделе "Обсуждения").
+        
+        Args:
+            group: Словарь с данными группы (id, name, geo)
+            keywords: Список ключевых слов для фильтрации
+            db: Опциональный объект БД для проверки приоритетов
+        
+        Returns:
+            List[ScoutPost]: Список найденных лидов из обсуждений
+        """
+        posts = []
+        from config import SCAN_LIMIT
+        vk_topics_limit = int(os.getenv("SCOUT_VK_TOPICS_LIMIT", "50"))  # Последние 50 тем
+        vk_comments_per_topic = int(os.getenv("SCOUT_VK_COMMENTS_PER_TOPIC", str(min(SCAN_LIMIT // 2, 30))))
+        
+        try:
+            # Получаем список тем обсуждений (board.getTopics)
+            topics_data = await self._vk_request("board.getTopics", {
+                "group_id": group["id"],
+                "count": vk_topics_limit,
+                "order": 1,  # 1 = по дате обновления (новые первыми)
+                "extended": 0,
+            })
+            
+            if not topics_data or "items" not in topics_data:
+                logger.debug(f"📋 VK группа {group['name']}: нет обсуждений или они недоступны")
+                return posts
+            
+            topics = topics_data.get("items", [])
+            logger.info(f"💬 VK группа {group['name']}: найдено {len(topics)} тем обсуждений")
+            
+            topic_count = 0
+            for topic in topics:
+                topic_count += 1
+                topic_id = topic.get("id")
+                if not topic_id:
+                    continue
+                
+                try:
+                    # Получаем комментарии к теме (board.getComments)
+                    comments_data = await self._vk_request("board.getComments", {
+                        "group_id": group["id"],
+                        "topic_id": topic_id,
+                        "count": vk_comments_per_topic,
+                        "need_likes": 0,
+                        "extended": 0,
+                    })
+                    
+                    if not comments_data or "items" not in comments_data:
+                        continue
+                    
+                    comment_count = 0
+                    for comm in comments_data.get("items", []):
+                        comment_count += 1
+                        ctext = comm.get("text", "")
+                        if not ctext:
+                            continue
+                        
+                        # ── STOP_KEYWORDS: Фильтрация до отправки в ИИ ─────────────────────
+                        text_lower = ctext.lower()
+                        has_stop_keyword = any(stop_kw.lower() in text_lower for stop_kw in self.STOP_KEYWORDS)
+                        if has_stop_keyword:
+                            logger.debug(f"🚫 Комментарий из обсуждения отфильтрован по STOP_KEYWORD: {ctext[:50]}...")
+                            continue
+                        
+                        # Проверяем наличие ключевых слов
+                        has_keywords = any(kw.lower() in text_lower for kw in keywords)
+                        if has_keywords:
+                            self.total_with_keywords += 1
+                        
+                        # Умная задержка: каждые 20 комментариев делаем паузу 0.5 сек
+                        if comment_count % 20 == 0:
+                            await asyncio.sleep(0.5)
+                        
+                        if not self.detect_lead(ctext):
+                            continue
+                        
+                        # ── ПРИОРИТЕТНЫЙ ЖК: Добавляем маркер в source_name ────────────
+                        is_priority = group.get("is_high_priority", False)
+                        source_name_display = group["name"] + " (обсуждение)"
+                        if is_priority:
+                            source_name_display = f"⭐ ПРИОРИТЕТНЫЙ ЖК: {group['name']} (обсуждение)"
+                        
+                        post = ScoutPost(
+                            source_type="vk",
+                            source_name=source_name_display,
+                            source_id=group["id"],
+                            post_id=f"topic{topic_id}_c{comm.get('id', 0)}",
+                            text=ctext,
+                            author_id=comm.get("from_id"),
+                            url=f"https://vk.com/topic-{group['id']}_{topic_id}?post={comm.get('id', 0)}",
+                            published_at=datetime.fromtimestamp(comm.get("date", 0)) if comm.get("date") else None,
+                            likes=0,
+                            comments=0,
+                            is_comment=True,  # Помечаем как комментарий
+                        )
+                        posts.append(post)
+                        self.total_leads += 1
+                        logger.info(f"✅ Найден лид в обсуждении VK группы {group['name']}: {ctext[:80]}...")
+                        
+                        if comm.get("from_id"):
+                            await self.send_vk_message(
+                                comm["from_id"],
+                                self.generate_outreach_message("vk", group["geo"])
+                            )
+                    
+                    # Умная задержка: каждые 5 тем делаем паузу 0.5 сек
+                    if topic_count % 5 == 0:
+                        await asyncio.sleep(0.5)
+                        
+                except Exception as e:
+                    logger.warning(f"⚠️ Ошибка парсинга обсуждения {topic_id}: {e}")
+                    continue
+                    
+        except Exception as e:
+            logger.warning(f"⚠️ Ошибка получения обсуждений для группы {group['name']}: {e}")
+        
+        return posts
 
     async def send_vk_message(self, user_id: int, message: str) -> bool:
         """
