@@ -125,11 +125,23 @@ class Database:
                     publish_date TIMESTAMP,
                     status TEXT DEFAULT 'draft',
                     image_url TEXT,
+                    image_prompt TEXT,
                     admin_id INTEGER DEFAULT NULL,
                     published_at TIMESTAMP DEFAULT NULL,
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                 )
             """)
+            # Миграция: добавление поля image_prompt если его нет
+            try:
+                await cursor.execute("PRAGMA table_info(content_plan)")
+                columns = await cursor.fetchall()
+                column_names = [col_info[1] for col_info in columns]
+                if "image_prompt" not in column_names:
+                    await cursor.execute("ALTER TABLE content_plan ADD COLUMN image_prompt TEXT")
+                    await self.conn.commit()
+                    logger.debug("✅ Добавлена колонка image_prompt в content_plan")
+            except Exception as e:
+                logger.warning(f"⚠️ Ошибка при добавлении колонки image_prompt: {e}")
             
             # Таблица для дней рождения клиентов
             await cursor.execute("""
@@ -802,7 +814,7 @@ class Database:
     # Разрешённые поля для update_content_plan_entry (whitelist)
     ALLOWED_CONTENT_PLAN_FIELDS = {
         'type', 'channel', 'title', 'body', 'cta', 'theme',
-        'publish_date', 'status', 'image_url', 'admin_id', 'published_at'
+        'publish_date', 'status', 'image_url', 'image_prompt', 'admin_id', 'published_at'
     }
 
     async def update_content_plan_entry(self, post_id: int, **kwargs):

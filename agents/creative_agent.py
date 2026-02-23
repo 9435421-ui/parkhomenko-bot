@@ -5,6 +5,7 @@ Creative Agent — генерация идей контента и анализ 
 import os
 import re
 import logging
+import asyncio
 from typing import List, Dict, Optional
 from datetime import datetime
 from utils.knowledge_base import KnowledgeBase
@@ -12,15 +13,17 @@ from utils import router_ai, yandex_gpt
 
 logger = logging.getLogger(__name__)
 
-# --- ИСПРАВЛЕНИЕ: Адаптивный стиль без упоминаний "High-end" и особняков ---
+# --- СТИЛЬ 2026: Адаптивный стиль для визуалов 2026 года ---
 STYLE_PRESET = (
-    "Realistic interior or technical floor plan matching the text. "
+    "2026-style realistic interior photography or technical floor plan matching the text. "
     "The image must EXACTLY match the post topic and content. "
-    "For mass housing topics (ЖК, хрущевка, ПИК, Самолет): show typical apartment layouts, "
-    "realistic renovation examples, or technical floor plans. "
-    "For technical topics: show diagrams, floor plans, or construction details. "
-    "For general topics: show relevant interior spaces or architectural solutions. "
-    "For news topics: Realistic cityscape of Moscow or official document style. No interior renders. "
+    "For mass housing topics (ЖК, хрущевка, ПИК, Самолет): show modern 2026 apartment layouts, "
+    "contemporary renovation examples, or technical floor plans with current building codes. "
+    "For technical topics: show diagrams, floor plans, or construction details in 2026 style. "
+    "For legal/regulatory topics: show official document style, legal papers, or Moscow cityscape with government buildings. "
+    "For general topics: show relevant interior spaces or architectural solutions in contemporary 2026 design. "
+    "For news topics: Realistic cityscape of Moscow 2026 or official document style. No interior renders. "
+    "Style: Modern, clean, professional. Use contemporary color palettes and lighting. "
     "No abstract elements, no luxury bias, no mansions unless specifically required by the topic. "
     "Focal point on spatial solutions and practical examples. No people, no text on image."
 )
@@ -177,6 +180,160 @@ class CreativeAgent:
             "cta": cta,
             "source": "ai"
         }
+    
+    async def generate_base_expert_pack(self) -> List[Dict]:
+        """
+        Генерирует "Base Expert Pack" — первые 9 постов для запуска контент-воронки.
+        
+        Фокус на:
+        - Доверие (экспертность Юлии, опыт TERION)
+        - Кейсы (московские ЖК: Зиларт, Династия, Символ и др.)
+        - Регуляции 2026 года (новые правила, изменения в законодательстве)
+        
+        Returns:
+            List[Dict]: Список из 9 постов с полями title, body, cta, theme, image_prompt
+        """
+        logger.info("🎯 CreativeAgent: генерация Base Expert Pack (9 постов)...")
+        
+        # ── ТЕМЫ ДЛЯ BASE EXPERT PACK ────────────────────────────────────────────────
+        base_topics = [
+            # 1-3: Доверие и экспертность
+            {
+                "query": "Кто такая Юлия Пархоменко и почему TERION — эксперт по перепланировкам в Москве",
+                "theme": "trust_expertise",
+                "focus": "доверие"
+            },
+            {
+                "query": "Сколько перепланировок согласовала TERION в Москве: реальные цифры и кейсы",
+                "theme": "trust_cases",
+                "focus": "доверие"
+            },
+            {
+                "query": "Почему собственники выбирают TERION для согласования перепланировок: отзывы и результаты",
+                "theme": "trust_reputation",
+                "focus": "доверие"
+            },
+            # 4-6: Кейсы московских ЖК
+            {
+                "query": "Перепланировка в ЖК Зиларт: как TERION помогла узаконить объединение кухни и гостиной",
+                "theme": "case_zilart",
+                "focus": "кейсы"
+            },
+            {
+                "query": "Согласование перепланировки в ЖК Династия: перенос мокрой зоны и объединение комнат",
+                "theme": "case_dynasty",
+                "focus": "кейсы"
+            },
+            {
+                "query": "Узаконивание перепланировки в ЖК Символ: работа с предписанием МЖИ и согласование с БТИ",
+                "theme": "case_symbol",
+                "focus": "кейсы"
+            },
+            # 7-9: Регуляции 2026 года
+            {
+                "query": "Новые правила перепланировок в Москве 2026: что изменилось в законодательстве",
+                "theme": "regulations_2026",
+                "focus": "регуляции"
+            },
+            {
+                "query": "Изменения в требованиях Мосжилинспекции 2026: как избежать штрафов и предписаний",
+                "theme": "regulations_mji",
+                "focus": "регуляции"
+            },
+            {
+                "query": "Обновленные нормы БТИ для перепланировок 2026: новые требования к проектной документации",
+                "theme": "regulations_bti",
+                "focus": "регуляции"
+            },
+        ]
+        
+        posts = []
+        for i, topic_info in enumerate(base_topics, 1):
+            try:
+                logger.info(f"📝 Генерация поста {i}/9: {topic_info['theme']}")
+                
+                # Генерируем контент поста
+                post_data = await self._research_topic(topic_info["query"])
+                
+                # Формируем image_prompt на основе темы и контента
+                image_prompt = self._generate_image_prompt(post_data, topic_info)
+                
+                # Добавляем подпись эксперта в body
+                expert_signature = "\n\n---\n🏡 Эксперт: Юлия Пархоменко\nКомпания: TERION"
+                if expert_signature not in post_data.get("body", ""):
+                    post_data["body"] = post_data.get("body", "") + expert_signature
+                
+                # Убеждаемся, что CTA содержит ссылку на квиз
+                if not post_data.get("cta"):
+                    post_data["cta"] = f"🧐 Узнайте стоимость вашей перепланировки за 1 минуту:\n👉 {self.quiz_link}"
+                
+                # Добавляем метаданные
+                post_data["theme"] = topic_info["theme"]
+                post_data["focus"] = topic_info["focus"]
+                post_data["image_prompt"] = image_prompt
+                
+                posts.append(post_data)
+                logger.info(f"✅ Пост {i}/9 сгенерирован: {post_data.get('title', 'Без названия')}")
+                
+                # Небольшая задержка между генерациями для избежания rate limits
+                await asyncio.sleep(1)
+                
+            except Exception as e:
+                logger.error(f"❌ Ошибка генерации поста {i}/9 ({topic_info['theme']}): {e}")
+                # Добавляем fallback пост
+                posts.append({
+                    "query": topic_info["query"],
+                    "title": f"Важное о {topic_info['theme']}",
+                    "body": f"Экспертный контент по теме: {topic_info['query']}\n\n{expert_signature}",
+                    "cta": f"🧐 Узнайте стоимость вашей перепланировки за 1 минуту:\n👉 {self.quiz_link}",
+                    "theme": topic_info["theme"],
+                    "focus": topic_info["focus"],
+                    "image_prompt": f"2026-style realistic interior or legal document related to {topic_info['theme']}",
+                    "source": "fallback"
+                })
+        
+        logger.info(f"✅ Base Expert Pack сгенерирован: {len(posts)} постов")
+        return posts
+    
+    def _generate_image_prompt(self, post_data: Dict, topic_info: Dict) -> str:
+        """
+        Генерирует промпт для изображения на основе темы и контента поста.
+        
+        Args:
+            post_data: Данные поста (title, body)
+            topic_info: Информация о теме (theme, focus)
+        
+        Returns:
+            str: Промпт для генерации изображения в стиле 2026 года
+        """
+        focus = topic_info.get("focus", "")
+        theme = topic_info.get("theme", "")
+        title = post_data.get("title", "")
+        
+        # Базовый промпт в стиле 2026 года
+        base_prompt = "2026-style professional photography, "
+        
+        if focus == "доверие":
+            # Для постов о доверии: современные интерьеры, офисные пространства, профессиональная атмосфера
+            image_prompt = f"{base_prompt}modern professional interior, contemporary office space, expert consultation setting, clean and trustworthy atmosphere, natural lighting, no people, no text"
+        elif focus == "кейсы":
+            # Для кейсов: конкретные интерьеры ЖК, до/после перепланировки, технические планы
+            if "зиларт" in theme.lower():
+                image_prompt = f"{base_prompt}modern apartment interior in Zilart residential complex, contemporary renovation, open space kitchen-living room, Moscow 2026, realistic interior design, no people, no text"
+            elif "династия" in theme.lower():
+                image_prompt = f"{base_prompt}modern apartment interior in Dynasty residential complex, bathroom relocation, contemporary renovation, Moscow 2026, realistic interior design, no people, no text"
+            elif "символ" in theme.lower():
+                image_prompt = f"{base_prompt}modern apartment interior in Symbol residential complex, legal documents and floor plans, contemporary renovation, Moscow 2026, realistic interior design, no people, no text"
+            else:
+                image_prompt = f"{base_prompt}modern Moscow apartment interior, contemporary renovation example, realistic interior design 2026, no people, no text"
+        elif focus == "регуляции":
+            # Для регуляций: официальные документы, городские пейзажи Москвы, правительственные здания
+            image_prompt = f"{base_prompt}official document style, legal papers, Moscow cityscape 2026, government buildings, professional legal documentation, realistic style, no people, no text"
+        else:
+            # Общий промпт
+            image_prompt = f"{base_prompt}realistic interior or technical floor plan matching the text, contemporary 2026 design, professional photography, no people, no text"
+        
+        return image_prompt
 
 # Создаем экземпляр агента для использования в других файлах
 creative_agent = CreativeAgent()

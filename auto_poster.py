@@ -109,48 +109,111 @@ class AutoPoster:
     async def _publish_to_channel(self, post: dict, channel_config: dict) -> bool:
         """Публикует пост через Publisher в целевой канал (TERION или ДОМ ГРАНД)."""
         try:
-            text = self._format_post_text(post)
+            text = self._format_post_text(post, platform="telegram")
             title = post.get("title", "") or ""
             image_url = post.get("image_url")
+            image_prompt = post.get("image_prompt")
             image_bytes: bytes | None = None
 
-            # Проверка: если image_url пустой, пост не публикуется
+            # ── ГЕНЕРАЦИЯ ИЗОБРАЖЕНИЯ: Если image_url пустой, но есть image_prompt ────
             if not image_url or not image_url.strip():
-                logger.warning(f"⏸️ Пост #{post.get('id')} пропущен: image_url пустой. Ожидаем генерацию изображения.")
-                return False
-
-            # Скачиваем изображение по URL
-            if image_url.startswith("http"):
-                try:
-                    async with aiohttp.ClientSession() as session:
-                        async with session.get(
-                            image_url, timeout=aiohttp.ClientTimeout(total=30)
-                        ) as resp:
-                            if resp.status == 200:
-                                image_bytes = await resp.read()
-                                if image_bytes and len(image_bytes) > 0:
-                                    logger.info(
-                                        f"✅ Изображение скачано ({len(image_bytes)} байт)"
-                                    )
-                                else:
-                                    logger.warning(f"⚠️ Пост #{post.get('id')} пропущен: изображение пустое")
-                                    return False
-                            else:
-                                logger.warning(f"⚠️ Пост #{post.get('id')} пропущен: HTTP {resp.status} при скачивании изображения")
-                                return False
-                except Exception as e:
-                    logger.warning(f"⚠️ Пост #{post.get('id')} пропущен: ошибка скачивания изображения {image_url}: {e}")
+                if image_prompt:
+                    try:
+                        logger.info(f"🖼️ Генерация изображения для поста #{post.get('id')}...")
+                        from handlers.content import _auto_generate_image
+                        import base64
+                        image_b64 = await _auto_generate_image(image_prompt)
+                        if image_b64:
+                            image_bytes = base64.b64decode(image_b64)
+                            logger.info(f"✅ Изображение сгенерировано для поста #{post.get('id')}")
+                        else:
+                            logger.warning(f"⚠️ Не удалось сгенерировать изображение для поста #{post.get('id')}")
+                    except Exception as e:
+                        logger.warning(f"⚠️ Ошибка генерации изображения для поста #{post.get('id')}: {e}")
+                
+                if not image_bytes:
+                    logger.warning(f"⏸️ Пост #{post.get('id')} пропущен: image_url пустой и генерация не удалась.")
                     return False
-            else:
-                logger.warning(f"⚠️ Пост #{post.get('id')} пропущен: image_url не является валидным HTTP URL")
+
+            # Скачиваем изображение по URL (если не было сгенерировано выше)
+            if not image_bytes and image_url:
+                if image_url.startswith("http"):
+                    try:
+                        async with aiohttp.ClientSession() as session:
+                            async with session.get(
+                                image_url, timeout=aiohttp.ClientTimeout(total=30)
+                            ) as resp:
+                                if resp.status == 200:
+                                    image_bytes = await resp.read()
+                                    if image_bytes and len(image_bytes) > 0:
+                                        logger.info(
+                                            f"✅ Изображение скачано ({len(image_bytes)} байт)"
+                                        )
+                                    else:
+                                        logger.warning(f"⚠️ Пост #{post.get('id')} пропущен: изображение пустое")
+                                        return False
+                                else:
+                                    logger.warning(f"⚠️ Пост #{post.get('id')} пропущен: HTTP {resp.status} при скачивании изображения")
+                                    return False
+                    except Exception as e:
+                        logger.warning(f"⚠️ Пост #{post.get('id')} пропущен: ошибка скачивания изображения {image_url}: {e}")
+                        return False
+                elif image_url.startswith("file_id") or len(image_url) > 20:
+                    # Telegram file_id - используем напрямую через bot.get_file
+                    try:
+                        from aiogram import Bot
+                        from config import BOT_TOKEN
+                        bot = Bot(token=BOT_TOKEN)
+                        file = await bot.get_file(image_url)
+                        image_bytes = await bot.download_file(file.file_path)
+                        await bot.session.close()
+                        logger.info(f"✅ Изображение загружено по file_id")
+                    except Exception as e:
+                        logger.warning(f"⚠️ Ошибка загрузки изображения по file_id: {e}")
+                        return False
+                else:
+                    logger.warning(f"⚠️ Пост #{post.get('id')} пропущен: image_url не является валидным HTTP URL или file_id")
+                    return False
+            
+            # Если всё ещё нет изображения, пропускаем пост
+            if not image_bytes:
+                logger.warning(f"⏸️ Пост #{post.get('id')} пропущен: нет изображения")
                 return False
 
-            # ── ИСПРАВЛЕНИЕ: Публикуем в целевой канал, а не во все ──────────────────
+            # ── ПУБЛИКАЦИЯ ВО ВСЕ ПЛАТФОРМЫ: TG, VK, MAX ──────────────────────────────
             channel_id = channel_config['chat_id']
-            success = await publisher.publish_to_telegram(channel_id, text, image_bytes)
+            results = {}
+            
+            # 1. Telegram (основной канал)
+            text_tg = self._format_post_text(post, platform="telegram")
+            results['telegram'] = await publisher.publish_to_telegram(channel_id, text_tg, image_bytes)
+            
+            # 2. VK (кросс-постинг)
+            try:
+                text_vk = self._format_post_text(post, platform="vk")
+                # VK подпись уже добавляется в publish_to_vk, но убеждаемся что она есть
+                results['vk'] = await publisher.publish_to_vk(text_vk, image_bytes, add_signature=True)
+            except Exception as e:
+                logger.warning(f"⚠️ Ошибка публикации в VK: {e}")
+                results['vk'] = False
+            
+            # 3. MAX.ru (кросс-постинг)
+            try:
+                text_max = self._format_post_text(post, platform="max")
+                title = post.get("title", "") or ""
+                results['max'] = await publisher.publish_to_max(text_max, title)
+            except Exception as e:
+                logger.warning(f"⚠️ Ошибка публикации в MAX: {e}")
+                results['max'] = False
+            
+            # Успех если хотя бы одна платформа опубликовала
+            success = any(results.values())
             
             if success:
-                logger.info(f"✅ Пост опубликован в {channel_config['name']} (ID: {channel_id})")
+                platforms_str = ", ".join([k for k, v in results.items() if v])
+                logger.info(f"✅ Пост #{post.get('id')} опубликован в: {platforms_str}")
+            else:
+                logger.warning(f"⚠️ Пост #{post.get('id')} не опубликован ни в одной платформе")
             
             return success
 
@@ -158,8 +221,16 @@ class AutoPoster:
             logger.error(f"❌ Ошибка публикации: {e}")
             return False
 
-    def _format_post_text(self, post: dict) -> str:
-        """Форматирует текст поста с обязательным футером и хэштегами"""
+    def _format_post_text(self, post: dict, platform: str = "telegram") -> str:
+        """Форматирует текст поста с обязательным футером, хэштегами и подписью эксперта.
+        
+        Args:
+            post: Данные поста из БД
+            platform: Платформа публикации ("telegram", "vk", "max")
+        
+        Returns:
+            str: Отформатированный текст поста
+        """
         title = post.get('title', '') or ''
         body = post.get('body', '') or ''
         cta = post.get('cta', '') or ''
@@ -181,13 +252,26 @@ class AutoPoster:
 
         parts = []
         if title:
-            parts.append(f"<b>{title}</b>")
+            # Для Telegram используем HTML, для VK/MAX — обычный текст
+            if platform == "telegram":
+                parts.append(f"<b>{title}</b>")
+            else:
+                parts.append(title)
         if body:
             parts.append(body)
         if cta:
             parts.append(cta)
         
         # Объединяем текст для проверки
+        text_so_far = "\n\n".join(parts)
+        
+        # ── ПОДПИСЬ ЭКСПЕРТА: Обязательна для всех платформ ────────────────────────
+        expert_signature = "\n\n---\n🏡 Эксперт: Юлия Пархоменко\nКомпания: TERION"
+        if "Эксперт: Юлия Пархоменко" not in text_so_far and "Юлия Пархоменко" not in text_so_far:
+            parts.append(expert_signature)
+            logger.info(f"✅ Добавлена подпись эксперта в пост #{post.get('id')}")
+        
+        # Обновляем text_so_far после добавления подписи
         text_so_far = "\n\n".join(parts)
         
         # Проверяем наличие ссылки на квиз
@@ -211,7 +295,15 @@ class AutoPoster:
             parts.append(hashtags)
             logger.info(f"✅ Добавлены правильные хэштеги в пост #{post.get('id')}")
 
-        return "\n\n".join(parts)
+        final_text = "\n\n".join(parts)
+        
+        # Для VK и MAX убираем HTML теги
+        if platform in ("vk", "max"):
+            import re
+            final_text = re.sub(r'<[^>]+>', '', final_text)
+            final_text = re.sub(r'&nbsp;', ' ', final_text)
+        
+        return final_text
 
     async def _send_publication_log(self, post: dict, channel_config: dict):
         """Отправляет лог публикации в группу"""
