@@ -1298,9 +1298,7 @@ class ScoutParser:
             await client.disconnect()
             return None
         try:
-            # resolve_telegram_link используется для новых ссылок (Discovery), используем длинный интервал
-            is_verified = False  # По умолчанию новые ссылки не верифицированы
-            await self._wait_get_entity_throttle(is_verified=is_verified)
+            await self._wait_get_entity_throttle(is_verified=False)
             entity = await client.get_entity(link)
             self._last_get_entity_at = time.monotonic()
             
@@ -1310,7 +1308,7 @@ class ScoutParser:
 
             if participants is None and isinstance(entity, (Channel, Chat)):
                 try:
-                    # Новые ссылки из Discovery: используем интервал в зависимости от верификации
+                    is_verified = False
                     await self._wait_get_entity_throttle(is_verified=is_verified)
                     full = await client.get_entity(entity)
                     self._last_get_entity_at = time.monotonic()
