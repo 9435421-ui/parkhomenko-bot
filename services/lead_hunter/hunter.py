@@ -430,12 +430,19 @@ class LeadHunter:
         card_header: str = "",
         anton_recommendation: str = "",
     ) -> bool:
-        """Отправляет карточку лида в рабочую группу (топик «Горячие лиды») отдельным сообщением с кнопками."""
+        """Отправляет карточку лида в рабочую группу (топик «Горячие лиды») отдельным сообщением с кнопками.
+        
+        Тихие уведомления: если priority_score < 8, отправляется без звука (disable_notification=True).
+        """
         from config import BOT_TOKEN, LEADS_GROUP_CHAT_ID, THREAD_ID_HOT_LEADS
         if not BOT_TOKEN or not LEADS_GROUP_CHAT_ID:
             logger.warning("⚠️ BOT_TOKEN или LEADS_GROUP_CHAT_ID не заданы — карточка в группу не отправлена")
             return False
         text = self._format_lead_card(lead, profile_url, card_header, anton_recommendation)
+        
+        # ── ТИХИЕ УВЕДОМЛЕНИЯ: priority_score < 8 → disable_notification = True ────
+        priority_score = lead.get("priority_score", 0)
+        disable_notification = priority_score < 8  # Тихие уведомления для низкоприоритетных лидов
         
         # ── КНОПКИ ДЕЙСТВИЙ ────────────────────────────────────────────────────────
         url_buttons = []
@@ -473,7 +480,10 @@ class LeadHunter:
                     text,
                     reply_markup=keyboard,
                     message_thread_id=thread_id,
+                    disable_notification=disable_notification,  # Тихие уведомления для priority_score < 8
                 )
+                if disable_notification:
+                    logger.debug(f"🔇 Тихое уведомление отправлено для лида #{lead_id} (priority_score={priority_score})")
                 return True
             finally:
                 if _bot_for_send() is None and getattr(bot, "session", None):
@@ -1158,6 +1168,34 @@ class LeadHunter:
         else:
             logger.debug("⏭️ Пропуск отправки файла лидов (0 лидов найдено)")
 
+        # ── ИТОГОВОЕ ЛОГИРОВАНИЕ ЦИКЛА ────────────────────────────────────────────────
+        # Подсчитываем статистику для итогового лога
+        tg_scanned = sum(r.get("scanned", 0) for r in tg_ok if r.get("status") == "ok")
+        vk_scanned = sum(r.get("scanned", 0) for r in vk_ok if r.get("status") == "ok")
+        
+        # Подсчитываем горячие лиды (priority_score >= 8 или ST-3/ST-4)
+        hot_leads_count = 0
+        try:
+            main_db = await self._ensure_db_connected()
+            # Получаем количество горячих лидов из БД за последний час
+            async with main_db.conn.cursor() as cursor:
+                await cursor.execute("""
+                    SELECT COUNT(*) FROM spy_leads 
+                    WHERE created_at >= datetime('now', '-1 hour')
+                    AND (priority_score >= 8 OR pain_stage IN ('ST-3', 'ST-4'))
+                """)
+                row = await cursor.fetchone()
+                hot_leads_count = row[0] if row else 0
+        except Exception as e:
+            logger.debug(f"⚠️ Не удалось подсчитать горячие лиды для итогового лога: {e}")
+            # Fallback: используем количество отправленных карточек
+            hot_leads_count = cards_sent if 'cards_sent' in locals() else 0
+        
+        # Итоговое логирование цикла
+        logger.info(
+            f"✅ Cycle complete: {tg_scanned} TG messages scanned, {vk_scanned} VK posts scanned, {hot_leads_count} Hot leads found"
+        )
+        
         logger.info(f"🏹 LeadHunter: охота завершена. Обработано {len(all_posts)} постов.")
         
         # Сбрасываем статистику парсера после использования
@@ -1319,13 +1357,20 @@ class LeadHunter:
                         
                         keyboard = InlineKeyboardMarkup(inline_keyboard=keyboard_rows) if keyboard_rows else None
                         
+                        # ── ТИХИЕ УВЕДОМЛЕНИЯ: priority_score < 8 → disable_notification = True ────
+                        disable_notification = priority_score < 8  # Тихие уведомления для низкоприоритетных лидов
+                        
                         await bot.send_message(
                             LEADS_GROUP_CHAT_ID,
                             card_text,
                             reply_markup=keyboard,
                             message_thread_id=THREAD_ID_HOT_LEADS,
-                            parse_mode="HTML"
+                            parse_mode="HTML",
+                            disable_notification=disable_notification,  # Тихие уведомления для priority_score < 8
                         )
+                        
+                        if disable_notification:
+                            logger.debug(f"🔇 Тихое уведомление отправлено для лида #{lead_id} (priority_score={priority_score})")
                         
                         # Отмечаем как отправленный
                         await main_db.mark_lead_sent_to_hot_leads(lead_id)
