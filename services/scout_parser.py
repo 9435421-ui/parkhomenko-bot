@@ -1657,25 +1657,25 @@ class ScoutParser:
                     if not self.detect_lead(ctext):
                         continue
                     
-                        # ── ПРИОРИТЕТНЫЙ ЖК: Добавляем маркер в source_name ────────────
-                        is_priority = group.get("is_high_priority", False)
-                        source_name_display = group["name"] + " (коммент)"
-                        if is_priority:
-                            source_name_display = f"⭐ ПРИОРИТЕТНЫЙ ЖК: {group['name']} (коммент)"
-                        
-                        post = ScoutPost(
-                            source_type="vk",
-                            source_name=source_name_display,
-                            source_id=group["id"],
-                            post_id=f"{item['id']}_c{comm.get('id', 0)}",
-                            text=ctext,
-                            author_id=comm.get("from_id"),
-                            url=f"https://vk.com/wall-{group['id']}_{item['id']}?reply={comm.get('id', 0)}",
-                            published_at=datetime.fromtimestamp(comm.get("date", 0)) if comm.get("date") else None,
-                            likes=0,
-                            comments=0,
-                            is_comment=True,  # Помечаем как комментарий
-                        )
+                    # ── ПРИОРИТЕТНЫЙ ЖК: Добавляем маркер в source_name ────────────
+                    is_priority = group.get("is_high_priority", False)
+                    source_name_display = group["name"] + " (коммент)"
+                    if is_priority:
+                        source_name_display = f"⭐ ПРИОРИТЕТНЫЙ ЖК: {group['name']} (коммент)"
+                    
+                    post = ScoutPost(
+                        source_type="vk",
+                        source_name=source_name_display,
+                        source_id=group["id"],
+                        post_id=f"{item['id']}_c{comm.get('id', 0)}",
+                        text=ctext,
+                        author_id=comm.get("from_id"),
+                        url=f"https://vk.com/wall-{group['id']}_{item['id']}?reply={comm.get('id', 0)}",
+                        published_at=datetime.fromtimestamp(comm.get("date", 0)) if comm.get("date") else None,
+                        likes=0,
+                        comments=0,
+                        is_comment=True,  # Помечаем как комментарий
+                    )
                     posts.append(post)
                     self.total_leads += 1
                     logger.info(f"✅ Найден лид в комментариях VK группы {group['name']}: {ctext[:80]}...")
