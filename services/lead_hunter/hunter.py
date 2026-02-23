@@ -56,66 +56,65 @@ class LeadHunter:
         card_header: str = "",
         anton_recommendation: str = "",
     ) -> str:
-        """Форматирует карточку лида. Умный Охотник v2.0: при наличии recommendation — формат с вердиктом и болью."""
+        """Форматирует карточку лида для Telegram (HTML). 
+        
+        Формат: Статус (эмодзи), Источник, Контент (300 символов), User handle, Score.
+        """
         recommendation = (lead.get("recommendation") or anton_recommendation or "").strip()
         pain_level = lead.get("pain_level") or min(lead.get("hotness", 3), 5)
-        pain_stage = lead.get("pain_stage")
+        pain_stage = lead.get("pain_stage", "ST-1")
         
         if pain_stage == "ST-4" or (recommendation and pain_level >= 4):
             return self._format_lead_card_v2(lead, profile_url, card_header, recommendation, pain_level)
-            
-        content = (lead.get("content") or lead.get("intent") or "")[:600]
-        if len(lead.get("content") or "") > 600:
-            content += "…"
-        lines = []
-        if card_header:
-            lines.append(f"🏢 <b>{card_header}</b>")
-            lines.append("")
-        lines.extend([
-            "🕵️ <b>Карточка лида</b>",
-            "",
-            f"📄 {content}",
-            "",
-            f"🎯 <b>Интент:</b> {lead.get('intent', '—')}",
-            f"⭐ <b>Горячность:</b> {lead.get('hotness', 0)}/10",
-            f"📍 <b>Гео:</b> {lead.get('geo', '—')}",
-            f"💡 <b>Контекст:</b> {lead.get('context_summary', '—')}",
-        ])
-        # ── ОБНОВЛЕННЫЙ ФОРМАТ: Эмодзи и шкала приоритета ─────────────────────────
-        priority_score = lead.get("priority_score", 0)
-        pain_stage = lead.get("pain_stage", "ST-1")
         
-        # Эмодзи для стадий боли
+        # ── ОБРЕЗКА КОНТЕНТА ДО 300 СИМВОЛОВ ────────────────────────────────────────
+        content = (lead.get("content") or lead.get("text") or lead.get("intent") or "").strip()
+        if len(content) > 300:
+            content = content[:300] + "…"
+        
+        # ── ЭМОДЗИ СТАТУСА ПО СТАДИИ БОЛИ ───────────────────────────────────────────
         pain_emoji = {
             "ST-1": "💡",
             "ST-2": "📋",
             "ST-3": "🔥",
             "ST-4": "🚨"
         }
-        emoji = pain_emoji.get(pain_stage, "💡")
+        status_emoji = pain_emoji.get(pain_stage, "💡")
         
-        # Шкала приоритета (визуальная)
+        # ── USER HANDLE ─────────────────────────────────────────────────────────────
+        user_handle = ""
+        author_name = lead.get("author_name") or lead.get("username") or ""
+        author_id = lead.get("author_id") or lead.get("user_id") or ""
+        
+        if author_name:
+            user_handle = f"@{author_name}" if not author_name.startswith("@") else author_name
+        elif author_id:
+            user_handle = f"ID: {author_id}"
+        else:
+            user_handle = "—"
+        
+        # ── ПРИОРИТЕТ И SCORE ───────────────────────────────────────────────────────
+        priority_score = lead.get("priority_score", 0)
         priority_bar = "█" * min(priority_score, 10) + "░" * (10 - min(priority_score, 10))
         
-        if pain_stage:
-            stage_label = {
-                "ST-1": "Интерес",
-                "ST-2": "Планирование",
-                "ST-3": "Актив",
-                "ST-4": "Критично"
-            }
-            label = stage_label.get(pain_stage, pain_stage)
-            lines.append(f"{emoji} <b>Стадия боли:</b> {pain_stage} ({label})")
+        # ── ИСТОЧНИК ───────────────────────────────────────────────────────────────
+        source = card_header or lead.get("source_name") or lead.get("source") or "Неизвестный источник"
         
-        if priority_score > 0:
-            lines.append(f"⭐ <b>Приоритет:</b> {priority_score}/10")
-            lines.append(f"📊 {priority_bar}")
+        # ── ФОРМИРОВАНИЕ КАРТОЧКИ ───────────────────────────────────────────────────
+        lines = [
+            f"{status_emoji} <b>Статус:</b> {pain_stage}",
+            f"📊 <b>Источник:</b> {source}",
+            "",
+            f"📄 <b>Содержание:</b>\n{content}",
+            "",
+            f"👤 <b>Пользователь:</b> {user_handle}",
+            f"⭐ <b>Приоритет:</b> {priority_score}/10",
+            f"📊 {priority_bar}",
+        ]
         
         if anton_recommendation:
-            lines.append(f"💡 <b>Рекомендация Антона:</b> {anton_recommendation}")
-        if profile_url and profile_url.startswith("tg://"):
-            lines.append(f"\n👤 <b>Профиль:</b> <code>{profile_url}</code>")
-        lines.append(f"\n🔗 Пост: {lead.get('url', '')}")
+            lines.append(f"\n💡 <b>Рекомендация:</b> {anton_recommendation}")
+        
         return "\n".join(lines)
 
     def _format_lead_card_v2(
@@ -437,16 +436,32 @@ class LeadHunter:
             logger.warning("⚠️ BOT_TOKEN или LEADS_GROUP_CHAT_ID не заданы — карточка в группу не отправлена")
             return False
         text = self._format_lead_card(lead, profile_url, card_header, anton_recommendation)
+        
+        # ── КНОПКИ ДЕЙСТВИЙ ────────────────────────────────────────────────────────
         url_buttons = []
+        
+        # Кнопка "🔗 Перейти к сообщению" (обязательная)
+        if post_url:
+            url_buttons.append(InlineKeyboardButton(text="🔗 Перейти к сообщению", url=post_url[:500]))
+        
+        # Кнопка профиля (если есть)
         if profile_url and profile_url.startswith("http"):
             url_buttons.append(InlineKeyboardButton(text="👤 Профиль", url=profile_url))
-        url_buttons.append(InlineKeyboardButton(text="🔗 Пост", url=post_url[:500]))
+        
+        # Кнопки действий
         action_buttons = [
-            InlineKeyboardButton(text="✍️ На эту тему пост", callback_data=f"lead_to_content:{lead_id}"),
+            InlineKeyboardButton(text="✅ В работу", callback_data=f"lead_take_work_{lead_id}"),
             InlineKeyboardButton(text="🛠 Ответить экспертно", callback_data=f"lead_expert_reply_{lead_id}"),
-            InlineKeyboardButton(text="✅ Взять в работу", callback_data=f"lead_take_work_{lead_id}"),
         ]
-        keyboard = InlineKeyboardMarkup(inline_keyboard=[url_buttons, action_buttons])
+        
+        # Формируем клавиатуру: первая строка - URL кнопки, вторая - действия
+        keyboard_rows = []
+        if url_buttons:
+            keyboard_rows.append(url_buttons)
+        if action_buttons:
+            keyboard_rows.append(action_buttons)
+        
+        keyboard = InlineKeyboardMarkup(inline_keyboard=keyboard_rows) if keyboard_rows else None
         try:
             bot = _bot_for_send()
             if bot is None:
@@ -1266,29 +1281,43 @@ class LeadHunter:
                         priority_score = lead.get("priority_score", 0)
                         pain_stage = lead.get("pain_stage", "")
                         
-                        # Форматируем карточку лида
+                        # Форматируем карточку лида с новым форматом
+                        lead_data = {
+                            "content": text,
+                            "text": text,
+                            "priority_score": priority_score,
+                            "pain_stage": pain_stage,
+                            "url": url,
+                            "source_name": source_name,
+                            "author_name": lead.get("author_name"),
+                            "author_id": lead.get("author_id"),
+                            "username": lead.get("username"),
+                        }
                         card_text = self._format_lead_card(
-                            {
-                                "content": text,
-                                "priority_score": priority_score,
-                                "pain_stage": pain_stage,
-                                "url": url
-                            },
+                            lead_data,
                             profile_url=profile_url,
                             card_header=source_name
                         )
                         
-                        # Кнопки
+                        # Кнопки (новый формат)
                         url_buttons = []
+                        if url:
+                            url_buttons.append(InlineKeyboardButton(text="🔗 Перейти к сообщению", url=url[:500]))
                         if profile_url and profile_url.startswith("http"):
                             url_buttons.append(InlineKeyboardButton(text="👤 Профиль", url=profile_url))
-                        url_buttons.append(InlineKeyboardButton(text="🔗 Пост", url=url[:500]))
+                        
                         action_buttons = [
-                            InlineKeyboardButton(text="✍️ На эту тему пост", callback_data=f"lead_to_content:{lead_id}"),
+                            InlineKeyboardButton(text="✅ В работу", callback_data=f"lead_take_work_{lead_id}"),
                             InlineKeyboardButton(text="🛠 Ответить экспертно", callback_data=f"lead_expert_reply_{lead_id}"),
-                            InlineKeyboardButton(text="✅ Взять в работу", callback_data=f"lead_take_work_{lead_id}"),
                         ]
-                        keyboard = InlineKeyboardMarkup(inline_keyboard=[url_buttons, action_buttons])
+                        
+                        keyboard_rows = []
+                        if url_buttons:
+                            keyboard_rows.append(url_buttons)
+                        if action_buttons:
+                            keyboard_rows.append(action_buttons)
+                        
+                        keyboard = InlineKeyboardMarkup(inline_keyboard=keyboard_rows) if keyboard_rows else None
                         
                         await bot.send_message(
                             LEADS_GROUP_CHAT_ID,

@@ -259,14 +259,36 @@ class LeadAnalyzer:
 
         # ── Проверка TRIGGER WORDS (горячие фразы) ──────────────────────────────
         found_triggers = [trigger for trigger in TRIGGER_WORDS if trigger in text_lower]
+        
+        # ── ПРИОРИТЕТНЫЕ КЛЮЧЕВЫЕ СЛОВА: максимальный boost для core-терминов ────
+        PRIORITY_KEYWORDS = {
+            "перепланировк": 2,  # +2 к priority_score
+            "узакони": 2,        # +2 к priority_score
+            "бти": 2,            # +2 к priority_score
+            "проект проема": 2,  # +2 к priority_score
+            "проект перепланировки": 2,  # +2 к priority_score
+        }
+        
+        keyword_boost = 0
+        found_priority_keywords = []
+        for keyword, boost in PRIORITY_KEYWORDS.items():
+            if keyword in text_lower:
+                keyword_boost += boost
+                found_priority_keywords.append(keyword)
+        
         if found_triggers:
-            logger.info(f"🔥 Trigger words обнаружены: {found_triggers} → ГОРЯЧИЙ ЛИД")
+            base_score = 8
+            # Применяем boost от приоритетных ключевых слов
+            final_score = min(10, base_score + keyword_boost)
+            logger.info(f"🔥 Trigger words обнаружены: {found_triggers} → ГОРЯЧИЙ ЛИД (score: {final_score}, boost: +{keyword_boost} от {found_priority_keywords})")
             result.update({
-                "priority_score": 8,
+                "priority_score": final_score,
                 "pain_stage": "ST-3",  # Высокая стадия боли
                 "is_lead": True,
                 "trigger_words": found_triggers,
-                "justification": f"Обнаружены ключевые фразы: {', '.join(found_triggers)}",
+                "priority_keywords": found_priority_keywords,
+                "keyword_boost": keyword_boost,
+                "justification": f"Обнаружены ключевые фразы: {', '.join(found_triggers)}" + (f" + boost от приоритетных слов: {', '.join(found_priority_keywords)}" if found_priority_keywords else ""),
             })
 
         # ── Проверка приоритетных ЖК (для пометки ⭐ ПРИОРИТЕТНЫЙ) ───────────────
@@ -425,10 +447,36 @@ class LeadAnalyzer:
                 else:
                     pain_stage = "ST-4"
             
+            # ── ПРИМЕНЯЕМ BOOST ОТ ПРИОРИТЕТНЫХ КЛЮЧЕВЫХ СЛОВ ────────────────────
+            # Проверяем наличие приоритетных ключевых слов в тексте
+            PRIORITY_KEYWORDS = {
+                "перепланировк": 2,  # +2 к priority_score
+                "узакони": 2,        # +2 к priority_score
+                "бти": 2,            # +2 к priority_score
+                "проект проема": 2,  # +2 к priority_score
+                "проект перепланировки": 2,  # +2 к priority_score
+            }
+            
+            keyword_boost = 0
+            found_priority_keywords = []
+            t_lower = text.lower()
+            for keyword, boost in PRIORITY_KEYWORDS.items():
+                if keyword in t_lower:
+                    keyword_boost += boost
+                    found_priority_keywords.append(keyword)
+            
+            # Применяем boost к priority_score (максимум 10)
+            priority_score_with_boost = min(10, priority_score + keyword_boost)
+            
+            if keyword_boost > 0:
+                logger.info(f"📈 Приоритетные ключевые слова обнаружены: {found_priority_keywords} → boost +{keyword_boost} (score: {priority_score} → {priority_score_with_boost})")
+            
             data.update({
-                "priority_score": priority_score,
+                "priority_score": priority_score_with_boost,
                 "pain_stage": pain_stage,
-                "is_lead": data.get("is_lead", priority_score >= 5)
+                "is_lead": data.get("is_lead", priority_score_with_boost >= 5),
+                "priority_keywords": found_priority_keywords if keyword_boost > 0 else None,
+                "keyword_boost": keyword_boost if keyword_boost > 0 else None,
             })
 
             # Дополнительная проверка: если ИИ не заметил ЖК, но он есть — повышаем

@@ -657,6 +657,32 @@ class Database:
                 (lead_id,),
             )
             await self.conn.commit()
+    
+    async def mark_lead_in_work(self, lead_id: int) -> None:
+        """Отметить лид как «взят в работу» (статус обновлен через кнопку «В работу»)."""
+        if not self.conn:
+            await self.connect()
+        
+        async with self.conn.cursor() as cursor:
+            # Проверяем наличие колонки status
+            await cursor.execute("PRAGMA table_info(spy_leads)")
+            columns = await cursor.fetchall()
+            column_names = [col_info[1] for col_info in columns]
+            
+            if "status" not in column_names:
+                try:
+                    await cursor.execute("ALTER TABLE spy_leads ADD COLUMN status TEXT DEFAULT 'new'")
+                    await self.conn.commit()
+                    logger.debug("✅ Добавлена колонка status в spy_leads")
+                except Exception as e:
+                    logger.warning(f"⚠️ Ошибка при добавлении колонки status: {e}")
+            
+            await cursor.execute(
+                "UPDATE spy_leads SET status = 'in_work', contacted_at = datetime('now') WHERE id = ?",
+                (lead_id,),
+            )
+            await self.conn.commit()
+            logger.info(f"✅ Лид #{lead_id} помечен как 'в работе'")
 
     async def get_top_trends(self, since_days: int = 7, limit: int = 15) -> List[Dict]:
         """

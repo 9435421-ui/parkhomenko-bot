@@ -1272,7 +1272,7 @@ async def lead_expert_reply(callback: CallbackQuery):
 # === ВЗЯТЬ В РАБОТУ (контакт Юлии в личку лиду) ===
 @router.callback_query(F.data.startswith("lead_take_work_"))
 async def lead_take_work(callback: CallbackQuery):
-    """Кнопка «Взять в работу»: пересылает контакт Юлии лиду в личку."""
+    """Кнопка «В работу»: обновляет статус лида в БД и пересылает контакт Юлии лиду в личку."""
     if not check_admin(callback.from_user.id):
         await callback.answer("⛔ Нет доступа", show_alert=True)
         return
@@ -1285,17 +1285,25 @@ async def lead_take_work(callback: CallbackQuery):
     if not lead:
         await callback.answer("❌ Лид не найден")
         return
+    
+    # ── ОБНОВЛЕНИЕ СТАТУСА В БД ────────────────────────────────────────────────────
+    try:
+        await db.mark_lead_in_work(lead_id)
+        logger.info(f"✅ Лид #{lead_id} помечен как 'в работе'")
+    except Exception as e:
+        logger.warning(f"⚠️ Не удалось обновить статус лида #{lead_id}: {e}")
+    
     from config import JULIA_CONTACT
     author_id = lead.get("author_id")
     if lead.get("source_type") == "telegram" and author_id:
         try:
             await callback.bot.send_message(int(author_id), f"🛠 Взят в работу.\n\n{JULIA_CONTACT}", parse_mode="HTML")
-            await callback.answer("✅ Контакт Юлии отправлен лиду.")
+            await callback.answer("✅ Контакт Юлии отправлен лиду. Статус обновлен.")
         except Exception as e:
             await callback.answer()
             await callback.message.answer(f"❌ Не удалось отправить: {e}. Напишите лиду вручную: {JULIA_CONTACT}")
     else:
-        await callback.answer()
+        await callback.answer("✅ Статус обновлен. Отправьте лиду вручную.")
         await callback.message.answer(f"Отправьте лиду вручную: {JULIA_CONTACT}")
 
 
