@@ -1218,7 +1218,8 @@ class ScoutParser:
                         participants = getattr(entity, "participants_count", None)
                         if participants is None:
                             try:
-                                full = await self._throttled_get_entity(client, entity)
+                                # Новые ссылки из Discovery: используем длинный интервал (60 сек)
+                                full = await self._throttled_get_entity(client, entity, is_verified=False)
                                 participants = getattr(full, "participants_count", None)
                             except Exception:
                                 pass
