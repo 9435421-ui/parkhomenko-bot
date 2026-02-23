@@ -1299,21 +1299,25 @@ class ScoutParser:
             return None
         try:
             # resolve_telegram_link используется для новых ссылок (Discovery), используем длинный интервал
-            await self._wait_get_entity_throttle(is_verified=False)
+            is_verified = False  # По умолчанию новые ссылки не верифицированы
+            await self._wait_get_entity_throttle(is_verified=is_verified)
             entity = await client.get_entity(link)
             self._last_get_entity_at = time.monotonic()
+            
             cid = getattr(entity, "id", None)
-            title = getattr(entity, "title", None) or getattr(entity, "username", None) or (str(cid) if cid else link)
+            title = getattr(entity, "title", None) or getattr(entity, "username", None)
             participants = getattr(entity, "participants_count", None)
+
             if participants is None and isinstance(entity, (Channel, Chat)):
                 try:
-                    # Новые ссылки из Discovery: используем длинный интервал (60 сек)
-                    await self._wait_get_entity_throttle(is_verified=False)
+                    # Новые ссылки из Discovery: используем интервал в зависимости от верификации
+                    await self._wait_get_entity_throttle(is_verified=is_verified)
                     full = await client.get_entity(entity)
                     self._last_get_entity_at = time.monotonic()
                     participants = getattr(full, "participants_count", None)
                 except Exception:
                     pass
+
             stored_link = self._channel_id_to_link(cid) if cid else link
             return {"id": cid, "title": title, "link": stored_link, "participants_count": participants}
         except Exception as e:
