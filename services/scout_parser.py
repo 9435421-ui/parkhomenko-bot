@@ -1661,8 +1661,12 @@ class ScoutParser:
                 if not comments_data or "items" not in comments_data:
                     continue
                 
+                # Обновляем счетчик просмотренных комментариев
+                comments_items = comments_data.get("items", [])
+                self.total_scanned += len(comments_items)
+                
                 comment_count = 0
-                for comm in comments_data.get("items", []):
+                for comm in comments_items:
                     comment_count += 1
                     ctext = comm.get("text", "")
                     if not ctext:
@@ -1779,8 +1783,12 @@ class ScoutParser:
                     if not comments_data or "items" not in comments_data:
                         continue
                     
+                    # Обновляем счетчик просмотренных комментариев из обсуждений
+                    comments_items = comments_data.get("items", [])
+                    self.total_scanned += len(comments_items)
+                    
                     comment_count = 0
-                    for comm in comments_data.get("items", []):
+                    for comm in comments_items:
                         comment_count += 1
                         ctext = comm.get("text", "")
                         if not ctext:
