@@ -581,7 +581,9 @@ class ScoutParser:
         # ── ИНКРЕМЕНТАЛЬНЫЙ ПОИСК: Используем last_post_id из БД ─────────────────
         # Если SPY_SKIP_OLD_MESSAGES не задан или = 0, используем last_post_id для каждого ресурса
         skip_old_messages = int(os.getenv("SPY_SKIP_OLD_MESSAGES", "0"))
-        tg_limit = int(os.getenv("SCOUT_TG_MESSAGES_LIMIT", "50"))
+        # Используем глобальный SCAN_LIMIT из config.py или дефолт 100
+        from config import SCAN_LIMIT
+        tg_limit = int(os.getenv("SCOUT_TG_MESSAGES_LIMIT", str(SCAN_LIMIT)))
         existing_links = set()
         resource_last_post_ids = {}  # Словарь: link -> last_post_id для инкрементального поиска
         new_links_queue: List[str] = []  # очередь ссылок для проверки по одной (anti-flood)
@@ -813,10 +815,16 @@ class ScoutParser:
                     # Если SearchRequest не дал результатов или упал, используем iter_messages как fallback
                     if not messages_list:
                         logger.debug(f"SearchRequest не дал результатов для {channel.get('name')}. Используем iter_messages.")
+                        message_count = 0
                         async for message in client.iter_messages(cid, **iter_params):
                             if not message.text:
                                 continue
                             messages_list.append(message)
+                            message_count += 1
+                            
+                            # Умная задержка: каждые 20 сообщений делаем паузу 0.5 сек для избежания FloodWait
+                            if message_count % 20 == 0:
+                                await asyncio.sleep(0.5)
                             
                             # Отладочный режим
                             if self.debug_mode and debug_count < self.debug_limit:
@@ -825,10 +833,16 @@ class ScoutParser:
                 except Exception as search_fallback_error:
                     # Если SearchRequest полностью не работает, используем iter_messages
                     logger.debug(f"⚠️ SearchRequest недоступен для канала {cid}: {search_fallback_error}. Используем iter_messages.")
+                    message_count = 0
                     async for message in client.iter_messages(cid, **iter_params):
                         if not message.text:
                             continue
                         messages_list.append(message)
+                        message_count += 1
+                        
+                        # Умная задержка: каждые 20 сообщений делаем паузу 0.5 сек для избежания FloodWait
+                        if message_count % 20 == 0:
+                            await asyncio.sleep(0.5)
                         
                         # Отладочный режим
                         if self.debug_mode and debug_count < self.debug_limit:
@@ -963,10 +977,16 @@ class ScoutParser:
                         
                         # Собираем все сообщения для логирования
                         discussion_messages = []
+                        message_count = 0
                         async for message in client.iter_messages(discussion_group_id, limit=tg_limit):
                             if not message.text:
                                 continue
                             discussion_messages.append(message)
+                            message_count += 1
+                            
+                            # Умная задержка: каждые 20 сообщений делаем паузу 0.5 сек для избежания FloodWait
+                            if message_count % 20 == 0:
+                                await asyncio.sleep(0.5)
                         
                         logger.info(f'Проверено сообщений в Discussion Group: {len(discussion_messages)}')
                         
@@ -1230,17 +1250,21 @@ class ScoutParser:
         keywords = self._load_keywords()
 
         # Сколько постов брать для разбора комментариев (в комментариях чаще пишут «посоветуйте», «как узаконить»)
-        vk_posts_to_scan = int(os.getenv("SCOUT_VK_POSTS_FOR_COMMENTS", "10"))
-        vk_comments_per_post = int(os.getenv("SCOUT_VK_COMMENTS_PER_POST", "30"))
+        # Используем глобальный SCAN_LIMIT из config.py для VK тоже
+        from config import SCAN_LIMIT
+        vk_posts_to_scan = int(os.getenv("SCOUT_VK_POSTS_FOR_COMMENTS", str(min(SCAN_LIMIT // 10, 20))))  # Адаптивно: до 20 постов
+        vk_comments_per_post = int(os.getenv("SCOUT_VK_COMMENTS_PER_POST", str(min(SCAN_LIMIT // 3, 50))))  # Адаптивно: до 50 комментариев
 
         for group in self.vk_groups:
             count = 0
             scanned_wall = 0
             scanned_comments = 0
             try:
+                # Используем глобальный SCAN_LIMIT из config.py для VK wall.get
+                from config import SCAN_LIMIT
                 wall_posts = await self._vk_request("wall.get", {
                     "owner_id": -int(group["id"]),
-                    "count": 50,
+                    "count": min(SCAN_LIMIT, 100),  # Максимум 100 постов (лимит VK API)
                     "extended": 0
                 })
 
@@ -1262,7 +1286,9 @@ class ScoutParser:
                 logger.info(f"📊 VK группа {group['name']}: проверено постов на стене: {scanned_wall}")
 
                 # Посты на стене
+                item_count = 0
                 for item in items:
+                    item_count += 1
                     text = item.get("text", "")
                     # Проверяем наличие ключевых слов (для статистики)
                     has_keywords = any(kw.lower() in text.lower() for kw in keywords) if text else False
@@ -1270,6 +1296,10 @@ class ScoutParser:
                         self.total_with_keywords += 1
                         if self.debug_mode:
                             logger.debug(f"[DEBUG] VK пост с ключевыми словами: {text[:100]}...")
+                    
+                    # Умная задержка: каждые 20 постов делаем паузу 0.5 сек для избежания FloodWait
+                    if item_count % 20 == 0:
+                        await asyncio.sleep(0.5)
                     
                     if self.detect_lead(text):
                         post = ScoutPost(
@@ -1299,7 +1329,9 @@ class ScoutParser:
                             )
 
                 # Комментарии к постам — там чаще пишут люди «посоветуйте мастера», «как узаконить»
+                comment_post_count = 0
                 for item in items[:vk_posts_to_scan]:
+                    comment_post_count += 1
                     comments_data = await self._vk_request("wall.getComments", {
                         "owner_id": -int(group["id"]),
                         "post_id": item["id"],
@@ -1309,7 +1341,9 @@ class ScoutParser:
                     })
                     if not comments_data or "items" not in comments_data:
                         continue
+                    comment_count = 0
                     for comm in comments_data.get("items", []):
+                        comment_count += 1
                         scanned_comments += 1
                         self.total_scanned += 1
                         ctext = comm.get("text", "")
@@ -1319,6 +1353,11 @@ class ScoutParser:
                         has_keywords = any(kw.lower() in ctext.lower() for kw in keywords)
                         if has_keywords:
                             self.total_with_keywords += 1
+                        
+                        # Умная задержка: каждые 20 комментариев делаем паузу 0.5 сек для избежания FloodWait
+                        if comment_count % 20 == 0:
+                            await asyncio.sleep(0.5)
+                        
                         if not self.detect_lead(ctext):
                             continue
                         post = ScoutPost(
@@ -1342,6 +1381,10 @@ class ScoutParser:
                                 comm["from_id"],
                                 self.generate_outreach_message("vk", group["geo"])
                             )
+                    
+                    # Умная задержка: каждые 5 постов с комментариями делаем паузу 0.5 сек
+                    if comment_post_count % 5 == 0:
+                        await asyncio.sleep(0.5)
 
                 total_scanned_group = scanned_wall + scanned_comments
                 self.last_scan_report.append({

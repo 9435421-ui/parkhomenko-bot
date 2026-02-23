@@ -139,3 +139,8 @@ SCOUT_VK_REGIONS = ["Химки", "Красногорск", "Север Моск
 # Лимиты (чтобы не забанили)
 SCOUT_VK_COMMENTS_PER_HOUR = 5  # Макс комментариев в час
 SCOUT_VK_MESSAGES_PER_HOUR = 3  # Макс
+
+# === SCAN DEPTH LIMITS ===
+# Глобальный лимит сообщений для сканирования (Telegram/VK)
+SCAN_LIMIT = int(os.getenv("SCAN_LIMIT", "100"))  # Максимум сообщений для сканирования за один цикл
+MAX_MESSAGES = SCAN_LIMIT  # Алиас для обратной совместимости
