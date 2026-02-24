@@ -18,30 +18,33 @@ async def init_database():
     await main_db.connect()
     
     try:
-        # Создаем таблицу ресурсов с правильными колонками
-        await main_db.execute('''
-            CREATE TABLE IF NOT EXISTS target_resources (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                link TEXT UNIQUE NOT NULL,
-                type TEXT NOT NULL,
-                title TEXT,
-                is_active INTEGER DEFAULT 1,
-                last_post_id INTEGER DEFAULT 0,
-                last_lead_at TEXT,
-                created_at TEXT DEFAULT CURRENT_TIMESTAMP,
-                updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+        async with main_db.conn.cursor() as cursor:
+            # Создаем таблицу ресурсов с правильными колонками
+            await cursor.execute('''
+                CREATE TABLE IF NOT EXISTS target_resources (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    link TEXT UNIQUE NOT NULL,
+                    type TEXT NOT NULL,
+                    title TEXT,
+                    is_active INTEGER DEFAULT 1,
+                    last_post_id INTEGER DEFAULT 0,
+                    last_lead_at TEXT,
+                    created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+                )
+            ''')
+            
+            # Добавляем стартовые чаты ПИК и Самолет
+            await cursor.execute(
+                'INSERT OR IGNORE INTO target_resources (link, type, title, is_active) VALUES (?, ?, ?, ?)',
+                ('pik_neighbors', 'telegram', 'ПИК Соседи', 1)
             )
-        ''')
-        
-        # Добавляем стартовые чаты ПИК и Самолет
-        await main_db.execute(
-            'INSERT OR IGNORE INTO target_resources (link, type, title, is_active) VALUES (?, ?, ?, ?)',
-            ('pik_neighbors', 'telegram', 'ПИК Соседи', 1)
-        )
-        await main_db.execute(
-            'INSERT OR IGNORE INTO target_resources (link, type, title, is_active) VALUES (?, ?, ?, ?)',
-            ('samolet_live', 'telegram', 'Самолет Live', 1)
-        )
+            await cursor.execute(
+                'INSERT OR IGNORE INTO target_resources (link, type, title, is_active) VALUES (?, ?, ?, ?)',
+                ('samolet_live', 'telegram', 'Самолет Live', 1)
+            )
+            
+            await main_db.conn.commit()
         
         print('✅ База TERION инициализирована!')
         print('✅ Таблица target_resources создана')
