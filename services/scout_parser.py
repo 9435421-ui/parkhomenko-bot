@@ -112,7 +112,7 @@ class ScoutParser:
             return []
 
         # Загружаем цели из БД (те самые, что добавил Discovery)
-        targets = await db.get_active_targets_for_scout(type_filter="vk") if db else []
+        targets = await db.get_active_targets_for_scout() if db else []
         
         async with aiohttp.ClientSession() as session:
             for target in targets:
