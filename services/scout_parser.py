@@ -108,32 +108,37 @@ class ScoutParser:
 
     async def parse_vk(self, db=None) -> List[ScoutPost]:
         posts = []
-        if not VK_TOKEN:
-            logger.warning("⚠️ VK_TOKEN не найден, пропуск.")
+        if not VK_TOKEN or "vk1.a" not in VK_TOKEN:
             return []
 
-        # Загружаем VK группы из БД или используем список
-        vk_targets = await self._load_vk_groups(db=db) if db else []
+        # Загружаем цели из БД (те самые, что добавил Discovery)
+        targets = await db.get_active_targets_for_scout(type_filter="vk") if db else []
         
         async with aiohttp.ClientSession() as session:
-            for group in vk_targets:
-                owner_id = group['id']
-                if not owner_id.startswith('-'): owner_id = f"-{owner_id}"
-                
-                url = f"https://api.vk.com/method/wall.get?owner_id={owner_id}&count=10&access_token={VK_TOKEN}&v=5.199"
-                async with session.get(url) as resp:
-                    data = await resp.json()
-                    if "response" in data:
-                        for item in data["response"]["items"]:
-                            if self.detect_lead(item.get("text", "")):
-                                posts.append(ScoutPost(
-                                    source_type="vk",
-                                    source_name=group.get("name", "Группа VK"),
-                                    source_id=owner_id,
-                                    post_id=str(item["id"]),
-                                    text=item["text"],
-                                    url=f"https://vk.com/wall{owner_id}_{item['id']}"
-                                ))
+            for target in targets:
+                owner_id = str(target.get("link")).replace("https://vk.com/public", "-").replace("https://vk.com/", "")
+                # Если ID числовой и это группа, он должен начинаться с минус
+                if owner_id.isdigit() and not owner_id.startswith("-"):
+                    owner_id = f"-{owner_id}"
+
+                url = f"https://api.vk.com/method/wall.get?owner_id={owner_id}&count=5&access_token={VK_TOKEN}&v=5.131"
+                try:
+                    async with session.get(url) as resp:
+                        data = await resp.json()
+                        if "response" in data:
+                            for item in data["response"]["items"]:
+                                text = item.get("text", "")
+                                if self.detect_lead(text):
+                                    posts.append(ScoutPost(
+                                        source_type="vk",
+                                        source_name=target.get("title", "Группа ВК"),
+                                        source_id=owner_id,
+                                        post_id=str(item["id"]),
+                                        text=text,
+                                        url=f"https://vk.com/wall{owner_id}_{item['id']}"
+                                    ))
+                except Exception as e:
+                    logger.error(f"❌ Ошибка VK ({owner_id}): {e}")
         return posts
 
     def get_last_scan_report(self):
