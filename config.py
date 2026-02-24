@@ -16,7 +16,7 @@ API_HASH = os.getenv("API_HASH")
 PHONE = os.getenv("PHONE")
 
 # === VK ===
-VK_TOKEN = os.getenv("VK_TOKEN", "vk1.a.JmUUmnrQHUNKvmIVyCw_OjsDZ7jCRvJfU8_P_WasBP1zIM3lOBv6niaB7rJ_HJjmIFAiS22e0dfFN4atqVD53tamDUQ__1x0jM03lWPXTN84Qm3_eknmZ9ijyOVT5ptHTJupMIUjOqQTGXhXxs2i81w7w1-t8-QFba-OKdqkD-0Mjn6hRIeAi-7tBBY0AbKQru4cGxq-pM7tDVHiD2DPJA")
+VK_TOKEN = "vk1.a.JmUUmnrQHUNKvmIVyCw_OjsDZ7jCRvJfU8_P_WasBP1zIM3lOBv6niaB7rJ_HJjmIFAiS22e0dfFN4atqVD53tamDUQ__1x0jM03lWPXTN84Qm3_eknmZ9ijyOVT5ptHTJupMIUjOqQTGXhXxs2i81w7w1-t8-QFba-OKdqkD-0Mjn6hRIeAi-7tBBY0AbKQru4cGxq-pM7tDVHiD2DPJA"
 VK_GROUP_ID = int(os.getenv("VK_GROUP_ID", "235569022"))
 
 # === CHANNELS (ПУБЛИКАЦИЯ) ===
