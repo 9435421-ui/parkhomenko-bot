@@ -216,11 +216,25 @@ class LeadHunter:
         zhk_name: str,
         intent: str,
         context_summary: str,
+        platform: str = "telegram",
+        is_priority_zhk: bool = False,
     ) -> str:
         """
         Генерирует через Yandex GPT проект сообщения для ответа автору поста.
-        Учитывает стадию боли (ST-1…ST-4) и название ЖК.
-        Возвращает готовый текст ответа — максимально живой, 2–4 предложения.
+        Учитывает стадию боли (ST-1…ST-4), название ЖК, платформу и приоритет ЖК.
+        При ошибке Yandex GPT автоматически переключается на Router AI (fallback).
+        
+        Args:
+            post_text: Текст поста от клиента
+            pain_stage: Стадия боли (ST-1/ST-2/ST-3/ST-4)
+            zhk_name: Название ЖК
+            intent: Интент клиента
+            context_summary: Краткое резюме контекста
+            platform: Платформа ("telegram" или "vk")
+            is_priority_zhk: Является ли ЖК приоритетным
+        
+        Returns:
+            str: Готовый текст ответа (2-4 предложения)
         """
         # ── Загружаем Базу Знаний TERION ─────────────────────────────────────
         kb_path = os.path.join(
@@ -264,13 +278,24 @@ class LeadHunter:
         }
         script_hint = pain_scripts.get(pain_stage, pain_scripts["ST-2"])
         zhk_hint = f"ЖК {zhk_name.title()}" if zhk_name else "чат жильцов"
+        
+        # Формируем информацию о приоритете и платформе для промпта
+        priority_note = ""
+        if is_priority_zhk:
+            priority_note = "\n⚠️ ВАЖНО: Это приоритетный ЖК (Высотка) — ответ должен быть особенно внимательным и профессиональным."
+        
+        platform_note = ""
+        if platform == "vk":
+            platform_note = "\n📘 Платформа: VK (более формальный тон, можно использовать эмодзи умеренно)."
+        else:
+            platform_note = "\n📱 Платформа: Telegram (живой, дружелюбный тон)."
 
         kb_section = f"\n\n---\nБАЗА ЗНАНИЙ TERION:\n{knowledge_base}" if knowledge_base else ""
 
         system_prompt = (
             "Ты — Агент-Продавец компании TERION по согласованию перепланировок в Москве. "
             "Роль: Друг-эксперт. Сначала помогаешь решить проблему, потом предлагаешь услугу. "
-            "Пишешь живой ответ в публичный Telegram-чат жильцов. "
+            f"Пишешь живой ответ в публичный {platform.upper()}-чат жильцов.{priority_note}{platform_note} "
             "Правила: не начинай с 'Здравствуйте', без маркетинговых клише, "
             "пиши как живой человек-эксперт, 2–4 предложения максимум. "
             "В конце всегда добавь: @terion_expert — для связи. "
@@ -287,6 +312,7 @@ class LeadHunter:
             "Напиши только готовый текст ответа, без объяснений и заголовков."
         )
 
+        # ── ПОПЫТКА 1: Основной API-ключ Яндекса ────────────────────────────────────
         try:
             from utils.yandex_gpt import generate
             reply = await generate(
@@ -295,11 +321,62 @@ class LeadHunter:
                 max_tokens=300,
             )
             result = (reply or "").strip()
-            if result:
+            # Проверяем, что ответ не является сообщением об ошибке
+            if result and not result.startswith("Ошибка") and not result.startswith("⚠️"):
                 return result
-            raise ValueError("Yandex GPT вернул пустой ответ")
+            raise ValueError(f"Yandex GPT вернул ошибку или пустой ответ: {result}")
         except Exception as e:
-            logger.debug("Ошибка генерации ответа продавца: %s", e)
+            logger.warning(f"⚠️ Основной Yandex GPT ключ не сработал: {e}")
+        
+        # ── ПОПЫТКА 2: Резервный API-ключ Яндекса (если настроен) ────────────────────
+        backup_key = os.getenv("YANDEX_API_KEY_BACKUP")
+        if backup_key:
+            try:
+                logger.info("🔄 Пробую резервный API-ключ Яндекса...")
+                # Временно устанавливаем резервный ключ как основной
+                original_key = os.getenv("YANDEX_API_KEY")
+                os.environ["YANDEX_API_KEY"] = backup_key
+                try:
+                    from utils.yandex_gpt import generate
+                    reply = await generate(
+                        system_prompt=system_prompt,
+                        user_message=user_prompt,
+                        max_tokens=300,
+                    )
+                    result = (reply or "").strip()
+                    if result and not result.startswith("Ошибка") and not result.startswith("⚠️"):
+                        logger.info("✅ Резервный API-ключ Яндекса успешно использован")
+                        return result
+                finally:
+                    # Восстанавливаем оригинальный ключ
+                    if original_key:
+                        os.environ["YANDEX_API_KEY"] = original_key
+                    else:
+                        os.environ.pop("YANDEX_API_KEY", None)
+            except Exception as backup_error:
+                logger.warning(f"⚠️ Резервный Yandex GPT ключ также не сработал: {backup_error}")
+        
+        # ── ПОПЫТКА 3: Router AI fallback ──────────────────────────────────────────────
+        logger.warning(f"⚠️ Все API-ключи Яндекса не сработали. Переключаюсь на Router AI fallback...")
+        
+        # ── FALLBACK 1: Router AI ────────────────────────────────────────────────
+        try:
+            from utils.router_ai import router_ai
+            router_reply = await router_ai.generate_response(
+                user_prompt=user_prompt,
+                system_prompt=system_prompt,
+                max_tokens=300,
+                temperature=0.2,
+            )
+            if router_reply and router_reply.strip():
+                result = router_reply.strip()
+                logger.info("✅ Router AI fallback успешно сгенерировал ответ")
+                return result
+        except Exception as router_error:
+            logger.warning(f"⚠️ Router AI fallback также не удался: {router_error}")
+            
+            # ── FALLBACK 2: Статические шаблоны по стадии боли ─────────────────────
+            logger.debug("Использую статические шаблоны как последний fallback")
             fallbacks = {
                 "ST-4": (
                     "Ситуация серьёзная — если МЖИ уже выдало предписание, "
@@ -477,6 +554,138 @@ class LeadHunter:
                         pass
         except Exception as e:
             logger.error(f"❌ Критическая ошибка при отправке ЛС пользователю {user_id}: {e}")
+            return False
+
+    async def _send_lead_card_for_moderation(
+        self,
+        lead: dict,
+        lead_id: int,
+        profile_url: str,
+        post_url: str,
+        card_header: str = "",
+        post_text: str = "",
+        source_type: str = "telegram",
+        source_link: str = "",
+        geo_tag: str = "",
+        is_priority: bool = False,
+        anton_recommendation: str = "",
+    ) -> bool:
+        """
+        Отправляет карточку лида в админ-канал для модерации (Режим Модерации).
+        
+        Карточка содержит:
+        - Платформа (TG/VK)
+        - Локация (Geo Header, например: "ЖК Зиларт, корп. 5")
+        - Приоритет (🔥 Высокий, если приоритетный ЖК)
+        - Интерактивные кнопки: Одобрить, Редактировать, Пропустить
+        """
+        from config import BOT_TOKEN, LEADS_GROUP_CHAT_ID, THREAD_ID_HOT_LEADS
+        if not BOT_TOKEN or not LEADS_GROUP_CHAT_ID:
+            logger.warning("⚠️ BOT_TOKEN или LEADS_GROUP_CHAT_ID не заданы — карточка на модерацию не отправлена")
+            return False
+        
+        # Формируем локацию (Geo Header)
+        location = geo_tag or card_header or "Не указано"
+        # Извлекаем гео-информацию из текста поста, если доступен parser
+        if post_text and hasattr(self, 'parser') and self.parser and hasattr(self.parser, 'extract_geo_header'):
+            try:
+                extracted_location = self.parser.extract_geo_header(post_text, location)
+                if extracted_location and extracted_location != location:
+                    location = extracted_location
+            except Exception:
+                pass
+        
+        # Определяем платформу
+        platform_emoji = "📱" if source_type == "telegram" else "📘"
+        platform_name = "Telegram" if source_type == "telegram" else "VK"
+        
+        # Формируем приоритет
+        priority_mark = ""
+        if is_priority:
+            priority_mark = "🔥 <b>Высокий приоритет</b> (Приоритетный ЖК)\n"
+        
+        # Формируем текст карточки
+        content = (lead.get("content") or lead.get("intent") or post_text or "")[:400]
+        if len(post_text or "") > 400:
+            content += "…"
+        
+        pain_stage = lead.get("pain_stage", "")
+        priority_score = lead.get("priority_score", 0)
+        
+        text_lines = [
+            "🕵️ <b>НОВЫЙ ЛИД (на модерации)</b>",
+            "",
+            f"{platform_emoji} <b>Платформа:</b> {platform_name}",
+            f"📍 <b>Локация:</b> {location}",
+            priority_mark,
+            f"📝 <b>Сообщение:</b> «{content}»",
+            "",
+        ]
+        
+        if pain_stage:
+            text_lines.append(f"🔴 <b>Стадия боли:</b> {pain_stage}")
+        if priority_score > 0:
+            text_lines.append(f"⭐ <b>Приоритет:</b> {priority_score}/10")
+        if anton_recommendation:
+            text_lines.append(f"💡 <b>Рекомендация Антона:</b> {anton_recommendation[:200]}")
+        
+        text_lines.extend([
+            "",
+            f"🔗 <b>Пост:</b> {post_url}",
+        ])
+        
+        if profile_url:
+            if profile_url.startswith("http"):
+                text_lines.append(f"👤 <b>Профиль:</b> <a href=\"{profile_url}\">открыть</a>")
+            elif profile_url.startswith("tg://"):
+                text_lines.append(f"👤 <b>Профиль:</b> <code>{profile_url}</code>")
+        
+        text = "\n".join(text_lines)
+        
+        # Формируем клавиатуру с кнопками модерации
+        from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
+        
+        keyboard_rows = [
+            [
+                InlineKeyboardButton(text="✅ Одобрить (Антон пишет)", callback_data=f"mod_approve_{lead_id}"),
+            ],
+            [
+                InlineKeyboardButton(text="✏️ Редактировать", callback_data=f"mod_edit_{lead_id}"),
+                InlineKeyboardButton(text="🗑 Пропустить", callback_data=f"mod_skip_{lead_id}"),
+            ],
+        ]
+        
+        # Добавляем кнопку "Открыть пост", если есть ссылка
+        if post_url:
+            keyboard_rows.append([
+                InlineKeyboardButton(text="🔗 Открыть пост", url=post_url[:500]),
+            ])
+        
+        keyboard = InlineKeyboardMarkup(inline_keyboard=keyboard_rows)
+        
+        try:
+            bot = _bot_for_send()
+            if bot is None:
+                bot = Bot(token=BOT_TOKEN, default=DefaultBotProperties(parse_mode="HTML"))
+            try:
+                thread_id = THREAD_ID_HOT_LEADS if THREAD_ID_HOT_LEADS else None
+                await bot.send_message(
+                    LEADS_GROUP_CHAT_ID,
+                    text,
+                    reply_markup=keyboard,
+                    message_thread_id=thread_id,
+                    disable_notification=False,  # Всегда обычное уведомление для модерации
+                )
+                logger.info(f"📋 Карточка лида #{lead_id} отправлена на модерацию в админ-канал")
+                return True
+            finally:
+                if _bot_for_send() is None and getattr(bot, "session", None):
+                    try:
+                        await bot.session.close()
+                    except Exception:
+                        pass
+        except Exception as e:
+            logger.error(f"❌ Не удалось отправить карточку лида на модерацию: {e}")
             return False
 
     async def _send_lead_card_to_group(
@@ -888,15 +1097,24 @@ class LeadHunter:
                             "ST-1": "🟢 Интерес",
                         }.get(pain_stage, "")
 
-                        # ── Генерируем проект ответа через Yandex GPT ─────────
+                        # ── Генерируем проект ответа через Yandex GPT (с fallback на Router AI) ─────────
                         sales_draft = ""
                         try:
+                            # Получаем данные о приоритете и платформе из target ресурса
+                            is_priority_zhk = False
+                            source_platform = "telegram"
+                            if res:
+                                is_priority_zhk = res.get("is_high_priority", 0) == 1
+                                source_platform = res.get("platform") or res.get("type") or "telegram"
+                            
                             sales_draft = await self._generate_sales_reply(
                                 post_text=post.text or "",
                                 pain_stage=pain_stage or "ST-2",
                                 zhk_name=zhk_name,
                                 intent=analysis.get("intent", ""),
                                 context_summary=analysis.get("context_summary", ""),
+                                platform=source_platform,
+                                is_priority_zhk=is_priority_zhk,
                             )
                         except Exception as draft_err:
                             logger.debug("Не удалось сгенерировать проект ответа: %s", draft_err)
@@ -973,11 +1191,12 @@ class LeadHunter:
                     except Exception as e:
                         logger.debug("Не удалось отправить уведомление Юлии: %s", e)
 
-            # Существующая логика исходящих сообщений (контент-бот / outreach)
-            if score > 0.7:
-                logger.info(f"🎯 Найден горячий лид! Score: {score}")
-                message = self.parser.generate_outreach_message(post.source_type)
-                await self.outreach.send_offer(post.source_type, post.source_id, message)
+            # ⚠️ АВТОМАТИЧЕСКАЯ ОТПРАВКА ОТКЛЮЧЕНА (Режим Модерации)
+            # Вместо автоматической отправки все лиды отправляются в админ-канал для модерации
+            # if score > 0.7:
+            #     logger.info(f"🎯 Найден горячий лид! Score: {score}")
+            #     message = self.parser.generate_outreach_message(post.source_type)
+            #     await self.outreach.send_offer(post.source_type, post.source_id, message)
 
         if all_posts:
             messages = [
@@ -1081,11 +1300,11 @@ class LeadHunter:
                         anton_recommendation = await self._get_anton_recommendation(post_text, main_db)
                     except Exception:
                         pass
-                    # ── Активное вовлечение: отправка ЛС пользователю ──────────────
-                    # Если лид найден в открытом чате и есть author_id — отправляем ЛС
-                    if author_id and author_id > 0:
-                        lead_content = lead.get("content") or lead.get("intent") or post_text[:200]
-                        await self._send_dm_to_user(author_id, post_url, lead_content)
+                    # ⚠️ АВТОМАТИЧЕСКАЯ ОТПРАВКА ЛС ОТКЛЮЧЕНА (Режим Модерации)
+                    # Вместо автоматической отправки ЛС все лиды отправляются в админ-канал для модерации
+                    # if author_id and author_id > 0:
+                    #     lead_content = lead.get("content") or lead.get("intent") or post_text[:200]
+                    #     await self._send_dm_to_user(author_id, post_url, lead_content)
                     
                     # ── ОБНОВЛЕННАЯ ЛОГИКА: Различение типов лидов для отправки ────────────
                     _lead_stage = lead.get("pain_stage") or ""
@@ -1119,36 +1338,48 @@ class LeadHunter:
                         and lead.get("hotness", 0) < 3
                     )
                     
-                    # ── НЕМЕДЛЕННАЯ ОТПРАВКА горячих лидов в топик "Горячие лиды" ────────
-                    if _is_hot_lead and (has_hot_trigger or _lead_stage in ("ST-1", "ST-2")):
-                        # Отправляем сразу в топик "Горячие лиды"
-                        if await self._send_lead_card_to_group(lead, lead_id, profile_url, post_url, card_header, anton_recommendation):
-                            cards_sent += 1
-                            # Отмечаем как отправленный
+                    # ── РЕЖИМ МОДЕРАЦИИ: Все лиды отправляются в админ-канал для модерации ────────
+                    # Вместо автоматической отправки все лиды проходят через модерацию
+                    
+                    # Получаем данные о target из БД, если есть source_link
+                    geo_tag_value = ""
+                    is_priority_value = False
+                    if post and hasattr(post, 'source_link') and post.source_link:
+                        try:
+                            main_db = await self._ensure_db_connected()
+                            target_res = await main_db.get_target_resource_by_link(post.source_link)
+                            if target_res:
+                                geo_tag_value = target_res.get("geo_tag", "") or ""
+                                is_priority_value = target_res.get("is_high_priority", 0) == 1
+                        except Exception as e:
+                            logger.debug(f"Не удалось получить данные target для source_link: {e}")
+                    
+                    # Если geo_tag не найден, используем card_header или извлекаем из текста
+                    if not geo_tag_value:
+                        geo_tag_value = card_header or ""
+                        if post_text and hasattr(self, 'parser') and self.parser:
                             try:
-                                main_db = await self._ensure_db_connected()
-                                await main_db.mark_lead_sent_to_hot_leads(lead_id)
+                                extracted = self.parser.extract_geo_header(post_text, geo_tag_value)
+                                if extracted and extracted != geo_tag_value:
+                                    geo_tag_value = extracted
                             except Exception:
                                 pass
-                    # ── ОТПРАВКА ST-3/ST-4 в рабочее время ────────────────────────────────
-                    elif _is_hot_lead and _lead_stage in ("ST-3", "ST-4"):
-                        if _business_hours and cards_sent < MAX_CARDS_PER_RUN:
-                            if await self._send_lead_card_to_group(lead, lead_id, profile_url, post_url, card_header, anton_recommendation):
-                                cards_sent += 1
-                                try:
-                                    main_db = await self._ensure_db_connected()
-                                    await main_db.mark_lead_sent_to_hot_leads(lead_id)
-                                except Exception:
-                                    pass
-                        elif not _business_hours:
-                            logger.info(
-                                "🌙 Горячий лид ST-3/ST-4 найден вне рабочего времени МСК — "
-                                "карточка в группу отложена до 09:00. URL: %s", post_url
-                            )
-                    # ── ОБЫЧНЫЕ ЛИДЫ: Сохраняем для сводки (не отправляем сразу) ─────────
-                    elif _is_regular_lead:
-                        logger.debug(f"📋 Обычный лид (priority={priority_score}) сохранен для сводки. URL: {post_url}")
-                        # Лид уже сохранен в БД, будет отправлен в сводке по расписанию
+                    
+                    if await self._send_lead_card_for_moderation(
+                        lead=lead,
+                        lead_id=lead_id,
+                        profile_url=profile_url,
+                        post_url=post_url,
+                        card_header=card_header,
+                        post_text=post_text,
+                        source_type=post.source_type if hasattr(post, 'source_type') else "telegram",
+                        source_link=post.source_link if hasattr(post, 'source_link') else "",
+                        geo_tag=geo_tag_value,
+                        is_priority=is_priority_value,
+                        anton_recommendation=anton_recommendation
+                    ):
+                        cards_sent += 1
+                        logger.info(f"📋 Карточка лида #{lead_id} отправлена на модерацию")
                 if cards_sent:
                     logger.info("📋 В рабочую группу отправлено карточек лидов: %s", cards_sent)
                 # Дублирование в рабочую группу: краткий отчёт о сохранённых лидах

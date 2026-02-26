@@ -305,6 +305,12 @@ class Database:
                 await self.conn.commit()
             except Exception:
                 pass
+            # Миграция: колонка last_lead_at для отслеживания времени последнего найденного лида
+            try:
+                await cursor.execute("ALTER TABLE target_resources ADD COLUMN last_lead_at TIMESTAMP NULL")
+                await self.conn.commit()
+            except Exception:
+                pass
             # Модуль «Ассистент Продаж»: скрипты подсказок для карточки лида
             await cursor.execute("""
                 CREATE TABLE IF NOT EXISTS sales_templates (
@@ -570,19 +576,25 @@ class Database:
     async def get_regular_leads_for_summary(self, since_hours: int = 24) -> List[Dict]:
         """Получить обычные лиды (priority_score < 3) для сводки.
         
+        Фильтр "Живой человек": исключает лиды от каналов (только от пользователей).
+        Лиды должны иметь author_id (не пустой) и не быть от каналов.
+
         Args:
             since_hours: За какой период получать лиды (по умолчанию 24 часа)
-        
+
         Returns:
             Список лидов с priority_score < 3, отсортированных по дате создания
         """
         async with self.conn.cursor() as cursor:
             await cursor.execute(
                 """SELECT id, source_type, source_name, author_id, username, profile_url, text, url, created_at, pain_stage, priority_score
-                   FROM spy_leads 
-                   WHERE created_at >= datetime('now', ?)
+                   FROM spy_leads
+                   WHERE created_at >= datetime('now', '-' || ? || ' hours')
                      AND (priority_score IS NULL OR priority_score < 3)
                      AND (pain_stage IS NULL OR pain_stage NOT IN ('ST-3', 'ST-4'))
+                     AND author_id IS NOT NULL
+                     AND author_id != ''
+                     AND author_id != '0'
                    ORDER BY created_at DESC""",
                 (f"-{since_hours} hours",),
             )
@@ -592,19 +604,26 @@ class Database:
     async def get_hot_leads_for_immediate_send(self) -> List[Dict]:
         """Получить горячие лиды (HOT_TRIGGERS, ST-1/ST-2) для немедленной отправки.
         
+        Фильтр "Живой человек": исключает лиды от каналов (только от пользователей).
+        Лиды должны иметь author_id (не пустой) и не быть от каналов.
+
         Returns:
             Список горячих лидов, которые еще не были отправлены в топик "Горячие лиды"
         """
         async with self.conn.cursor() as cursor:
             # Получаем лиды с высоким приоритетом или стадиями ST-1/ST-2
             # которые еще не были отправлены (нет флага sent_to_hot_leads)
+            # Фильтр "Живой человек": только от пользователей (author_id не пустой)
             await cursor.execute(
                 """SELECT id, source_type, source_name, author_id, username, profile_url, text, url, created_at, pain_stage, priority_score
-                   FROM spy_leads 
+                   FROM spy_leads
                    WHERE (
-                       priority_score >= 3 
+                       priority_score >= 3
                        OR pain_stage IN ('ST-1', 'ST-2', 'ST-3', 'ST-4')
                    )
+                     AND author_id IS NOT NULL
+                     AND author_id != ''
+                     AND author_id != '0'
                    AND (sent_to_hot_leads IS NULL OR sent_to_hot_leads = 0)
                    ORDER BY created_at DESC
                    LIMIT 50""",
@@ -638,10 +657,12 @@ class Database:
             await self.conn.commit()
 
     async def get_spy_lead(self, lead_id: int) -> Optional[Dict]:
-        """Получить лид из spy_leads по id (для кнопки «Ответить от имени Антона»)."""
+        """Получить лид из spy_leads по id (для кнопки «Ответить от имени Антона» и режима модерации)."""
         async with self.conn.cursor() as cursor:
             await cursor.execute(
-                "SELECT id, source_type, source_name, author_id, username, profile_url, text, url FROM spy_leads WHERE id = ?",
+                """SELECT id, source_type, source_name, author_id, username, profile_url, text, url, 
+                          pain_stage, priority_score, intent, context_summary, geo_tag
+                   FROM spy_leads WHERE id = ?""",
                 (lead_id,),
             )
             row = await cursor.fetchone()
@@ -660,6 +681,32 @@ class Database:
             )
             row = await cursor.fetchone()
             return dict(row) if row else None
+    
+    async def check_recent_contact(self, author_id: str, hours: int = 48) -> bool:
+        """
+        Проверяет, был ли контакт с пользователем в последние N часов.
+        Используется для фильтрации повторных лидов от одного пользователя.
+        
+        Args:
+            author_id: ID автора (строка)
+            hours: Количество часов для проверки (по умолчанию 48)
+        
+        Returns:
+            True если был контакт в указанный период, False иначе
+        """
+        if not author_id:
+            return False
+        async with self.conn.cursor() as cursor:
+            await cursor.execute(
+                """SELECT COUNT(*) FROM spy_leads
+                   WHERE (author_id = ? OR author_id = ?)
+                   AND contacted_at IS NOT NULL
+                   AND datetime(contacted_at) >= datetime('now', '-' || ? || ' hours')""",
+                (str(author_id), author_id, hours),
+            )
+            row = await cursor.fetchone()
+            count = row[0] if row else 0
+            return count > 0
 
     async def mark_spy_lead_contacted(self, lead_id: int) -> None:
         """Отметить лид как «с ним уже начали диалог» (Антон написал первым)."""
@@ -962,27 +1009,45 @@ class Database:
             row = await cursor.fetchone()
             return dict(row) if row else None
 
-    async def get_active_targets_for_scout(self) -> List[Dict]:
-        """Список целей для парсера/хантера: active + telegram. Поля: link, title, geo_tag, id, is_high_priority, last_lead_at, last_post_id."""
+    async def get_active_targets_for_scout(self, platform: Optional[str] = None) -> List[Dict]:
+        """
+        Список целей для парсера/хантера. 
+        Поля: link, title, geo_tag, id, is_high_priority, last_lead_at, last_post_id.
+        
+        Args:
+            platform: Фильтр по платформе ('telegram' или 'vk'). Если None - возвращает все активные ресурсы.
+        """
         async with self.conn.cursor() as cursor:
+            query = """SELECT id, link, title, COALESCE(geo_tag, '') AS geo_tag,
+                          COALESCE(is_high_priority, 0) AS is_high_priority, last_lead_at, last_post_id,
+                          COALESCE(platform, type) as platform
+                       FROM target_resources
+                       WHERE (status = 'active' OR (is_active = 1 AND (status IS NULL OR status = '')))"""
+            params = []
+            
+            if platform:
+                query += " AND (platform = ? OR type = ?)"
+                params.extend([platform, platform])
+            
             try:
-                await cursor.execute(
-                    """SELECT id, link, title, COALESCE(geo_tag, '') AS geo_tag,
-                          COALESCE(is_high_priority, 0) AS is_high_priority, last_lead_at, last_post_id
-                       FROM target_resources
-                       WHERE (status = 'active' OR (is_active = 1 AND (status IS NULL OR status = '')))
-                         AND (platform = 'telegram' OR type = 'telegram')"""
-                )
-            except Exception:
-                await cursor.execute(
-                    """SELECT id, link, title, COALESCE(geo_tag, '') AS geo_tag,
-                          COALESCE(is_high_priority, 0) AS is_high_priority, last_post_id
-                       FROM target_resources
-                       WHERE (status = 'active' OR (is_active = 1 AND (status IS NULL OR status = '')))
-                         AND (platform = 'telegram' OR type = 'telegram')"""
-                )
-            rows = await cursor.fetchall()
-            return [dict(row) for row in rows]
+                await cursor.execute(query, params)
+                rows = await cursor.fetchall()
+                return [dict(row) for row in rows]
+            except Exception as e:
+                logger.error(f"Ошибка получения целей для скаута: {e}")
+                # Fallback для старых БД без новых полей
+                try:
+                    fallback_query = """SELECT id, link, title, COALESCE(geo_tag, '') AS geo_tag,
+                              COALESCE(is_high_priority, 0) AS is_high_priority, last_post_id
+                           FROM target_resources
+                           WHERE (status = 'active' OR (is_active = 1 AND (status IS NULL OR status = '')))"""
+                    if platform:
+                        fallback_query += " AND (platform = ? OR type = ?)"
+                    await cursor.execute(fallback_query, params)
+                    rows = await cursor.fetchall()
+                    return [dict(row) for row in rows]
+                except Exception:
+                    return []
 
     async def update_target_last_lead_at(self, link: str) -> None:
         """Обновить время последнего найденного лида по ресурсу (для исключения из скана через 48ч)."""

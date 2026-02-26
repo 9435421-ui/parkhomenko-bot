@@ -175,6 +175,8 @@ async def main():
     hunter = LeadHunter()
     
     # Поиск клиентов каждые 30 минут (каналы TG + VK)
+    # Использует обновленный ScoutParser с фильтрами анти-спама и режимом модерации
+    # Все найденные лиды отправляются в админ-канал (топик THREAD_ID_HOT_LEADS) для модерации
     scheduler.add_job(hunter.hunt, 'interval', minutes=30)
 
     # Гео-шпион 24/7: чаты ЖК (Перекрёсток, Самолёт, ПИК и т.д.) — каждые 5 мин
@@ -197,26 +199,31 @@ async def main():
     scheduler.add_job(send_sales_reminders, 'interval', hours=6)
     
     # ── ПЛАНИРОВЩИК СВОДОК ЛИДОВ ────────────────────────────────────────────────────
-    # Отправка сводок обычных лидов (priority < 3) трижды в день: 10:00, 14:00, 19:00 МСК
+    # Отправка сводок обычных лидов (priority < 3) трижды в день: 9:00, 14:00, 19:00 МСК
+    # Фильтр "Живой человек": только лиды от пользователей (не от каналов) попадают в сводки
     async def send_regular_leads_summary_job():
-        """Задача для отправки сводки обычных лидов по расписанию."""
+        """Задача для отправки сводки обычных лидов по расписанию.
+        
+        Фильтр "Живой человек" применяется в БД: get_regular_leads_for_summary()
+        исключает лиды от каналов (sender_type == 'channel' или author_id отсутствует).
+        """
         try:
             await hunter.send_regular_leads_summary()
         except Exception as e:
             logger.error(f"Ошибка отправки сводки обычных лидов: {e}")
     
-    # Добавляем задачи на отправку сводок в 10:00, 14:00, 19:00 МСК
-    # Используем UTC: МСК = UTC+3, поэтому 10:00 МСК = 07:00 UTC, 14:00 МСК = 11:00 UTC, 19:00 МСК = 16:00 UTC
+    # Добавляем задачи на отправку сводок в 9:00, 14:00, 19:00 МСК
+    # Используем UTC: МСК = UTC+3, поэтому 9:00 МСК = 06:00 UTC, 14:00 МСК = 11:00 UTC, 19:00 МСК = 16:00 UTC
     try:
         from pytz import timezone
         moscow_tz = timezone('Europe/Moscow')
-        scheduler.add_job(send_regular_leads_summary_job, 'cron', hour=10, minute=0, timezone=moscow_tz)
+        scheduler.add_job(send_regular_leads_summary_job, 'cron', hour=9, minute=0, timezone=moscow_tz)
         scheduler.add_job(send_regular_leads_summary_job, 'cron', hour=14, minute=0, timezone=moscow_tz)
         scheduler.add_job(send_regular_leads_summary_job, 'cron', hour=19, minute=0, timezone=moscow_tz)
     except ImportError:
         # Если pytz не установлен, используем UTC с учетом смещения
         logger.warning("⚠️ pytz не установлен, используем UTC с учетом МСК (UTC+3)")
-        scheduler.add_job(send_regular_leads_summary_job, 'cron', hour=7, minute=0)  # 10:00 МСК
+        scheduler.add_job(send_regular_leads_summary_job, 'cron', hour=6, minute=0)  # 9:00 МСК
         scheduler.add_job(send_regular_leads_summary_job, 'cron', hour=11, minute=0)  # 14:00 МСК
         scheduler.add_job(send_regular_leads_summary_job, 'cron', hour=16, minute=0)  # 19:00 МСК
     

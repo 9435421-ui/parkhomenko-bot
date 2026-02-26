@@ -1373,3 +1373,319 @@ async def lead_reply_text(message: Message, state: FSMContext):
         await message.answer(
             f"❌ Не удалось отправить: {e}. Возможно, лид ещё не писал боту — тогда напишите ему вручную (профиль в карточке)."
         )
+
+
+# ============================================================
+# === РЕЖИМ МОДЕРАЦИИ: Обработчики кнопок модерации лидов ===
+# ============================================================
+
+class ModerationStates(StatesGroup):
+    wait_mod_edit_text = State()  # Редактирование ответа перед отправкой
+    wait_mod_approve_confirm = State()  # Подтверждение отправки сгенерированного ответа
+
+
+@router.callback_query(F.data.startswith("mod_approve_"))
+async def mod_approve_handler(callback: CallbackQuery, state: FSMContext):
+    """
+    Кнопка «✅ Одобрить (Антон пишет ответ)»:
+    1. Генерирует ответ через Router AI (Yandex GPT)
+    2. Показывает ответ на финальное подтверждение
+    3. После подтверждения отправляет лиду
+    """
+    if not check_admin(callback.from_user.id):
+        await callback.answer("⛔ Нет доступа", show_alert=True)
+        return
+    
+    try:
+        lead_id = int(callback.data.replace("mod_approve_", ""))
+    except ValueError:
+        await callback.answer("❌ Неверный ID лида")
+        return
+    
+    # Получаем данные лида из БД
+    lead = await db.get_spy_lead(lead_id)
+    if not lead:
+        await callback.answer("❌ Лид не найден")
+        return
+    
+    await callback.answer("⏳ Генерирую ответ через Router AI...")
+    
+    # Получаем данные для генерации ответа
+    post_text = (lead.get("text") or "")[:400]
+    source_type = lead.get("source_type", "telegram")
+    
+    # Получаем данные анализа лида (если есть в БД)
+    pain_stage = lead.get("pain_stage", "ST-2")
+    intent = lead.get("intent", "")
+    context_summary = lead.get("context_summary", "")
+    
+    # Извлекаем название ЖК из source_name или geo_tag
+    source_name = lead.get("source_name", "")
+    geo_tag = lead.get("geo_tag", "")
+    zhk_name = geo_tag or ""
+    if not zhk_name and source_name:
+        # Пытаемся извлечь название ЖК из source_name
+        import re
+        zhk_match = re.search(r"ЖК\s+([А-Яа-яЁё\w\s]+)", source_name, re.IGNORECASE)
+        if zhk_match:
+            zhk_name = zhk_match.group(1).strip()
+    
+    # Получаем данные о приоритете ЖК из БД (если есть source_link)
+    is_priority_zhk = False
+    source_link = lead.get("url", "")
+    if source_link:
+        try:
+            # Пытаемся найти target ресурс по URL поста
+            # Для этого нужно извлечь базовую ссылку канала из URL поста
+            import re
+            if source_type == "telegram":
+                # Извлекаем username канала из URL типа https://t.me/channel_name/123
+                match = re.search(r't\.me/([^/]+)', source_link)
+                if match:
+                    channel_username = match.group(1)
+                    target_res = await db.get_target_resource_by_link(f"https://t.me/{channel_username}")
+                    if target_res:
+                        is_priority_zhk = target_res.get("is_high_priority", 0) == 1
+            elif source_type == "vk":
+                # Извлекаем ID группы из URL типа https://vk.com/wall-123456_789
+                match = re.search(r'vk\.com/wall(-?\d+)', source_link)
+                if match:
+                    group_id = match.group(1)
+                    target_res = await db.get_target_resource_by_link(f"https://vk.com/public{group_id.replace('-', '')}")
+                    if target_res:
+                        is_priority_zhk = target_res.get("is_high_priority", 0) == 1
+        except Exception as e:
+            logger.debug(f"Не удалось получить данные о приоритете ЖК: {e}")
+    
+    # Генерируем ответ через Router AI (используем метод из hunter.py с fallback)
+    try:
+        from services.lead_hunter.hunter import LeadHunter
+        hunter = LeadHunter()
+        generated_reply = await hunter._generate_sales_reply(
+            post_text=post_text,
+            pain_stage=pain_stage,
+            zhk_name=zhk_name,
+            intent=intent,
+            context_summary=context_summary,
+            platform=source_type,
+            is_priority_zhk=is_priority_zhk,
+        )
+    except Exception as e:
+        logger.error(f"Ошибка генерации ответа через Router AI: {e}")
+        generated_reply = (
+            "Здравствуйте! Вижу ваш вопрос по перепланировке. "
+            "TERION специализируется на согласовании перепланировок в Москве. "
+            "Могу помочь с проектом и согласованием. Напишите: @terion_expert"
+        )
+    
+    # Сохраняем сгенерированный ответ в состояние для подтверждения
+    await state.set_state(ModerationStates.wait_mod_approve_confirm)
+    await state.update_data(
+        mod_lead_id=lead_id,
+        mod_reply_text=generated_reply,
+        mod_source_type=source_type,
+        mod_author_id=lead.get("author_id"),
+    )
+    
+    # Показываем сгенерированный ответ на подтверждение
+    from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
+    
+    confirm_keyboard = InlineKeyboardMarkup(inline_keyboard=[
+        [
+            InlineKeyboardButton(text="✅ Отправить лиду", callback_data=f"mod_confirm_send_{lead_id}"),
+            InlineKeyboardButton(text="✏️ Редактировать", callback_data=f"mod_edit_{lead_id}"),
+        ],
+        [
+            InlineKeyboardButton(text="❌ Отменить", callback_data=f"mod_cancel_{lead_id}"),
+        ],
+    ])
+    
+    await callback.message.answer(
+        f"🤖 <b>Ответ сгенерирован через Router AI</b>\n\n"
+        f"📄 <b>Текст лида:</b> «{post_text[:200]}{'…' if len(post_text) > 200 else ''}»\n\n"
+        f"💬 <b>Ответ Антона:</b>\n\n"
+        f"<code>{generated_reply}</code>\n\n"
+        f"Выберите действие:",
+        parse_mode="HTML",
+        reply_markup=confirm_keyboard,
+    )
+
+
+@router.callback_query(F.data.startswith("mod_confirm_send_"))
+async def mod_confirm_send_handler(callback: CallbackQuery, state: FSMContext):
+    """Подтверждение отправки сгенерированного ответа лиду"""
+    if not check_admin(callback.from_user.id):
+        await callback.answer("⛔ Нет доступа", show_alert=True)
+        return
+    
+    try:
+        lead_id = int(callback.data.replace("mod_confirm_send_", ""))
+    except ValueError:
+        await callback.answer("❌ Неверный ID лида")
+        return
+    
+    data = await state.get_data()
+    if data.get("mod_lead_id") != lead_id:
+        await callback.answer("❌ Несоответствие данных")
+        return
+    
+    reply_text = data.get("mod_reply_text", "")
+    source_type = data.get("mod_source_type", "telegram")
+    author_id = data.get("mod_author_id")
+    
+    await state.clear()
+    
+    # Отправляем ответ лиду
+    if source_type == "telegram" and author_id:
+        try:
+            await callback.bot.send_message(int(author_id), reply_text)
+            await callback.answer("✅ Ответ отправлен лиду в ЛС")
+            await callback.message.edit_text(
+                callback.message.text + "\n\n✅ <b>Ответ отправлен лиду</b>",
+                parse_mode="HTML",
+            )
+        except Exception as e:
+            await callback.answer("❌ Ошибка отправки")
+            await callback.message.answer(
+                f"❌ Не удалось отправить в ЛС: {e}\n\n"
+                f"Скопируйте текст и ответьте вручную:\n\n"
+                f"<code>{reply_text}</code>",
+                parse_mode="HTML",
+            )
+    else:
+        await callback.answer("✅ Готово")
+        await callback.message.answer(
+            f"📋 <b>Ответ (отправьте лиду вручную):</b>\n\n"
+            f"<code>{reply_text}</code>",
+            parse_mode="HTML",
+        )
+
+
+@router.callback_query(F.data.startswith("mod_edit_"))
+async def mod_edit_handler(callback: CallbackQuery, state: FSMContext):
+    """Кнопка «✏️ Редактировать»: переход в режим ручного редактирования ответа"""
+    if not check_admin(callback.from_user.id):
+        await callback.answer("⛔ Нет доступа", show_alert=True)
+        return
+    
+    try:
+        lead_id = int(callback.data.replace("mod_edit_", ""))
+    except ValueError:
+        await callback.answer("❌ Неверный ID лида")
+        return
+    
+    lead = await db.get_spy_lead(lead_id)
+    if not lead:
+        await callback.answer("❌ Лид не найден")
+        return
+    
+    # Проверяем, есть ли уже сгенерированный ответ в состоянии
+    data = await state.get_data()
+    current_reply = data.get("mod_reply_text", "")
+    
+    await state.set_state(ModerationStates.wait_mod_edit_text)
+    await state.update_data(
+        mod_lead_id=lead_id,
+        mod_source_type=lead.get("source_type", "telegram"),
+        mod_author_id=lead.get("author_id"),
+    )
+    
+    post_text = (lead.get("text") or "")[:200]
+    
+    if current_reply:
+        await callback.message.answer(
+            f"✏️ <b>Редактирование ответа для лида #{lead_id}</b>\n\n"
+            f"📄 Текст лида: «{post_text}…»\n\n"
+            f"Текущий ответ:\n<code>{current_reply}</code>\n\n"
+            f"Введите новый текст ответа или /cancel для отмены.",
+            parse_mode="HTML",
+        )
+    else:
+        await callback.message.answer(
+            f"✏️ <b>Ручной ввод ответа для лида #{lead_id}</b>\n\n"
+            f"📄 Текст лида: «{post_text}…»\n\n"
+            f"Введите текст ответа от имени Антона или /cancel для отмены.",
+            parse_mode="HTML",
+        )
+    
+    await callback.answer()
+
+
+@router.message(ModerationStates.wait_mod_edit_text, F.text)
+async def mod_edit_text_handler(message: Message, state: FSMContext):
+    """Обработка введённого текста ответа (ручное редактирование)"""
+    if not check_admin(message.from_user.id):
+        return
+    
+    if message.text and message.text.strip().lower() == "/cancel":
+        await state.clear()
+        await message.answer("Отменено.")
+        return
+    
+    data = await state.get_data()
+    lead_id = data.get("mod_lead_id")
+    if not lead_id:
+        await state.clear()
+        return
+    
+    edited_reply = (message.text or "").strip()
+    if not edited_reply:
+        await message.answer("Текст не должен быть пустым. Введите снова или /cancel.")
+        return
+    
+    source_type = data.get("mod_source_type", "telegram")
+    author_id = data.get("mod_author_id")
+    
+    await state.clear()
+    
+    # Отправляем отредактированный ответ лиду
+    if source_type == "telegram" and author_id:
+        try:
+            await message.bot.send_message(int(author_id), edited_reply)
+            await message.answer("✅ Отредактированный ответ отправлен лиду в ЛС.")
+        except Exception as e:
+            await message.answer(
+                f"❌ Не удалось отправить: {e}\n\n"
+                f"Скопируйте текст и ответьте вручную:\n\n"
+                f"<code>{edited_reply}</code>",
+                parse_mode="HTML",
+            )
+    else:
+        await message.answer(
+            f"📋 <b>Ответ (отправьте лиду вручную):</b>\n\n"
+            f"<code>{edited_reply}</code>",
+            parse_mode="HTML",
+        )
+
+
+@router.callback_query(F.data.startswith("mod_skip_"))
+async def mod_skip_handler(callback: CallbackQuery):
+    """Кнопка «🗑 Пропустить»: просто отмечает лид как пропущенный"""
+    if not check_admin(callback.from_user.id):
+        await callback.answer("⛔ Нет доступа", show_alert=True)
+        return
+    
+    try:
+        lead_id = int(callback.data.replace("mod_skip_", ""))
+    except ValueError:
+        await callback.answer("❌ Неверный ID лида")
+        return
+    
+    # Можно добавить обновление статуса в БД (например, status = 'skipped')
+    # Пока просто подтверждаем действие
+    await callback.answer("✅ Лид пропущен")
+    await callback.message.edit_text(
+        callback.message.text + "\n\n🗑 <b>Пропущен</b>",
+        parse_mode="HTML",
+    )
+
+
+@router.callback_query(F.data.startswith("mod_cancel_"))
+async def mod_cancel_handler(callback: CallbackQuery, state: FSMContext):
+    """Отмена действия модерации"""
+    if not check_admin(callback.from_user.id):
+        await callback.answer("⛔ Нет доступа", show_alert=True)
+        return
+    
+    await state.clear()
+    await callback.answer("❌ Действие отменено")
