@@ -586,31 +586,6 @@ def start_handler(message):
     # Check if privacy consent is not accepted
     if not consent.privacy_accepted:
         # Показываем текст согласия через show_privacy_consent
->>>>>>> 04faaaec929f79a35479144e71cef6fcf49cf331
-        show_privacy_consent(user_id)
-        return
-=======
-    # Extract start parameter from deep link
-    start_param = 'organic'  # Значение по умолчанию для органического трафика
-    if len(message.text.split()) > 1:
-        # Format: /start <parameter>
-        param_text = message.text.split()[1].strip()
-        if param_text:  # Проверяем, что параметр не пустой
-            start_param = param_text
-
-    state.source = start_param
-    save_user_state_to_db(user_id)
-    print(f"📊 User {user_id} came from source: {start_param}")
-
-    # Сбросим состояние для нового старта
-    state.mode = None
-    state.quiz_step = 0
-    save_user_state_to_db(user_id)
-
-    # Check if privacy consent is not accepted
-    if not consent.privacy_accepted:
-        # Показываем текст согласия через show_privacy_consent
->>>>>>> 04faaaec929f79a35479144e71cef6fcf49cf331
         show_privacy_consent(user_id)
         return
 

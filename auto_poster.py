@@ -14,7 +14,7 @@ def safe_html(text: str) -> str:
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-CONTENT_CHANNEL_ID = int(os.getenv("CONTENT_CHANNEL_ID"))
+CONTENT_CHANNEL_ID = int(os.getenv("CONTENT_CHANNEL_ID", 0))
 
 YANDEX_API_KEY = os.getenv("YANDEX_API_KEY")
 FOLDER_ID = os.getenv("FOLDER_ID")

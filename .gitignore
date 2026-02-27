@@ -1,4 +1,3 @@
-<<<<<<< HEAD
 # Python
 __pycache__/
 *.py[cod]
@@ -34,6 +33,7 @@ wheels/
 *.sqlite
 *.sqlite3
 database/*.db
+data/*.db
 
 # Logs
 *.log
@@ -60,17 +60,3 @@ nohup.out
 # Backups
 *.bak
 *.backup
-=======
-venv/
-__pycache__/
-*.pyc
-
-# Базы данных
-data/*.db
-
-# Логи
-logs/*.log
-
-# Локальные env
-.env
->>>>>>> 04faaaec929f79a35479144e71cef6fcf49cf331
