@@ -152,13 +152,50 @@ async def main():
         try:
             posts = await db.get_posts_to_publish()
             if not posts:
+                logger.info("ℹ️ Постов к публикации не найдено (status=approved, publish_date <= сейчас)")
                 return
+            
+            logger.info(f"📰 Найдено {len(posts)} постов к публикации")
+            
             for post in posts:
                 try:
                     title = (post.get("title") or "").strip()
                     body = (post.get("body") or "").strip()
                     text = f"📌 <b>{title}</b>\n\n{body}\n\n#перепланировка #согласование #терион" if title else body + "\n\n#перепланировка #согласование #терион"
-                    image_bytes = None  # TODO: загрузка по image_url при наличии
+                    
+                    # Загрузка изображения по image_url
+                    image_bytes = None
+                    image_url = post.get("image_url")
+                    if image_url:
+                        try:
+                            if not image_url.startswith("http"):
+                                # Telegram file_id — скачиваем через бот
+                                try:
+                                    file = await main_bot.get_file(image_url)
+                                    file_path = file.file_path
+                                    file_url = f"https://api.telegram.org/file/bot{main_bot.token}/{file_path}"
+                                    import aiohttp
+                                    async with aiohttp.ClientSession() as session:
+                                        async with session.get(file_url) as resp:
+                                            if resp.status == 200:
+                                                image_bytes = await resp.read()
+                                                logger.debug(f"✅ Изображение загружено из Telegram file_id для поста #{post.get('id')}")
+                                except Exception as e:
+                                    logger.warning(f"⚠️ Не удалось загрузить изображение из Telegram file_id для поста #{post.get('id')}: {e}")
+                            else:
+                                # HTTP URL — скачиваем напрямую
+                                try:
+                                    import aiohttp
+                                    async with aiohttp.ClientSession() as session:
+                                        async with session.get(image_url) as resp:
+                                            if resp.status == 200:
+                                                image_bytes = await resp.read()
+                                                logger.debug(f"✅ Изображение загружено по URL для поста #{post.get('id')}")
+                                except Exception as e:
+                                    logger.warning(f"⚠️ Не удалось загрузить изображение по URL для поста #{post.get('id')}: {e}")
+                        except Exception as e:
+                            logger.warning(f"⚠️ Ошибка загрузки изображения для поста #{post.get('id')}: {e}")
+                    
                     await publisher.publish_all(text, image_bytes)
                     await db.mark_as_published(post["id"])
                     logger.info("✅ Опубликован пост #%s из контент-плана", post["id"])

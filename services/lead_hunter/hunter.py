@@ -463,32 +463,128 @@ class LeadHunter:
                 return {"is_lead": True, "intent": "Запрос по перепланировке/БТИ", "hotness": 3, "context_summary": text[:200], "recommendation": "", "pain_level": 3}
             return {"is_lead": False, "intent": "", "hotness": 0, "context_summary": "", "recommendation": "", "pain_level": 0}
 
-        # Use Yandex agent
+        # ── ПОПЫТКА 1: Основной API-ключ Яндекса ────────────────────────────────────
         try:
             from utils.yandex_gpt import generate
             resp = await generate(system_prompt=system_prompt, user_message=user_prompt, max_tokens=400)
-            import json, re
-            m = re.search(r'\{[\s\S]*\}', resp or "")
-            if not m:
-                logger.debug("Yandex returned no JSON: %s", resp)
-                return {"is_lead": False, "intent": "", "hotness": 0, "context_summary": "", "recommendation": "", "pain_level": 0}
-            out = json.loads(m.group(0))
-            out.setdefault("is_lead", bool(out.get("is_lead")))
-            out.setdefault("intent", out.get("intent", "") or "")
-            try:
-                out["hotness"] = int(out.get("hotness", 0))
-            except Exception:
-                out["hotness"] = 0
-            out.setdefault("context_summary", out.get("context_summary", "") or "")
-            out.setdefault("recommendation", out.get("recommendation", "") or "")
-            try:
-                out["pain_level"] = int(out.get("pain_level", min(out.get("hotness", 0), 5)))
-            except Exception:
-                out["pain_level"] = min(out.get("hotness", 0), 5)
-            return out
+            
+            # Проверяем, что ответ не является сообщением об ошибке
+            if resp and not resp.startswith("Ошибка") and not resp.startswith("⚠️"):
+                import json, re
+                m = re.search(r'\{[\s\S]*\}', resp or "")
+                if m:
+                    out = json.loads(m.group(0))
+                    out.setdefault("is_lead", bool(out.get("is_lead")))
+                    out.setdefault("intent", out.get("intent", "") or "")
+                    try:
+                        out["hotness"] = int(out.get("hotness", 0))
+                    except Exception:
+                        out["hotness"] = 0
+                    out.setdefault("context_summary", out.get("context_summary", "") or "")
+                    out.setdefault("recommendation", out.get("recommendation", "") or "")
+                    try:
+                        out["pain_level"] = int(out.get("pain_level", min(out.get("hotness", 0), 5)))
+                    except Exception:
+                        out["pain_level"] = min(out.get("hotness", 0), 5)
+                    return out
+                else:
+                    logger.debug("Yandex returned no JSON: %s", resp)
+                    raise ValueError(f"Yandex GPT вернул некорректный ответ: {resp}")
+            else:
+                raise ValueError(f"Yandex GPT вернул ошибку: {resp}")
         except Exception as e:
-            logger.exception("Ошибка Yandex intent анализатора: %s", e)
-            return {"is_lead": False, "intent": "", "hotness": 0, "context_summary": "", "recommendation": "", "pain_level": 0}
+            logger.warning(f"⚠️ Основной Yandex GPT ключ не сработал для анализа интента: {e}")
+        
+        # ── ПОПЫТКА 2: Резервный API-ключ Яндекса (если настроен) ────────────────────
+        backup_key = os.getenv("YANDEX_API_KEY_BACKUP")
+        if backup_key:
+            try:
+                logger.info("🔄 Пробую резервный API-ключ Яндекса для анализа интента...")
+                # Временно устанавливаем резервный ключ как основной
+                original_key = os.getenv("YANDEX_API_KEY")
+                os.environ["YANDEX_API_KEY"] = backup_key
+                try:
+                    from utils.yandex_gpt import generate
+                    resp = await generate(system_prompt=system_prompt, user_message=user_prompt, max_tokens=400)
+                    result = (resp or "").strip()
+                    if result and not result.startswith("Ошибка") and not result.startswith("⚠️"):
+                        import json, re
+                        m = re.search(r'\{[\s\S]*\}', result or "")
+                        if m:
+                            out = json.loads(m.group(0))
+                            out.setdefault("is_lead", bool(out.get("is_lead")))
+                            out.setdefault("intent", out.get("intent", "") or "")
+                            try:
+                                out["hotness"] = int(out.get("hotness", 0))
+                            except Exception:
+                                out["hotness"] = 0
+                            out.setdefault("context_summary", out.get("context_summary", "") or "")
+                            out.setdefault("recommendation", out.get("recommendation", "") or "")
+                            try:
+                                out["pain_level"] = int(out.get("pain_level", min(out.get("hotness", 0), 5)))
+                            except Exception:
+                                out["pain_level"] = min(out.get("hotness", 0), 5)
+                            logger.info("✅ Резервный API-ключ Яндекса успешно использован для анализа интента")
+                            return out
+                finally:
+                    # Восстанавливаем оригинальный ключ
+                    if original_key:
+                        os.environ["YANDEX_API_KEY"] = original_key
+                    else:
+                        os.environ.pop("YANDEX_API_KEY", None)
+            except Exception as backup_error:
+                logger.warning(f"⚠️ Резервный Yandex GPT ключ также не сработал для анализа интента: {backup_error}")
+        
+        # ── ПОПЫТКА 3: Router AI fallback ──────────────────────────────────────────────
+        logger.warning(f"⚠️ Все API-ключи Яндекса не сработали для анализа интента. Переключаюсь на Router AI fallback...")
+        try:
+            # Пробуем импортировать router_ai из handlers/content.py (как в admin.py)
+            try:
+                from handlers.content import router_ai
+                router_resp = await router_ai.generate(
+                    prompt=user_prompt,
+                    system_prompt=system_prompt,
+                    max_tokens=400,
+                )
+            except ImportError:
+                # Fallback: пробуем utils.router_ai
+                from utils.router_ai import router_ai
+                router_resp = await router_ai.generate_response(
+                    user_prompt=user_prompt,
+                    system_prompt=system_prompt,
+                    max_tokens=400,
+                    temperature=0.2,
+                )
+            
+            if router_resp and router_resp.strip():
+                import json, re
+                m = re.search(r'\{[\s\S]*\}', router_resp or "")
+                if m:
+                    out = json.loads(m.group(0))
+                    out.setdefault("is_lead", bool(out.get("is_lead")))
+                    out.setdefault("intent", out.get("intent", "") or "")
+                    try:
+                        out["hotness"] = int(out.get("hotness", 0))
+                    except Exception:
+                        out["hotness"] = 0
+                    out.setdefault("context_summary", out.get("context_summary", "") or "")
+                    out.setdefault("recommendation", out.get("recommendation", "") or "")
+                    try:
+                        out["pain_level"] = int(out.get("pain_level", min(out.get("hotness", 0), 5)))
+                    except Exception:
+                        out["pain_level"] = min(out.get("hotness", 0), 5)
+                    logger.info("✅ Router AI fallback успешно использован для анализа интента")
+                    return out
+        except Exception as router_error:
+            logger.warning(f"⚠️ Router AI fallback также не удался для анализа интента: {router_error}")
+        
+        # ── FALLBACK: Простая эвристика как последний резерв ─────────────────────
+        logger.debug("Использую простую эвристику как последний fallback для анализа интента")
+        import re
+        text_l = (text or "").lower()
+        if any(k in text_l for k in ["перепланиров", "снос", "объединен", "мокр", "бти", "узакон"]):
+            return {"is_lead": True, "intent": "Запрос по перепланировке/БТИ", "hotness": 3, "context_summary": text[:200], "recommendation": "", "pain_level": 3}
+        return {"is_lead": False, "intent": "", "hotness": 0, "context_summary": "", "recommendation": "", "pain_level": 0}
 
     async def _send_dm_to_user(
         self,
