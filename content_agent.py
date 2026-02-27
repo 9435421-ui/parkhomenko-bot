@@ -254,7 +254,7 @@ class ContentAgent:
         messages.append({"role": "user", "text": user_prompt})
 
         payload = {
-            "modelUri": f"gpt://{self.folder_id}/yandexgpt/latest",
+            "modelUri": self.model_uri,
             "completionOptions": {
                 "stream": False,
                 "temperature": 0.7,

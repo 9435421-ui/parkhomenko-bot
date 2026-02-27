@@ -219,7 +219,7 @@ class AutoPoster:
             )
             plan_item = {
                 'type': post.get('type', 'fact'),
-                'theme': getattr(post, 'theme', None)  # Если есть поле theme
+                'theme': post.get('theme', None)  # Если есть поле theme
             }
 
             # Генерируем текст
