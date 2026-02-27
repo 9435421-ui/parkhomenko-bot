@@ -69,7 +69,7 @@ class AutoPoster:
 
                     # Публикуем в канал
                     logger.info(f"Публикуем поздравление с {holiday['name']}")
-                    self.bot.send_message(
+                    await self.bot.send_message(
                         chat_id=CONTENT_CHANNEL_ID,
                         text=full_message,
                         parse_mode='HTML'
@@ -84,7 +84,7 @@ class AutoPoster:
 
                     log_text = f"🎉 Праздничное поздравление\nНазвание: {holiday['name']}\nДата: {holiday['date']}\nВремя: {datetime.now()}"
                     try:
-                        self.bot.send_message(
+                        await self.bot.send_message(
                             chat_id=LEADS_GROUP_CHAT_ID,
                             text=log_text,
                             message_thread_id=THREAD_ID_LOGS
@@ -151,9 +151,9 @@ class AutoPoster:
                     # Отправляем в канал
                     logger.info(f"[AutoPoster] Publishing post {post['id']} (type={post.get('type')}, has_image={bool(post.get('image_url'))})")
                     if post.get('image_url'):
-                        self.bot.send_photo(chat_id=CONTENT_CHANNEL_ID, photo=post['image_url'], caption=formatted_post, parse_mode='HTML')
+                        await self.bot.send_photo(chat_id=CONTENT_CHANNEL_ID, photo=post['image_url'], caption=formatted_post, parse_mode='HTML')
                     else:
-                        self.bot.send_message(chat_id=CONTENT_CHANNEL_ID, text=formatted_post, parse_mode='HTML')
+                        await self.bot.send_message(chat_id=CONTENT_CHANNEL_ID, text=formatted_post, parse_mode='HTML')
 
                     # Отмечаем как опубликованный
                     await db.mark_as_published(post['id'])
@@ -167,7 +167,7 @@ class AutoPoster:
 
                     log_text = f"📤 Пост опубликован в канал\nID: {post['id']}\nТип: {post['type']}\nЗаголовок: {post.get('title', 'Без заголовка')}\nВремя: {datetime.now()}"
                     try:
-                        self.bot.send_message(
+                        await self.bot.send_message(
                             chat_id=LEADS_GROUP_CHAT_ID,
                             text=log_text,
                             message_thread_id=THREAD_ID_LOGS
@@ -188,7 +188,7 @@ class AutoPoster:
 
                     error_log = f"❌ ОШИБКА публикации\nID: {post['id']}\nДетали: {str(e)}\nВремя: {datetime.now()}"
                     try:
-                        self.bot.send_message(
+                        await self.bot.send_message(
                             chat_id=LEADS_GROUP_CHAT_ID,
                             text=error_log,
                             message_thread_id=THREAD_ID_LOGS
