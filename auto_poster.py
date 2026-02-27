@@ -26,6 +26,10 @@ except ValueError:
 if CONTENT_CHANNEL_ID == 0:
     raise RuntimeError("Ошибка: ID канала не настроен в .env. CONTENT_CHANNEL_ID не может быть равен 0")
 
+# Leads Group Configuration
+LEADS_GROUP_CHAT_ID = int(os.getenv("LEADS_GROUP_CHAT_ID", "0"))
+THREAD_ID_LOGS = int(os.getenv("THREAD_ID_LOGS", "88"))
+
 YANDEX_API_KEY = os.getenv("YANDEX_API_KEY")
 FOLDER_ID = os.getenv("FOLDER_ID")
 
@@ -88,10 +92,6 @@ class AutoPoster:
                     logger.info(f"✅ Поздравление с {holiday['name']} опубликовано в канал {CONTENT_CHANNEL_ID}")
 
                     # Логируем публикацию
-                    import os
-                    LEADS_GROUP_CHAT_ID = int(os.getenv("LEADS_GROUP_CHAT_ID", "0"))
-                    THREAD_ID_LOGS = int(os.getenv("THREAD_ID_LOGS", "88"))
-
                     log_text = f"🎉 Праздничное поздравление\nНазвание: {holiday['name']}\nДата: {holiday['date']}\nВремя: {datetime.now()}"
                     try:
                         await self.bot.send_message(
@@ -171,10 +171,6 @@ class AutoPoster:
                     logger.info(f"[AutoPoster] Post {post['id']} published successfully")
 
                     # Логируем публикацию в THREAD_ID_LOGS группы
-                    import os
-                    LEADS_GROUP_CHAT_ID = int(os.getenv("LEADS_GROUP_CHAT_ID", "0"))
-                    THREAD_ID_LOGS = int(os.getenv("THREAD_ID_LOGS", "88"))
-
                     log_text = f"📤 Пост опубликован в канал\nID: {post['id']}\nТип: {post['type']}\nЗаголовок: {post.get('title', 'Без заголовка')}\nВремя: {datetime.now()}"
                     try:
                         await self.bot.send_message(
@@ -192,10 +188,6 @@ class AutoPoster:
                     logger.error(f"❌ Ошибка публикации поста #{post['id']}: {e}")
 
                     # Логируем ошибку публикации
-                    import os
-                    LEADS_GROUP_CHAT_ID = int(os.getenv("LEADS_GROUP_CHAT_ID", "0"))
-                    THREAD_ID_LOGS = int(os.getenv("THREAD_ID_LOGS", "88"))
-
                     error_log = f"❌ ОШИБКА публикации\nID: {post['id']}\nДетали: {str(e)}\nВремя: {datetime.now()}"
                     try:
                         await self.bot.send_message(
