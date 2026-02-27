@@ -14,7 +14,17 @@ def safe_html(text: str) -> str:
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-CONTENT_CHANNEL_ID = int(os.getenv("CONTENT_CHANNEL_ID", 0))
+CONTENT_CHANNEL_ID_STR = os.getenv("CONTENT_CHANNEL_ID")
+if not CONTENT_CHANNEL_ID_STR:
+    raise RuntimeError("Ошибка: ID канала не настроен в .env. Установите переменную CONTENT_CHANNEL_ID")
+
+try:
+    CONTENT_CHANNEL_ID = int(CONTENT_CHANNEL_ID_STR)
+except ValueError:
+    raise RuntimeError(f"Ошибка: CONTENT_CHANNEL_ID должен быть целым числом, получено: {CONTENT_CHANNEL_ID_STR}")
+
+if CONTENT_CHANNEL_ID == 0:
+    raise RuntimeError("Ошибка: ID канала не настроен в .env. CONTENT_CHANNEL_ID не может быть равен 0")
 
 YANDEX_API_KEY = os.getenv("YANDEX_API_KEY")
 FOLDER_ID = os.getenv("FOLDER_ID")
@@ -251,11 +261,12 @@ class AutoPoster:
         Returns:
             str: Отформатированный текст поста
         """
+        # Экранируем содержимое, но не HTML-теги
         title = escape(post.get('title', '').strip())
         body = escape(post.get('body', '').strip())
         cta = escape(post.get('cta', '').strip())
 
-        # Формируем текст
+        # Формируем текст с HTML-тегами (теги добавляются ПОСЛЕ экранирования содержимого)
         parts = []
 
         if title:
