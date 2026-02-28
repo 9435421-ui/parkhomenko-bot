@@ -2,6 +2,7 @@ import asyncio
 import logging
 import os
 from datetime import datetime
+from functools import partial
 from html import escape
 from database import db
 from image_agent import ImageAgent
@@ -205,18 +206,22 @@ class AutoPoster:
                         # Синхронный бот (telebot) - оборачиваем в asyncio.to_thread для неблокирующего выполнения
                         if post.get('image_url'):
                             await asyncio.to_thread(
-                                self.bot.send_photo,
-                                CONTENT_CHANNEL_ID,
-                                post['image_url'],
-                                caption=formatted_post,
-                                parse_mode='HTML'
+                                partial(
+                                    self.bot.send_photo,
+                                    CONTENT_CHANNEL_ID,
+                                    post['image_url'],
+                                    caption=formatted_post,
+                                    parse_mode='HTML'
+                                )
                             )
                         else:
                             await asyncio.to_thread(
-                                self.bot.send_message,
-                                CONTENT_CHANNEL_ID,
-                                formatted_post,
-                                parse_mode='HTML'
+                                partial(
+                                    self.bot.send_message,
+                                    CONTENT_CHANNEL_ID,
+                                    formatted_post,
+                                    parse_mode='HTML'
+                                )
                             )
 
                     # Отмечаем как опубликованный
@@ -235,12 +240,14 @@ class AutoPoster:
                             )
                         else:
                             # Синхронный бот (telebot) - оборачиваем в asyncio.to_thread для неблокирующего выполнения
-                            # Передаем message_thread_id как именованный параметр
+                            # Используем partial для передачи keyword arguments
                             await asyncio.to_thread(
-                                self.bot.send_message,
-                                LEADS_GROUP_CHAT_ID,
-                                log_text,
-                                message_thread_id=THREAD_ID_LOGS
+                                partial(
+                                    self.bot.send_message,
+                                    LEADS_GROUP_CHAT_ID,
+                                    log_text,
+                                    message_thread_id=THREAD_ID_LOGS
+                                )
                             )
                     except Exception as e:
                         logger.error(f"Failed to send publication log: {e}")
@@ -262,12 +269,14 @@ class AutoPoster:
                             )
                         else:
                             # Синхронный бот (telebot) - оборачиваем в asyncio.to_thread для неблокирующего выполнения
-                            # Передаем message_thread_id как именованный параметр
+                            # Используем partial для передачи keyword arguments
                             await asyncio.to_thread(
-                                self.bot.send_message,
-                                LEADS_GROUP_CHAT_ID,
-                                error_log,
-                                message_thread_id=THREAD_ID_LOGS
+                                partial(
+                                    self.bot.send_message,
+                                    LEADS_GROUP_CHAT_ID,
+                                    error_log,
+                                    message_thread_id=THREAD_ID_LOGS
+                                )
                             )
                     except:
                         pass
