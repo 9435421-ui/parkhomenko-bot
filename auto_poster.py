@@ -105,10 +105,11 @@ class AutoPoster:
                             parse_mode='HTML'
                         )
                     else:
-                        # Синхронный бот (telebot)
-                        self.bot.send_message(
-                            chat_id=CONTENT_CHANNEL_ID,
-                            text=full_message,
+                        # Синхронный бот (telebot) - оборачиваем в asyncio.to_thread для неблокирующего выполнения
+                        await asyncio.to_thread(
+                            self.bot.send_message,
+                            CONTENT_CHANNEL_ID,
+                            full_message,
                             parse_mode='HTML'
                         )
 
@@ -124,10 +125,12 @@ class AutoPoster:
                                 message_thread_id=THREAD_ID_LOGS
                             )
                         else:
-                            # Синхронный бот (telebot) - message_thread_id не поддерживается напрямую
-                            self.bot.send_message(
-                                chat_id=LEADS_GROUP_CHAT_ID,
-                                text=log_text
+                            # Синхронный бот (telebot) - оборачиваем в asyncio.to_thread для неблокирующего выполнения
+                            # message_thread_id не поддерживается напрямую в telebot
+                            await asyncio.to_thread(
+                                self.bot.send_message,
+                                LEADS_GROUP_CHAT_ID,
+                                log_text
                             )
                     except Exception as e:
                         logger.error(f"Failed to send holiday log: {e}")
@@ -198,11 +201,22 @@ class AutoPoster:
                         else:
                             await self.bot.send_message(chat_id=CONTENT_CHANNEL_ID, text=formatted_post, parse_mode='HTML')
                     else:
-                        # Синхронный бот (telebot)
+                        # Синхронный бот (telebot) - оборачиваем в asyncio.to_thread для неблокирующего выполнения
                         if post.get('image_url'):
-                            self.bot.send_photo(chat_id=CONTENT_CHANNEL_ID, photo=post['image_url'], caption=formatted_post, parse_mode='HTML')
+                            await asyncio.to_thread(
+                                self.bot.send_photo,
+                                CONTENT_CHANNEL_ID,
+                                post['image_url'],
+                                caption=formatted_post,
+                                parse_mode='HTML'
+                            )
                         else:
-                            self.bot.send_message(chat_id=CONTENT_CHANNEL_ID, text=formatted_post, parse_mode='HTML')
+                            await asyncio.to_thread(
+                                self.bot.send_message,
+                                CONTENT_CHANNEL_ID,
+                                formatted_post,
+                                parse_mode='HTML'
+                            )
 
                     # Отмечаем как опубликованный
                     await db.mark_as_published(post['id'])
@@ -219,10 +233,11 @@ class AutoPoster:
                                 message_thread_id=THREAD_ID_LOGS
                             )
                         else:
-                            # Синхронный бот (telebot)
-                            self.bot.send_message(
-                                chat_id=LEADS_GROUP_CHAT_ID,
-                                text=log_text
+                            # Синхронный бот (telebot) - оборачиваем в asyncio.to_thread для неблокирующего выполнения
+                            await asyncio.to_thread(
+                                self.bot.send_message,
+                                LEADS_GROUP_CHAT_ID,
+                                log_text
                             )
                     except Exception as e:
                         logger.error(f"Failed to send publication log: {e}")
@@ -243,10 +258,11 @@ class AutoPoster:
                                 message_thread_id=THREAD_ID_LOGS
                             )
                         else:
-                            # Синхронный бот (telebot)
-                            self.bot.send_message(
-                                chat_id=LEADS_GROUP_CHAT_ID,
-                                text=error_log
+                            # Синхронный бот (telebot) - оборачиваем в asyncio.to_thread для неблокирующего выполнения
+                            await asyncio.to_thread(
+                                self.bot.send_message,
+                                LEADS_GROUP_CHAT_ID,
+                                error_log
                             )
                     except:
                         pass
