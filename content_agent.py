@@ -324,8 +324,8 @@ class ContentAgent:
         lower = text.lower()
         # Разбиваем текст на слова (по пробелам и знакам препинания)
         words = re.findall(r'\b\w+\b', lower)
-        # Проверяем наличие запрещенных слов как целых слов
-        if any(banned_word in words for banned_word in banned):
+        # Проверяем наличие запрещенных слов по их корням (проверка вхождения подстроки)
+        if any(banned_word.lower() in word.lower() for banned_word in banned for word in words):
             # Фолбэк — нейтральное поздравление без продаж
             return (
                 "Пусть этот день будет для вас тёплым и радостным. "
