@@ -125,11 +125,12 @@ class AutoPoster:
                             )
                         else:
                             # Синхронный бот (telebot) - оборачиваем в asyncio.to_thread для неблокирующего выполнения
-                            # message_thread_id не поддерживается напрямую в telebot
+                            # Передаем message_thread_id как именованный параметр
                             await asyncio.to_thread(
                                 self.bot.send_message,
                                 LEADS_GROUP_CHAT_ID,
-                                log_text
+                                log_text,
+                                message_thread_id=THREAD_ID_LOGS
                             )
                     except Exception as e:
                         logger.error(f"Failed to send holiday log: {e}")
@@ -233,10 +234,12 @@ class AutoPoster:
                             )
                         else:
                             # Синхронный бот (telebot) - оборачиваем в asyncio.to_thread для неблокирующего выполнения
+                            # Передаем message_thread_id как именованный параметр
                             await asyncio.to_thread(
                                 self.bot.send_message,
                                 LEADS_GROUP_CHAT_ID,
-                                log_text
+                                log_text,
+                                message_thread_id=THREAD_ID_LOGS
                             )
                     except Exception as e:
                         logger.error(f"Failed to send publication log: {e}")
@@ -258,10 +261,12 @@ class AutoPoster:
                             )
                         else:
                             # Синхронный бот (telebot) - оборачиваем в asyncio.to_thread для неблокирующего выполнения
+                            # Передаем message_thread_id как именованный параметр
                             await asyncio.to_thread(
                                 self.bot.send_message,
                                 LEADS_GROUP_CHAT_ID,
-                                error_log
+                                error_log,
+                                message_thread_id=THREAD_ID_LOGS
                             )
                     except:
                         pass
