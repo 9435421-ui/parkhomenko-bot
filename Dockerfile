@@ -25,4 +25,4 @@ RUN mkdir -p database backups
 ENV PYTHONUNBUFFERED=1
 
 # Запуск бота
-CMD ["python", "bot.py"]
+CMD ["python", "main.py"]
