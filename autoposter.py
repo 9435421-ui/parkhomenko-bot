@@ -3,7 +3,8 @@ import logging
 import os
 from datetime import datetime
 import pytz
-import telebot
+from aiogram import Bot
+from aiogram.types import FSInputFile
 from dotenv import load_dotenv
 from database import db
 
@@ -22,8 +23,8 @@ if not CHANNEL_ID:
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# Инициализация бота
-bot = telebot.TeleBot(BOT_TOKEN)
+# Инициализация асинхронного бота (aiogram)
+bot = Bot(token=BOT_TOKEN)
 
 async def run_autoposter():
     """
@@ -51,14 +52,14 @@ async def run_autoposter():
 
                         logger.info(f"Отправка поста #{post_id}, запланирован на {scheduled_at}")
 
-                        # Отправляем пост
+                        # Отправляем пост асинхронно
                         if image_path and image_path.strip():
-                            # Отправляем фото с подписью
-                            with open(image_path, 'rb') as photo:
-                                bot.send_photo(chat_id=channel_id, photo=photo, caption=text)
+                            # Отправляем фото с подписью (асинхронно через aiogram)
+                            photo_file = FSInputFile(image_path)
+                            await bot.send_photo(chat_id=channel_id, photo=photo_file, caption=text)
                         else:
-                            # Отправляем текстовое сообщение
-                            bot.send_message(chat_id=channel_id, text=text)
+                            # Отправляем текстовое сообщение (асинхронно)
+                            await bot.send_message(chat_id=channel_id, text=text)
 
                         # Отмечаем как отправленный
                         await db.mark_scheduled_post_as_sent(post_id)
@@ -87,7 +88,8 @@ async def main():
         # Запускаем автопостер
         await run_autoposter()
     finally:
-        # Отключаемся от БД при завершении
+        # Закрываем сессию бота и отключаемся от БД
+        await bot.session.close()
         await db.disconnect()
 
 if __name__ == "__main__":
