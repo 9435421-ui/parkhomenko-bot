@@ -52,8 +52,18 @@ class AutoPoster:
         self.channel_id = CONTENT_CHANNEL_ID
         # Определяем тип бота для правильной работы с async/sync методами
         # Проверяем, является ли метод send_message корутиной (async)
+        # Используем надежную проверку для bound methods (aiogram) и обычных функций (telebot)
         send_msg_method = getattr(bot, 'send_message', None)
-        self.is_async = send_msg_method is not None and inspect.iscoroutinefunction(send_msg_method)
+        if send_msg_method is None:
+            self.is_async = False
+        else:
+            # Для bound methods (aiogram.Bot) получаем оригинальную функцию через __func__
+            # Для обычных функций (telebot) используем напрямую
+            original_func = getattr(send_msg_method, '__func__', send_msg_method)
+            # Разворачиваем декораторы, если они есть
+            unwrapped_func = inspect.unwrap(original_func)
+            # Проверяем, является ли оригинальная функция корутиной
+            self.is_async = inspect.iscoroutinefunction(unwrapped_func)
 
     async def _check_and_publish_holidays(self):
         """
