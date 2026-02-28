@@ -23,6 +23,12 @@ UPLOAD_DIR = os.getenv("UPLOAD_DIR")
 ADMIN_ID = int(os.getenv("ADMIN_ID", "223465437"))
 ADMIN_GROUP_ID = int(os.getenv("ADMIN_GROUP_ID", "0"))
 MINI_APP_URL = os.getenv("MINI_APP_URL")
+JULIA_USER_ID = int(os.getenv("JULIA_USER_ID", "0"))
+JULIA_CONTACT = os.getenv("JULIA_CONTACT", "@terion_expert")
+THREAD_ID_LOGS = int(os.getenv("THREAD_ID_LOGS", "88"))
+THREAD_ID_DRAFTS = int(os.getenv("THREAD_ID_DRAFTS", "85"))
+VK_QUIZ_LINK = os.getenv("VK_QUIZ_LINK", "https://vk.com/app123456")
+CONTENT_HASHTAGS = os.getenv("CONTENT_HASHTAGS", "#перепланировка #москва")
 
 # Database path - используем DATABASE_PATH из .env, fallback на стандартный путь
 DATABASE_PATH = os.getenv("DATABASE_PATH", "database/terion.db")
