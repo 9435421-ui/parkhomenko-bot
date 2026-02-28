@@ -5,13 +5,20 @@ import os
 import shutil
 from datetime import datetime
 from pathlib import Path
+from dotenv import load_dotenv
+
+# Загружаем переменные окружения
+load_dotenv()
+
+# Получаем путь к базе данных из .env или используем значение по умолчанию
+DATABASE_PATH = os.getenv("DATABASE_PATH", "database/terion.db")
 
 
 def backup_database():
     """Создание бэкапа базы данных"""
     
-    # Путь к базе данных
-    db_path = Path("database/bot.db")
+    # Путь к базе данных из конфигурации
+    db_path = Path(DATABASE_PATH)
     
     if not db_path.exists():
         print("❌ База данных не найдена. Возможно, бот ещё не запускался.")
