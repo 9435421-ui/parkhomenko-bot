@@ -14,7 +14,7 @@ class ContentAgent:
         self.brief_content = self._load_brief()
 
         # Единый список типов постов
-        self.post_types = ['news', 'fact', 'case', 'offer']
+        self.post_types = ['news', 'fact', 'case', 'offer', 'seasonal']
 
         # Шаблоны поздравлений с днем рождения (без упоминания услуг/перепланировок)
         self.birthday_templates = [
