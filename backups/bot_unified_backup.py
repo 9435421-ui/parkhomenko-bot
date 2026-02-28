@@ -929,6 +929,18 @@ def mode_select_handler(call):
             )
 
             bot.send_message(user_id, "Выберите тип объекта:\n- квартира\n- дом\n- нежилое помещение (офис, магазин и т.п.).", reply_markup=markup)
+        elif state.quiz_step == 3:
+            # Показываем кнопки выбора типа объекта (исправление зависания на шаге 3)
+            markup = types.InlineKeyboardMarkup()
+            markup.row(
+                types.InlineKeyboardButton("Квартира", callback_data="obj_kvartira"),
+                types.InlineKeyboardButton("Дом", callback_data="obj_dom")
+            )
+            markup.row(
+                types.InlineKeyboardButton("Нежилое помещение (офис, магазин и т.п.)", callback_data="obj_kommertsia")
+            )
+
+            bot.send_message(user_id, "Выберите тип объекта:\n- квартира\n- дом\n- нежилое помещение (офис, магазин и т.п.).", reply_markup=markup)
         elif state.quiz_step == 5:
             bot.send_message(
                 user_id, "Укажите этаж и этажность дома (например: 5/9 или просто 5):"
