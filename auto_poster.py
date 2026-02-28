@@ -15,17 +15,48 @@ def safe_html(text: str) -> str:
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
+def parse_channel_id(channel_id_str: str) -> int | str | None:
+    """
+    Парсит ID канала из строки.
+    Поддерживает как числовой ID (например, -1001234567890), так и username (например, @channel_name).
+    
+    Args:
+        channel_id_str: Строка с ID канала или username
+        
+    Returns:
+        int если это числовой ID, str если это username (начинается с @), None если пустая строка
+    """
+    if not channel_id_str:
+        return None
+    
+    if channel_id_str.startswith("@"):
+        # Если передан username канала (например, @channel_name), используем как строку
+        return channel_id_str
+    else:
+        # Если передан числовой ID, конвертируем в int
+        try:
+            parsed_id = int(channel_id_str)
+            if parsed_id == 0:
+                raise ValueError("Channel ID не может быть равен 0")
+            return parsed_id
+        except ValueError as e:
+            raise ValueError(
+                f"Channel ID должен быть числовым ID (например, -1001234567890) "
+                f"или username канала (например, @channel_name), получено: {channel_id_str}. "
+                f"Ошибка: {e}"
+            )
+
 CONTENT_CHANNEL_ID_STR = os.getenv("CONTENT_CHANNEL_ID")
 if not CONTENT_CHANNEL_ID_STR:
     raise RuntimeError("Ошибка: ID канала не настроен в .env. Установите переменную CONTENT_CHANNEL_ID")
 
 try:
-    CONTENT_CHANNEL_ID = int(CONTENT_CHANNEL_ID_STR)
-except ValueError:
-    raise RuntimeError(f"Ошибка: CONTENT_CHANNEL_ID должен быть целым числом, получено: {CONTENT_CHANNEL_ID_STR}")
+    CONTENT_CHANNEL_ID = parse_channel_id(CONTENT_CHANNEL_ID_STR)
+except ValueError as e:
+    raise RuntimeError(f"Ошибка: {e}")
 
-if CONTENT_CHANNEL_ID == 0:
-    raise RuntimeError("Ошибка: ID канала не настроен в .env. CONTENT_CHANNEL_ID не может быть равен 0")
+if CONTENT_CHANNEL_ID is None:
+    raise RuntimeError("Ошибка: ID канала не настроен в .env. CONTENT_CHANNEL_ID не может быть пустым")
 
 # Leads Group Configuration
 LEADS_GROUP_CHAT_ID = int(os.getenv("LEADS_GROUP_CHAT_ID", "0"))
