@@ -91,6 +91,8 @@ def restore_database(backup_file: str):
     # Создаём бэкап текущей БД перед восстановлением
     if db_path.exists():
         current_backup = Path("backups") / f"before_restore_{datetime.now().strftime('%Y%m%d_%H%M%S')}.db"
+        backup_dir = Path("backups")
+        backup_dir.mkdir(exist_ok=True)
         shutil.copy2(db_path, current_backup)
         print(f"💾 Текущая БД сохранена в: {current_backup}")
     
