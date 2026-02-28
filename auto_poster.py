@@ -171,7 +171,8 @@ class AutoPoster:
             for post in posts:
                 try:
                     # Если текст поста не заполнен, генерируем его
-                    if not post.get('body') or not post.get('body').strip():
+                    body_text = post.get('body') or ""
+                    if not body_text.strip():
                         logger.info(f"Генерируем текст для поста #{post['id']} типа '{post.get('type', 'unknown')}'")
                         await self._generate_missing_text(post)
 
@@ -296,9 +297,10 @@ class AutoPoster:
             str: Отформатированный текст поста
         """
         # Экранируем содержимое, но не HTML-теги
-        title = escape(post.get('title', '').strip())
-        body = escape(post.get('body', '').strip())
-        cta = escape(post.get('cta', '').strip())
+        # Безопасная обработка None значений перед вызовом .strip()
+        title = escape((post.get('title') or '').strip())
+        body = escape((post.get('body') or '').strip())
+        cta = escape((post.get('cta') or '').strip())
 
         # Формируем текст с HTML-тегами (теги добавляются ПОСЛЕ экранирования содержимого)
         parts = []
