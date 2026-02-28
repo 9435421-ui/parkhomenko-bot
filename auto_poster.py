@@ -96,6 +96,17 @@ class AutoPoster:
             # Проверяем, является ли оригинальная функция корутиной
             self.is_async = inspect.iscoroutinefunction(unwrapped_func)
 
+    @staticmethod
+    def _file_exists(file_path: str) -> bool:
+        """Синхронный вспомогательный метод для проверки существования файла"""
+        return os.path.exists(file_path)
+
+    @staticmethod
+    def _write_file(file_path: str, content: str) -> None:
+        """Синхронный вспомогательный метод для записи файла"""
+        with open(file_path, 'w') as f:
+            f.write(content)
+
     async def _check_and_publish_holidays(self):
         """
         Проверяет и публикует праздничные поздравления (один раз в сутки)
@@ -113,7 +124,9 @@ class AutoPoster:
             today_str = datetime.now().strftime("%Y-%m-%d")
             holiday_flag_file = f"holiday_published_{today_str}.flag"
 
-            if os.path.exists(holiday_flag_file):
+            # Асинхронная проверка существования файла через asyncio.to_thread
+            file_exists = await asyncio.to_thread(self._file_exists, holiday_flag_file)
+            if file_exists:
                 logger.info("Праздничные поздравления уже опубликованы сегодня")
                 return
 
@@ -175,8 +188,8 @@ class AutoPoster:
 
             # Создаем флаг-файл, чтобы не публиковать повторно сегодня
             try:
-                with open(holiday_flag_file, 'w') as f:
-                    f.write(today_str)
+                # Асинхронная запись файла через asyncio.to_thread
+                await asyncio.to_thread(self._write_file, holiday_flag_file, today_str)
                 logger.info("Создан флаг-файл для предотвращения повторной публикации")
             except Exception as e:
                 logger.error(f"Не удалось создать флаг-файл: {e}")
