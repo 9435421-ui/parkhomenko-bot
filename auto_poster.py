@@ -268,7 +268,7 @@ class AutoPoster:
             }
 
             # Генерируем текст
-            text_data = agent.generate_post_text(plan_item)
+            text_data = await agent.generate_post_text(plan_item)
 
             # Обновляем пост в базе данных
             await db.update_content_plan_entry(

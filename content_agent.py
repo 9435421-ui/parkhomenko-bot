@@ -1,4 +1,4 @@
-import requests
+import aiohttp
 import os
 from datetime import datetime, timedelta
 import json
@@ -36,7 +36,7 @@ class ContentAgent:
         except FileNotFoundError:
             return "База знаний не найдена. Используйте общие знания по перепланировкам."
 
-    def generate_post_text(self, plan_item):
+    async def generate_post_text(self, plan_item):
         """
         Сгенерировать текст поста в зависимости от plan_item.type
 
@@ -54,7 +54,7 @@ class ContentAgent:
             post_type = 'fact'
 
         prompt = self._build_prompt(post_type, theme)
-        text = self._call_yandex_gpt(prompt)
+        text = await self._call_yandex_gpt(prompt)
 
         # Парсим ответ: заголовок (опционально), текст, CTA
         title, body, cta = self._parse_response(text)
@@ -65,9 +65,9 @@ class ContentAgent:
             'cta': cta
         }
 
-    def generate_posts(self, count=7, post_types=None, theme=None):
+    async def generate_posts(self, count=7, post_types=None, theme=None):
         """
-        Генерирует N постов
+        Генерирует N постов (асинхронный)
         post_types: {'news': 2, 'fact': 3, 'seasonal': 1, 'case': 1}
         theme: опциональная тема недели (например: "новый год и зимние перепланировки")
         """
@@ -88,7 +88,7 @@ class ContentAgent:
             for i in range(num):
                 # Используем новый метод генерации
                 plan_item = {'type': post_type, 'theme': theme}
-                text_data = self.generate_post_text(plan_item)
+                text_data = await self.generate_post_text(plan_item)
 
                 post = {
                     'type': post_type,
@@ -163,8 +163,8 @@ class ContentAgent:
             "Последствие: пауза до первой сделки, проверка банка или отказ в ипотеке."
         )
 
-    def _call_yandex_gpt(self, user_prompt, mode="default", context=""):
-        """Вызов YandexGPT API"""
+    async def _call_yandex_gpt(self, user_prompt, mode="default", context=""):
+        """Вызов YandexGPT API (асинхронный)"""
 
         if mode == "greeting":
             system_prompt = """
@@ -263,11 +263,11 @@ class ContentAgent:
             "messages": messages
         }
 
-        response = requests.post(self.endpoint, headers=headers, json=payload, timeout=30)
-        response.raise_for_status()
-
-        result = response.json()
-        return result['result']['alternatives'][0]['message']['text']
+        async with aiohttp.ClientSession() as session:
+            async with session.post(self.endpoint, headers=headers, json=payload, timeout=aiohttp.ClientTimeout(total=30)) as response:
+                response.raise_for_status()
+                result = await response.json()
+                return result['result']['alternatives'][0]['message']['text']
 
     def _parse_response(self, text):
         """Парсит ответ LLM на title, body, cta"""
@@ -314,7 +314,7 @@ class ContentAgent:
             )
         return text
 
-    def generate_greeting_post(self, person_name, date, occasion='день рождения'):
+    async def generate_greeting_post(self, person_name, date, occasion='день рождения'):
         """
         Генерирует персональный поздравительный пост
 
@@ -348,7 +348,7 @@ class ContentAgent:
 [Поздравление с пожеланиями]
 """
 
-        text = self._call_yandex_gpt(prompt, mode="greeting")
+        text = await self._call_yandex_gpt(prompt, mode="greeting")
         text = self._sanitize_greeting(text)
 
         # Для поздравления title можно не использовать, всё в body
@@ -392,7 +392,7 @@ class ContentAgent:
             'cta': ''
         }
 
-    def generate_welcome_post(self, person_name: str | None = None):
+    async def generate_welcome_post(self, person_name: str | None = None):
         """
         Генерирует приветственное сообщение-визитку для потенциального клиента.
 
@@ -422,7 +422,7 @@ class ContentAgent:
 [Текст приветствия 2–3 абзаца с CTA в конце]
 """
 
-        text = self._call_yandex_gpt(prompt, mode="default")  # обычный продающий режим
+        text = await self._call_yandex_gpt(prompt, mode="default")  # обычный продающий режим
         title, body, cta = self._parse_response(text)
 
         return {
