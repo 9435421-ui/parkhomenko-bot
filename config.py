@@ -64,6 +64,7 @@ JULIA_USER_ID = int(os.getenv("JULIA_USER_ID", "0"))
 JULIA_CONTACT = os.getenv("JULIA_CONTACT", "@terion_expert")
 THREAD_ID_LOGS = int(os.getenv("THREAD_ID_LOGS", "88"))
 THREAD_ID_DRAFTS = int(os.getenv("THREAD_ID_DRAFTS", "85"))
+THREAD_ID_SEASONAL = int(os.getenv("THREAD_ID_SEASONAL", "87"))
 VK_QUIZ_LINK = os.getenv("VK_QUIZ_LINK", "https://vk.com/app123456")
 CONTENT_HASHTAGS = os.getenv("CONTENT_HASHTAGS", "#перепланировка #москва")
 
