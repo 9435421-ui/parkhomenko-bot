@@ -13,9 +13,9 @@ class Database:
 
     async def connect(self):
         """Подключение к базе данных"""
-        db_path = os.getenv("DB_PATH", "db/parkhomenko_bot.db")
+        db_path = os.getenv("DATABASE_PATH", "db/parkhomenko_bot.db")
         if not db_path:
-            raise RuntimeError("DB_PATH must be set in .env")
+            raise RuntimeError("DATABASE_PATH must be set in .env")
 
         # Автоматическое создание папки для БД
         DB_DIR = os.path.dirname(db_path)
@@ -159,6 +159,37 @@ class Database:
             await cur.execute(holidays_sql)
             await cur.execute(scheduled_posts_sql)
         await self.conn.commit()
+        
+        # Миграция: добавление колонок image_prompt и image_url в content_plan если их нет
+        await self._migrate_content_plan_columns()
+
+    async def _migrate_content_plan_columns(self):
+        """Миграция: добавление колонок image_prompt и image_url в таблицу content_plan если их нет"""
+        try:
+            async with self.conn.cursor() as cur:
+                # Получаем список колонок таблицы content_plan
+                await cur.execute("PRAGMA table_info(content_plan)")
+                columns = await cur.fetchall()
+                column_names = [col[1] for col in columns]
+                
+                # Добавляем image_prompt если его нет
+                if "image_prompt" not in column_names:
+                    await cur.execute("ALTER TABLE content_plan ADD COLUMN image_prompt TEXT")
+                    logger.info("✅ Добавлена колонка image_prompt в content_plan")
+                
+                # Добавляем image_url если его нет
+                if "image_url" not in column_names:
+                    await cur.execute("ALTER TABLE content_plan ADD COLUMN image_url TEXT")
+                    logger.info("✅ Добавлена колонка image_url в content_plan")
+                
+                # Добавляем updated_at если его нет
+                if "updated_at" not in column_names:
+                    await cur.execute("ALTER TABLE content_plan ADD COLUMN updated_at TEXT DEFAULT (datetime('now'))")
+                    logger.info("✅ Добавлена колонка updated_at в content_plan")
+            
+            await self.conn.commit()
+        except Exception as e:
+            logger.warning(f"⚠️ Ошибка при миграции колонок content_plan: {e}")
 
     # Функции для работы с лидами
     async def save_lead(self, name, phone, extra_contact=None, object_type=None,
@@ -185,8 +216,9 @@ class Database:
         """
         async with self.conn.cursor() as cur:
             await cur.execute(query, (post_type, title, body, cta, publish_date.isoformat(), image_prompt, image_url))
-            return cur.lastrowid
+            post_id = cur.lastrowid
         await self.conn.commit()
+        return post_id
 
     async def get_draft_posts(self):
         """Получить все посты со статусом draft"""
@@ -208,7 +240,9 @@ class Database:
             await cur.execute(query, (post_id,))
         await self.conn.commit()
 
-    async def update_content_plan_entry(self, post_id: int, status: str = None, publish_date: str = None, image_prompt: str = None, image_url: str = None):
+    async def update_content_plan_entry(self, post_id: int, status: str = None, publish_date: str = None, 
+                                       image_prompt: str = None, image_url: str = None,
+                                       title: str = None, body: str = None, cta: str = None):
         """Обновить запись в контент-плане"""
         updates = []
         params = []
@@ -225,10 +259,21 @@ class Database:
         if image_url is not None:
             updates.append("image_url = ?")
             params.append(image_url)
+        if title is not None:
+            updates.append("title = ?")
+            params.append(title)
+        if body is not None:
+            updates.append("body = ?")
+            params.append(body)
+        if cta is not None:
+            updates.append("cta = ?")
+            params.append(cta)
 
         if not updates:
             return  # Nothing to update
 
+        # Добавляем обновление updated_at при любом изменении
+        updates.append("updated_at = datetime('now')")
         params.append(post_id)
 
         query = f"UPDATE content_plan SET {', '.join(updates)} WHERE id = ?"
