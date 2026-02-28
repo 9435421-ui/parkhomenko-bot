@@ -10,7 +10,7 @@ from datetime import datetime, timedelta
 from typing import List, Dict, Optional
 from dataclasses import dataclass
 import aiohttp
-from config import VK_TOKEN, VK_GROUP_ID
+from config import VK_API_TOKEN, VK_GROUP_ID
 
 logger = logging.getLogger(__name__)
 
@@ -386,8 +386,8 @@ class ScoutParser:
         Использует фильтрацию по платформе и приоритеты из БД.
         """
         posts = []
-        if not VK_TOKEN or "vk1.a" not in VK_TOKEN:
-            logger.warning("⚠️ VK_TOKEN не настроен или невалиден")
+        if not VK_API_TOKEN or "vk1.a" not in VK_API_TOKEN:
+            logger.warning("⚠️ VK_API_TOKEN не настроен или невалиден")
             return []
 
         # Загружаем цели из БД с фильтрацией по платформе (Data-Driven Scout)
@@ -427,7 +427,7 @@ class ScoutParser:
                 if is_priority:
                     logger.info(f"⭐ Приоритетный ЖК VK: {source_name}")
 
-                url = f"https://api.vk.com/method/wall.get?owner_id={owner_id}&count={count}&access_token={VK_TOKEN}&v=5.131"
+                url = f"https://api.vk.com/method/wall.get?owner_id={owner_id}&count={count}&access_token={VK_API_TOKEN}&v=5.131"
                 try:
                     async with session.get(url) as resp:
                         data = await resp.json()
