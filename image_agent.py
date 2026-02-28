@@ -1,3 +1,4 @@
+import os
 import logging
 
 # Настройка логирования для модуля
@@ -5,8 +6,16 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 class ImageAgent:
-    def __init__(self, api_key: str | None = None):
-        self.api_key = api_key
+    def __init__(self, api_key: str | None = None, folder_id: str | None = None):
+        """
+        Инициализация ImageAgent
+        
+        Args:
+            api_key: API ключ Yandex Cloud (если None, берется из .env)
+            folder_id: ID каталога Yandex Cloud (если None, берется из .env)
+        """
+        self.api_key = api_key or os.getenv("YANDEX_API_KEY")
+        self.folder_id = folder_id or os.getenv("FOLDER_ID")
         logger.info("ImageAgent инициализирован (режим заглушки)")
 
     def build_image_prompt(self, post_type: str, text: str) -> str:
