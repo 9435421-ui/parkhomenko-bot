@@ -74,7 +74,8 @@ def cleanup_old_backups(backup_dir: Path, days: int = 30):
 def restore_database(backup_file: str):
     """Восстановление базы данных из бэкапа"""
     backup_path = Path(backup_file)
-    db_path = Path("database/bot.db")
+    # Используем путь к базе данных из конфигурации
+    db_path = Path(DATABASE_PATH)
     
     if not backup_path.exists():
         print(f"❌ Файл бэкапа не найден: {backup_path}")
