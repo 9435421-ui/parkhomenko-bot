@@ -106,11 +106,14 @@ class AutoPoster:
                         )
                     else:
                         # Синхронный бот (telebot) - оборачиваем в asyncio.to_thread для неблокирующего выполнения
+                        # Используем partial для передачи keyword arguments
                         await asyncio.to_thread(
-                            self.bot.send_message,
-                            CONTENT_CHANNEL_ID,
-                            full_message,
-                            parse_mode='HTML'
+                            partial(
+                                self.bot.send_message,
+                                CONTENT_CHANNEL_ID,
+                                full_message,
+                                parse_mode='HTML'
+                            )
                         )
 
                     logger.info(f"✅ Поздравление с {holiday['name']} опубликовано в канал {CONTENT_CHANNEL_ID}")
@@ -126,12 +129,14 @@ class AutoPoster:
                             )
                         else:
                             # Синхронный бот (telebot) - оборачиваем в asyncio.to_thread для неблокирующего выполнения
-                            # Передаем message_thread_id как именованный параметр
+                            # Используем partial для передачи keyword arguments
                             await asyncio.to_thread(
-                                self.bot.send_message,
-                                LEADS_GROUP_CHAT_ID,
-                                log_text,
-                                message_thread_id=THREAD_ID_LOGS
+                                partial(
+                                    self.bot.send_message,
+                                    LEADS_GROUP_CHAT_ID,
+                                    log_text,
+                                    message_thread_id=THREAD_ID_LOGS
+                                )
                             )
                     except Exception as e:
                         logger.error(f"Failed to send holiday log: {e}")
