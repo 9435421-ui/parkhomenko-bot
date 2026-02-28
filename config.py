@@ -9,16 +9,19 @@ VK_API_TOKEN = os.getenv("VK_API_TOKEN")
 VK_GROUP_ID = os.getenv("VK_GROUP_ID")
 LEADS_GROUP_CHAT_ID = int(os.getenv("LEADS_GROUP_CHAT_ID", "-1003370698977"))
 
-def parse_channel_id(channel_id_str: str) -> int | str | None:
+def parse_channel_id(channel_id_str: str | None) -> int | str | None:
     """
-    Парсит ID канала из строки.
+    Эталонная функция для парсинга ID канала из строки.
     Поддерживает как числовой ID (например, -1001234567890), так и username (например, @channel_name).
     
     Args:
-        channel_id_str: Строка с ID канала или username
+        channel_id_str: Строка с ID канала или username, может быть None или пустой строкой
         
     Returns:
-        int если это числовой ID, str если это username (начинается с @), None если пустая строка
+        int если это числовой ID, str если это username (начинается с @), None если пустая строка или None
+        
+    Note:
+        Функция не проверяет значение на 0 - если явно задан 0, значит так нужно для тестов или безопасности.
     """
     if not channel_id_str:
         return None

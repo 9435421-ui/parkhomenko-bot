@@ -5,6 +5,7 @@ from datetime import datetime
 from html import escape
 from database import db
 from image_agent import ImageAgent
+from config import parse_channel_id, CONTENT_CHANNEL_ID, LEADS_GROUP_CHAT_ID, THREAD_ID_LOGS, YANDEX_API_KEY, FOLDER_ID
 import inspect
 
 def safe_html(text: str) -> str:
@@ -15,55 +16,9 @@ def safe_html(text: str) -> str:
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-def parse_channel_id(channel_id_str: str) -> int | str | None:
-    """
-    Парсит ID канала из строки.
-    Поддерживает как числовой ID (например, -1001234567890), так и username (например, @channel_name).
-    
-    Args:
-        channel_id_str: Строка с ID канала или username
-        
-    Returns:
-        int если это числовой ID, str если это username (начинается с @), None если пустая строка
-    """
-    if not channel_id_str:
-        return None
-    
-    if channel_id_str.startswith("@"):
-        # Если передан username канала (например, @channel_name), используем как строку
-        return channel_id_str
-    else:
-        # Если передан числовой ID, конвертируем в int
-        try:
-            parsed_id = int(channel_id_str)
-            if parsed_id == 0:
-                raise ValueError("Channel ID не может быть равен 0")
-            return parsed_id
-        except ValueError as e:
-            raise ValueError(
-                f"Channel ID должен быть числовым ID (например, -1001234567890) "
-                f"или username канала (например, @channel_name), получено: {channel_id_str}. "
-                f"Ошибка: {e}"
-            )
-
-CONTENT_CHANNEL_ID_STR = os.getenv("CONTENT_CHANNEL_ID")
-if not CONTENT_CHANNEL_ID_STR:
+# Проверка обязательных переменных окружения
+if not CONTENT_CHANNEL_ID:
     raise RuntimeError("Ошибка: ID канала не настроен в .env. Установите переменную CONTENT_CHANNEL_ID")
-
-try:
-    CONTENT_CHANNEL_ID = parse_channel_id(CONTENT_CHANNEL_ID_STR)
-except ValueError as e:
-    raise RuntimeError(f"Ошибка: {e}")
-
-if CONTENT_CHANNEL_ID is None:
-    raise RuntimeError("Ошибка: ID канала не настроен в .env. CONTENT_CHANNEL_ID не может быть пустым")
-
-# Leads Group Configuration
-LEADS_GROUP_CHAT_ID = int(os.getenv("LEADS_GROUP_CHAT_ID", "0"))
-THREAD_ID_LOGS = int(os.getenv("THREAD_ID_LOGS", "88"))
-
-YANDEX_API_KEY = os.getenv("YANDEX_API_KEY")
-FOLDER_ID = os.getenv("FOLDER_ID")
 
 if not YANDEX_API_KEY or not FOLDER_ID:
     raise RuntimeError("YANDEX_API_KEY and FOLDER_ID must be set in environment")
