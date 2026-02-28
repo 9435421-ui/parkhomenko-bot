@@ -60,6 +60,7 @@ class Database:
             await cursor.execute("PRAGMA synchronous=NORMAL")  # Баланс между производительностью и надежностью
             await self.conn.commit()
         await self._create_tables()
+        await self._migrate_sources_table()
         logger.info(f"✅ База данных подключена (WAL режим): {self.db_path}")
     
     async def close(self):
@@ -377,24 +378,6 @@ class Database:
             """)
             await self.conn.commit()
             
-            # Миграция: проверка и добавление колонки updated_at в sources, если её нет
-            try:
-                await cursor.execute("PRAGMA table_info(sources)")
-                columns = await cursor.fetchall()
-                column_names = [col_info[1] for col_info in columns]
-                
-                if 'updated_at' not in column_names:
-                    logger.info("🔧 Добавляю колонку updated_at в таблицу sources...")
-                    await cursor.execute("ALTER TABLE sources ADD COLUMN updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP")
-                    # Обновляем существующие записи
-                    await cursor.execute("UPDATE sources SET updated_at = COALESCE(last_scanned, CURRENT_TIMESTAMP) WHERE updated_at IS NULL")
-                    await self.conn.commit()
-                    logger.info("✅ Колонка updated_at добавлена в таблицу sources")
-                else:
-                    logger.debug("ℹ️ Колонка updated_at уже существует в таблице sources")
-            except Exception as e:
-                logger.warning(f"⚠️ Ошибка при проверке/добавлении колонки updated_at в sources: {e}")
-            
             # Таблица продажных диалогов (5-шаговый скрипт)
             await cursor.execute("""
                 CREATE TABLE IF NOT EXISTS sales_conversations (
@@ -419,6 +402,43 @@ class Database:
                 )
             """)
             await self.conn.commit()
+
+    async def _migrate_sources_table(self):
+        """
+        Миграция таблицы sources: проверка и добавление колонки updated_at, если её нет.
+        Вызывается при каждом запуске бота для обеспечения совместимости со старыми базами данных.
+        """
+        try:
+            async with self.conn.cursor() as cursor:
+                # Проверяем, существует ли таблица sources
+                await cursor.execute("""
+                    SELECT name FROM sqlite_master 
+                    WHERE type='table' AND name='sources'
+                """)
+                table_exists = await cursor.fetchone()
+                
+                if not table_exists:
+                    logger.debug("ℹ️ Таблица sources не существует, миграция не требуется")
+                    return
+                
+                # Проверяем наличие колонки updated_at
+                await cursor.execute("PRAGMA table_info(sources)")
+                columns = await cursor.fetchall()
+                column_names = [col_info[1] for col_info in columns]
+                
+                if 'updated_at' not in column_names:
+                    logger.info("🔧 Добавляю колонку updated_at в таблицу sources...")
+                    await cursor.execute("ALTER TABLE sources ADD COLUMN updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP")
+                    # Обновляем существующие записи
+                    await cursor.execute("UPDATE sources SET updated_at = COALESCE(last_scanned, CURRENT_TIMESTAMP) WHERE updated_at IS NULL")
+                    await self.conn.commit()
+                    logger.info("✅ Колонка updated_at успешно добавлена в таблицу sources")
+                else:
+                    logger.debug("ℹ️ Колонка updated_at уже существует в таблице sources")
+        except Exception as e:
+            logger.error(f"❌ Ошибка при миграции таблицы sources: {e}")
+            # Не прерываем работу бота, если миграция не удалась
+            # Возможно, таблица еще не создана или есть другие проблемы
 
     async def get_or_create_user(self, user_id: int, username: Optional[str] = None,
                                 first_name: Optional[str] = None, last_name: Optional[str] = None) -> Dict:
