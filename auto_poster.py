@@ -5,6 +5,7 @@ from datetime import datetime
 from html import escape
 from database import db
 from image_agent import ImageAgent
+import inspect
 
 def safe_html(text: str) -> str:
     """Экранирует HTML-спецсимволы для безопасной отправки с parse_mode='HTML'"""
@@ -45,10 +46,14 @@ class AutoPoster:
         Инициализация AutoPoster
 
         Args:
-            bot: Экземпляр телеграм-бота
+            bot: Экземпляр телеграм-бота (aiogram.Bot или telebot.TeleBot)
         """
         self.bot = bot
         self.channel_id = CONTENT_CHANNEL_ID
+        # Определяем тип бота для правильной работы с async/sync методами
+        # Проверяем, является ли метод send_message корутиной (async)
+        send_msg_method = getattr(bot, 'send_message', None)
+        self.is_async = send_msg_method is not None and inspect.iscoroutinefunction(send_msg_method)
 
     async def _check_and_publish_holidays(self):
         """
@@ -83,22 +88,37 @@ class AutoPoster:
 
                     # Публикуем в канал
                     logger.info(f"Публикуем поздравление с {holiday['name']}")
-                    await self.bot.send_message(
-                        chat_id=CONTENT_CHANNEL_ID,
-                        text=full_message,
-                        parse_mode='HTML'
-                    )
+                    if self.is_async:
+                        await self.bot.send_message(
+                            chat_id=CONTENT_CHANNEL_ID,
+                            text=full_message,
+                            parse_mode='HTML'
+                        )
+                    else:
+                        # Синхронный бот (telebot)
+                        self.bot.send_message(
+                            chat_id=CONTENT_CHANNEL_ID,
+                            text=full_message,
+                            parse_mode='HTML'
+                        )
 
                     logger.info(f"✅ Поздравление с {holiday['name']} опубликовано в канал {CONTENT_CHANNEL_ID}")
 
                     # Логируем публикацию
                     log_text = f"🎉 Праздничное поздравление\nНазвание: {holiday['name']}\nДата: {holiday['date']}\nВремя: {datetime.now()}"
                     try:
-                        await self.bot.send_message(
-                            chat_id=LEADS_GROUP_CHAT_ID,
-                            text=log_text,
-                            message_thread_id=THREAD_ID_LOGS
-                        )
+                        if self.is_async:
+                            await self.bot.send_message(
+                                chat_id=LEADS_GROUP_CHAT_ID,
+                                text=log_text,
+                                message_thread_id=THREAD_ID_LOGS
+                            )
+                        else:
+                            # Синхронный бот (telebot) - message_thread_id не поддерживается напрямую
+                            self.bot.send_message(
+                                chat_id=LEADS_GROUP_CHAT_ID,
+                                text=log_text
+                            )
                     except Exception as e:
                         logger.error(f"Failed to send holiday log: {e}")
 
@@ -160,10 +180,18 @@ class AutoPoster:
 
                     # Отправляем в канал
                     logger.info(f"[AutoPoster] Publishing post {post['id']} (type={post.get('type')}, has_image={bool(post.get('image_url'))})")
-                    if post.get('image_url'):
-                        await self.bot.send_photo(chat_id=CONTENT_CHANNEL_ID, photo=post['image_url'], caption=formatted_post, parse_mode='HTML')
+                    if self.is_async:
+                        # Асинхронный бот (aiogram)
+                        if post.get('image_url'):
+                            await self.bot.send_photo(chat_id=CONTENT_CHANNEL_ID, photo=post['image_url'], caption=formatted_post, parse_mode='HTML')
+                        else:
+                            await self.bot.send_message(chat_id=CONTENT_CHANNEL_ID, text=formatted_post, parse_mode='HTML')
                     else:
-                        await self.bot.send_message(chat_id=CONTENT_CHANNEL_ID, text=formatted_post, parse_mode='HTML')
+                        # Синхронный бот (telebot)
+                        if post.get('image_url'):
+                            self.bot.send_photo(chat_id=CONTENT_CHANNEL_ID, photo=post['image_url'], caption=formatted_post, parse_mode='HTML')
+                        else:
+                            self.bot.send_message(chat_id=CONTENT_CHANNEL_ID, text=formatted_post, parse_mode='HTML')
 
                     # Отмечаем как опубликованный
                     await db.mark_as_published(post['id'])
@@ -173,11 +201,18 @@ class AutoPoster:
                     # Логируем публикацию в THREAD_ID_LOGS группы
                     log_text = f"📤 Пост опубликован в канал\nID: {post['id']}\nТип: {post['type']}\nЗаголовок: {post.get('title', 'Без заголовка')}\nВремя: {datetime.now()}"
                     try:
-                        await self.bot.send_message(
-                            chat_id=LEADS_GROUP_CHAT_ID,
-                            text=log_text,
-                            message_thread_id=THREAD_ID_LOGS
-                        )
+                        if self.is_async:
+                            await self.bot.send_message(
+                                chat_id=LEADS_GROUP_CHAT_ID,
+                                text=log_text,
+                                message_thread_id=THREAD_ID_LOGS
+                            )
+                        else:
+                            # Синхронный бот (telebot)
+                            self.bot.send_message(
+                                chat_id=LEADS_GROUP_CHAT_ID,
+                                text=log_text
+                            )
                     except Exception as e:
                         logger.error(f"Failed to send publication log: {e}")
 
@@ -190,11 +225,18 @@ class AutoPoster:
                     # Логируем ошибку публикации
                     error_log = f"❌ ОШИБКА публикации\nID: {post['id']}\nДетали: {str(e)}\nВремя: {datetime.now()}"
                     try:
-                        await self.bot.send_message(
-                            chat_id=LEADS_GROUP_CHAT_ID,
-                            text=error_log,
-                            message_thread_id=THREAD_ID_LOGS
-                        )
+                        if self.is_async:
+                            await self.bot.send_message(
+                                chat_id=LEADS_GROUP_CHAT_ID,
+                                text=error_log,
+                                message_thread_id=THREAD_ID_LOGS
+                            )
+                        else:
+                            # Синхронный бот (telebot)
+                            self.bot.send_message(
+                                chat_id=LEADS_GROUP_CHAT_ID,
+                                text=error_log
+                            )
                     except:
                         pass
 
