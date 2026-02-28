@@ -1714,13 +1714,14 @@ def generate_content_cmd(message):
     theme_msg = f" с темой '{theme}'" if theme else ""
     bot.reply_to(message, f"🤖 Генерирую контент-план на неделю{theme_msg}... Это займёт ~30-60 секунд.")
 
-    try:
-        # Генерируем посты
-        agent = ContentAgent(api_key=YANDEX_API_KEY, model_uri=f"gpt://{FOLDER_ID}/yandexgpt/latest")
-        posts = agent.generate_posts(7, theme=theme)
+    async def generate_and_save():
+        """Асинхронная функция для генерации и сохранения постов"""
+        try:
+            # Генерируем посты
+            agent = ContentAgent(api_key=YANDEX_API_KEY, model_uri=f"gpt://{FOLDER_ID}/yandexgpt/latest")
+            posts = await agent.generate_posts(7, theme=theme)
 
-        # Сохраняем в БД
-        async def save_posts():
+            # Сохраняем в БД
             for post in posts:
                 await db.save_post(
                     post['type'],
@@ -1729,8 +1730,15 @@ def generate_content_cmd(message):
                     post['cta'],
                     post['publish_date']
                 )
+            
+            return posts
+        except Exception as e:
+            logging.error(f"Error in generate_and_save: {e}")
+            raise
 
-        asyncio.run(save_posts())
+    try:
+        # Запускаем асинхронную генерацию и сохранение
+        posts = asyncio.run(generate_and_save())
 
         # Отправляем черновики в соответствующие топики
         drafts = asyncio.run(db.get_draft_posts())
