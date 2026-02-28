@@ -1949,7 +1949,8 @@ def generate_welcome_cmd(message):
     try:
         # Генерируем приветственное сообщение
         agent = ContentAgent(api_key=YANDEX_API_KEY, model_uri=f"gpt://{FOLDER_ID}/yandexgpt/latest")
-        post = agent.generate_welcome_post(person_name=person_name)
+        # Обертываем асинхронный вызов в asyncio.run()
+        post = asyncio.run(agent.generate_welcome_post(person_name=person_name))
 
         # Сохраняем как черновик
         publish_date = datetime.datetime.now() + datetime.timedelta(days=1)  # Завтра в 10:00
