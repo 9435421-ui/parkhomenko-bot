@@ -2037,17 +2037,16 @@ def content_callback_handler(call):
 
         # Устанавливаем publish_date и статус (инкрементальные даты)
         import datetime
-        from datetime import datetime, timedelta
 
         # Получить максимальную дату среди approved постов
         max_date = asyncio.run(db.get_max_publish_date(status='approved'))
 
         if max_date is None:
             # Первый approved пост → завтра в 10:00
-            next_date = (datetime.now() + timedelta(days=1)).replace(hour=10, minute=0, second=0, microsecond=0)
+            next_date = (datetime.datetime.now() + datetime.timedelta(days=1)).replace(hour=10, minute=0, second=0, microsecond=0)
         else:
             # Следующий пост → +1 день от последнего
-            next_date = max_date + timedelta(days=1)
+            next_date = max_date + datetime.timedelta(days=1)
 
         # Обновить пост
         asyncio.run(db.update_content_plan_entry(
