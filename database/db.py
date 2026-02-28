@@ -4,6 +4,7 @@
 import aiosqlite
 import os
 import logging
+from pathlib import Path
 from typing import Optional, Dict, List
 from datetime import datetime
 
@@ -13,8 +14,36 @@ logger = logging.getLogger(__name__)
 class Database:
     """Класс для работы с SQLite базой данных"""
     
-    def __init__(self, db_path: str = "database/bot.db"):
-        self.db_path = db_path
+    def __init__(self, db_path: str = None):
+        """
+        Инициализация базы данных.
+        
+        Логика выбора пути:
+        1. Если db_path передан явно - используем его
+        2. Если DATABASE_PATH задан в окружении - используем его точно как есть
+        3. Иначе - используем дефолтный путь database/terion.db (или database/bot.db если terion.db не существует)
+        """
+        if db_path is None:
+            # Проверяем переменную окружения DATABASE_PATH
+            env_db_path = os.getenv("DATABASE_PATH")
+            if env_db_path:
+                # Если переменная задана - используем её точно как есть
+                db_path = env_db_path
+            else:
+                # Fallback: проверяем существование terion.db, иначе используем bot.db
+                terion_path = Path("database/terion.db")
+                bot_path = Path("database/bot.db")
+                
+                if terion_path.exists():
+                    db_path = str(terion_path)
+                elif bot_path.exists():
+                    db_path = str(bot_path)
+                else:
+                    # Если ни один файл не существует, используем terion.db по умолчанию
+                    db_path = str(terion_path)
+        
+        # Нормализуем путь для надежности
+        self.db_path = str(Path(db_path).resolve())
         self.conn: Optional[aiosqlite.Connection] = None
     
     async def connect(self):
@@ -331,6 +360,41 @@ class Database:
                 )
             await self.conn.commit()
             
+            # Таблица sources для Telethon (источники для мониторинга)
+            await cursor.execute("""
+                CREATE TABLE IF NOT EXISTS sources (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    type TEXT NOT NULL,
+                    source_id TEXT NOT NULL,
+                    name TEXT,
+                    category TEXT,
+                    keywords TEXT,
+                    is_active BOOLEAN DEFAULT 1,
+                    last_scanned TIMESTAMP NULL,
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    UNIQUE(type, source_id)
+                )
+            """)
+            await self.conn.commit()
+            
+            # Миграция: проверка и добавление колонки updated_at в sources, если её нет
+            try:
+                await cursor.execute("PRAGMA table_info(sources)")
+                columns = await cursor.fetchall()
+                column_names = [col_info[1] for col_info in columns]
+                
+                if 'updated_at' not in column_names:
+                    logger.info("🔧 Добавляю колонку updated_at в таблицу sources...")
+                    await cursor.execute("ALTER TABLE sources ADD COLUMN updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP")
+                    # Обновляем существующие записи
+                    await cursor.execute("UPDATE sources SET updated_at = COALESCE(last_scanned, CURRENT_TIMESTAMP) WHERE updated_at IS NULL")
+                    await self.conn.commit()
+                    logger.info("✅ Колонка updated_at добавлена в таблицу sources")
+                else:
+                    logger.debug("ℹ️ Колонка updated_at уже существует в таблице sources")
+            except Exception as e:
+                logger.warning(f"⚠️ Ошибка при проверке/добавлении колонки updated_at в sources: {e}")
+            
             # Таблица продажных диалогов (5-шаговый скрипт)
             await cursor.execute("""
                 CREATE TABLE IF NOT EXISTS sales_conversations (
@@ -596,7 +660,7 @@ class Database:
                      AND author_id != ''
                      AND author_id != '0'
                    ORDER BY created_at DESC""",
-                (f"-{since_hours} hours",),
+                (since_hours,),
             )
             rows = await cursor.fetchall()
             return [dict(row) for row in rows]
@@ -985,13 +1049,13 @@ class Database:
                 return rid
             try:
                 await cursor.execute(
-                    """INSERT INTO target_resources (type, link, title, notes, status, participants_count, geo_tag, platform) VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
-                    (resource_type, link, title, notes, status, participants_count, geo_tag, platform),
+                    """INSERT INTO target_resources (type, link, title, notes, status, participants_count, geo_tag, platform, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                    (resource_type, link, title, notes, status, participants_count, geo_tag, platform, datetime.now()),
                 )
             except Exception:
                 await cursor.execute(
-                    "INSERT INTO target_resources (type, link, title, notes) VALUES (?, ?, ?, ?)",
-                    (resource_type, link, title, notes),
+                    "INSERT INTO target_resources (type, link, title, notes, updated_at) VALUES (?, ?, ?, ?, ?)",
+                    (resource_type, link, title, notes, datetime.now()),
                 )
             await self.conn.commit()
             return cursor.lastrowid
@@ -1041,9 +1105,11 @@ class Database:
                               COALESCE(is_high_priority, 0) AS is_high_priority, last_post_id
                            FROM target_resources
                            WHERE (status = 'active' OR (is_active = 1 AND (status IS NULL OR status = '')))"""
+                    fallback_params = []
                     if platform:
                         fallback_query += " AND (platform = ? OR type = ?)"
-                    await cursor.execute(fallback_query, params)
+                        fallback_params.extend([platform, platform])
+                    await cursor.execute(fallback_query, fallback_params)
                     rows = await cursor.fetchall()
                     return [dict(row) for row in rows]
                 except Exception:
