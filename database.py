@@ -164,7 +164,7 @@ class Database:
         await self._migrate_content_plan_columns()
 
     async def _migrate_content_plan_columns(self):
-        """Миграция: добавление колонок image_prompt и image_url в таблицу content_plan если их нет"""
+        """Миграция: добавление обязательных колонок в таблицу content_plan если их нет"""
         try:
             async with self.conn.cursor() as cur:
                 # Получаем список колонок таблицы content_plan
@@ -172,20 +172,21 @@ class Database:
                 columns = await cur.fetchall()
                 column_names = [col[1] for col in columns]
                 
-                # Добавляем image_prompt если его нет
-                if "image_prompt" not in column_names:
-                    await cur.execute("ALTER TABLE content_plan ADD COLUMN image_prompt TEXT")
-                    logger.info("✅ Добавлена колонка image_prompt в content_plan")
+                # Список обязательных колонок для проверки
+                required_columns = {
+                    'image_prompt': 'TEXT',
+                    'image_url': 'TEXT',
+                    'title': 'TEXT',
+                    'body': 'TEXT',
+                    'cta': 'TEXT',
+                    'updated_at': 'TEXT DEFAULT (datetime(\'now\'))'
+                }
                 
-                # Добавляем image_url если его нет
-                if "image_url" not in column_names:
-                    await cur.execute("ALTER TABLE content_plan ADD COLUMN image_url TEXT")
-                    logger.info("✅ Добавлена колонка image_url в content_plan")
-                
-                # Добавляем updated_at если его нет
-                if "updated_at" not in column_names:
-                    await cur.execute("ALTER TABLE content_plan ADD COLUMN updated_at TEXT DEFAULT (datetime('now'))")
-                    logger.info("✅ Добавлена колонка updated_at в content_plan")
+                # Добавляем каждую колонку если её нет
+                for col_name, col_type in required_columns.items():
+                    if col_name not in column_names:
+                        await cur.execute(f"ALTER TABLE content_plan ADD COLUMN {col_name} {col_type}")
+                        logger.info(f"✅ Добавлена колонка {col_name} в content_plan")
             
             await self.conn.commit()
         except Exception as e:
@@ -240,46 +241,52 @@ class Database:
             await cur.execute(query, (post_id,))
         await self.conn.commit()
 
-    async def update_content_plan_entry(self, post_id: int, status: str = None, publish_date: str = None, 
-                                       image_prompt: str = None, image_url: str = None,
-                                       title: str = None, body: str = None, cta: str = None):
-        """Обновить запись в контент-плане"""
+    async def update_content_plan_entry(self, post_id: int, **kwargs):
+        """
+        Обновить запись в контент-плане
+        
+        Args:
+            post_id: ID поста для обновления
+            **kwargs: Поля для обновления (status, publish_date, image_prompt, image_url, 
+                     title, body, cta, type, created_at, published_at)
+        
+        Примеры:
+            await db.update_content_plan_entry(post_id=1, title="Новый заголовок", body="Новый текст")
+            await db.update_content_plan_entry(post_id=1, status="approved", image_url="https://...")
+        """
+        # Разрешенные поля для обновления (исключаем id и updated_at - они обновляются автоматически)
+        allowed_fields = {
+            'status', 'publish_date', 'image_prompt', 'image_url',
+            'title', 'body', 'cta', 'type', 'created_at', 'published_at'
+        }
+        
         updates = []
         params = []
-
-        if status:
-            updates.append("status = ?")
-            params.append(status)
-        if publish_date:
-            updates.append("publish_date = ?")
-            params.append(publish_date)
-        if image_prompt is not None:
-            updates.append("image_prompt = ?")
-            params.append(image_prompt)
-        if image_url is not None:
-            updates.append("image_url = ?")
-            params.append(image_url)
-        if title is not None:
-            updates.append("title = ?")
-            params.append(title)
-        if body is not None:
-            updates.append("body = ?")
-            params.append(body)
-        if cta is not None:
-            updates.append("cta = ?")
-            params.append(cta)
-
+        
+        # Фильтруем kwargs по разрешенным полям
+        for field, value in kwargs.items():
+            if field not in allowed_fields:
+                logger.warning(f"⚠️ Попытка обновить неразрешенное поле '{field}' в content_plan. Поле проигнорировано.")
+                continue
+            
+            # Проверяем, что значение не None (кроме случаев, когда нужно установить NULL)
+            if value is not None:
+                updates.append(f"{field} = ?")
+                params.append(value)
+        
         if not updates:
+            logger.debug(f"Нет полей для обновления в записи {post_id}")
             return  # Nothing to update
-
+        
         # Добавляем обновление updated_at при любом изменении
         updates.append("updated_at = datetime('now')")
         params.append(post_id)
-
+        
         query = f"UPDATE content_plan SET {', '.join(updates)} WHERE id = ?"
         async with self.conn.cursor() as cur:
             await cur.execute(query, params)
         await self.conn.commit()
+        logger.debug(f"✅ Обновлена запись {post_id} в content_plan: {', '.join([f'{k}={v}' for k, v in kwargs.items() if k in allowed_fields])}")
 
     async def get_max_publish_date(self, status='approved'):
         """Возвращает максимальную publish_date среди постов с указанным статусом"""
