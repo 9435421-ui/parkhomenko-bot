@@ -867,18 +867,22 @@ def mode_select_handler(call):
                 if "москв" in text_lower:
                     state.city = "Москва"
                     state.quiz_step = 5  # Пропускаем шаг города
+                    break  # Берем первое совпадение из истории
                 elif "химк" in text_lower:
                     state.city = "Химки"
                     state.quiz_step = 5
+                    break  # Берем первое совпадение из истории
                 elif "сочи" in text_lower:
                     state.city = "Сочи"
                     state.quiz_step = 5
+                    break  # Берем первое совпадение из истории
                 elif any(
                     city in text_lower
                     for city in ["краснодар", "петербург", "екатеринбург"]
                 ):
                     state.city = msg.get("text", "").strip()
                     state.quiz_step = 5
+                    break  # Берем первое совпадение из истории
 
             # Извлекаем этаж (формат 2/5, 16/25 и т.п.)
             for msg in state.dialog_history:
@@ -890,6 +894,7 @@ def mode_select_handler(call):
                         state.total_floors = parts[1].strip()
                         if state.quiz_step == 5:
                             state.quiz_step = 6  # Пропускаем этаж
+                        break  # Берем первое совпадение из истории
 
             # Извлекаем описание работ
             for msg in state.dialog_history:
