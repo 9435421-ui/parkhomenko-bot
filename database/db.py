@@ -171,6 +171,18 @@ class Database:
                     await self.conn.commit()
                     logger.debug("✅ Добавлена колонка image_prompt в content_plan")
             except Exception as e:
+                logger.warning(f"Ошибка при проверке image_prompt: {e}")
+            
+            # Миграция: добавление поля updated_at если его нет
+            try:
+                await cursor.execute("PRAGMA table_info(content_plan)")
+                columns = await cursor.fetchall()
+                column_names = [col_info[1] for col_info in columns]
+                if "updated_at" not in column_names:
+                    await cursor.execute("ALTER TABLE content_plan ADD COLUMN updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP")
+                    await self.conn.commit()
+                    logger.debug("✅ Добавлена колонка updated_at в content_plan")
+            except Exception as e:
                 logger.warning(f"⚠️ Ошибка при добавлении колонки image_prompt: {e}")
             
             # Таблица для дней рождения клиентов
@@ -945,7 +957,7 @@ class Database:
     # Разрешённые поля для update_content_plan_entry (whitelist)
     ALLOWED_CONTENT_PLAN_FIELDS = {
         'type', 'channel', 'title', 'body', 'cta', 'theme',
-        'publish_date', 'status', 'image_url', 'image_prompt', 'admin_id', 'published_at'
+        'publish_date', 'status', 'image_url', 'image_prompt', 'admin_id', 'published_at', 'updated_at'
     }
 
     async def update_content_plan_entry(self, post_id: int, **kwargs):
@@ -955,6 +967,9 @@ class Database:
         
         if not filtered_kwargs:
             return  # Нечего обновлять
+        
+        # Добавляем обновление updated_at при любом изменении
+        filtered_kwargs['updated_at'] = datetime.now()
         
         async with self.conn.cursor() as cursor:
             set_clause = ", ".join([f"{k} = ?" for k in filtered_kwargs.keys()])
