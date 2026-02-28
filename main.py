@@ -112,14 +112,14 @@ async def main():
             logger.info("✅ Рабочая группа: OK")
         except Exception as e:
             logger.error(f"❌ Рабочая группа: {e}")
-        from config import VK_TOKEN, VK_GROUP_ID
-        if VK_TOKEN and VK_GROUP_ID:
+        from config import VK_API_TOKEN, VK_GROUP_ID
+        if VK_API_TOKEN and VK_GROUP_ID:
             try:
                 import aiohttp
                 async with aiohttp.ClientSession() as session:
                     async with session.get(
                         "https://api.vk.com/method/groups.getById",
-                        params={"access_token": VK_TOKEN, "v": "5.199", "group_ids": VK_GROUP_ID}
+                        params={"access_token": VK_API_TOKEN, "v": "5.199", "group_ids": VK_GROUP_ID}
                     ) as resp:
                         data = await resp.json()
                         if "response" in data and data["response"]:
