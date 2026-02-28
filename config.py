@@ -71,5 +71,8 @@ CONTENT_HASHTAGS = os.getenv("CONTENT_HASHTAGS", "#перепланировка 
 # Database path - используем DATABASE_PATH из .env, fallback на стандартный путь
 DATABASE_PATH = os.getenv("DATABASE_PATH", "database/terion.db")
 
-CHANNEL_NAME = "@kapremont_channel"
-CHANNEL_LINK = "https://t.me/kapremont_channel"
+# Channel display information (для отображения в интерфейсе)
+CHANNEL_NAME = os.getenv("TARGET_CHANNEL_USERNAME", "@terion_channel")
+# Формируем ссылку из username, если не задана явно
+_channel_username = CHANNEL_NAME.lstrip("@") if CHANNEL_NAME.startswith("@") else CHANNEL_NAME
+CHANNEL_LINK = os.getenv("TARGET_CHANNEL_LINK", f"https://t.me/{_channel_username}")
