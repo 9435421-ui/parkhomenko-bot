@@ -332,6 +332,9 @@ class AutoPoster:
                 api_key=YANDEX_API_KEY,
                 model_uri=f"gpt://{FOLDER_ID}/yandexgpt/latest"
             )
+            # Асинхронная инициализация: загружаем базу знаний без блокировки event loop
+            await agent.initialize()
+            
             plan_item = {
                 'type': post.get('type', 'fact'),
                 'theme': post.get('theme', None)  # Если есть поле theme

@@ -11,7 +11,7 @@ class ContentAgent:
         self.model_uri = model_uri
         self.image_agent = ImageAgent()
         self.endpoint = "https://llm.api.cloud.yandex.net/foundationModels/v1/completion"
-        self.brief_content = self._load_brief()
+        self.brief_content = None  # Будет загружен асинхронно через initialize()
 
         # Единый список типов постов
         self.post_types = ['news', 'fact', 'case', 'offer', 'seasonal']
@@ -28,13 +28,23 @@ class ContentAgent:
             "С днем рождения! Желаем вам тепла от близких, радости от маленьких побед и исполнения мечтаний. Пусть этот день станет одним из самых счастливых в вашей жизни."
         ]
 
-    def _load_brief(self):
-        """Загружает базу знаний"""
+    @staticmethod
+    def _load_brief_sync():
+        """Синхронный вспомогательный метод для загрузки базы знаний"""
         try:
             with open("BRIEF_pereplanirovki.md", "r", encoding="utf-8") as f:
                 return f.read()
         except FileNotFoundError:
             return "База знаний не найдена. Используйте общие знания по перепланировкам."
+
+    async def initialize(self):
+        """
+        Асинхронная инициализация: загружает базу знаний без блокировки event loop
+        
+        Должен быть вызван после создания экземпляра ContentAgent в асинхронном контексте.
+        """
+        import asyncio
+        self.brief_content = await asyncio.to_thread(self._load_brief_sync)
 
     async def generate_post_text(self, plan_item):
         """
