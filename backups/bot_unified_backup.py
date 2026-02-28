@@ -2126,4 +2126,3 @@ while True:
     except Exception as e:
         print(f"❌ Ошибка polling: {e}")
         time.sleep(15)
-        time.sleep(15)
