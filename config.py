@@ -65,6 +65,8 @@ JULIA_CONTACT = os.getenv("JULIA_CONTACT", "@terion_expert")
 THREAD_ID_LOGS = int(os.getenv("THREAD_ID_LOGS", "88"))
 THREAD_ID_DRAFTS = int(os.getenv("THREAD_ID_DRAFTS", "85"))
 THREAD_ID_SEASONAL = int(os.getenv("THREAD_ID_SEASONAL", "87"))
+THREAD_ID_TRENDS_SEASON = int(os.getenv("THREAD_ID_TRENDS_SEASON", "0"))
+THREAD_ID_CONTENT_PLAN = int(os.getenv("THREAD_ID_CONTENT_PLAN", "0"))
 VK_QUIZ_LINK = os.getenv("VK_QUIZ_LINK", "https://vk.com/app123456")
 CONTENT_HASHTAGS = os.getenv("CONTENT_HASHTAGS", "#перепланировка #москва")
 
