@@ -173,7 +173,8 @@ class AutoPoster:
                 if post.get('image_prompt') and not post.get('image_url'):
                     logger.info(f"[AutoPoster] Generating image for post {post['id']} (type={post.get('type')}, prompt={post.get('image_prompt')!r})")
                     agent = ImageAgent(api_key=YANDEX_API_KEY, folder_id=FOLDER_ID)
-                    image_url = agent.generate_image(post['image_prompt'])
+                    # Оборачиваем синхронный вызов в asyncio.to_thread для соблюдения асинхронного паттерна
+                    image_url = await asyncio.to_thread(agent.generate_image, post['image_prompt'])
                     if image_url:
                         await db.update_content_plan_entry(post_id=post['id'], image_url=image_url)
                         post['image_url'] = image_url
