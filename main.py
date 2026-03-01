@@ -95,53 +95,24 @@ async def main():
     # 3. Проверка связей (те же экземпляры main_bot, content_bot — сессии не закрываем)
     logger.info("🔍 Проверка связей...")
     try:
-        from config import CHANNEL_ID_TERION, CHANNEL_ID_DOM_GRAD, LEADS_GROUP_CHAT_ID
-        from config import THREAD_ID_DRAFTS, THREAD_ID_CONTENT_PLAN, THREAD_ID_TRENDS_SEASON, THREAD_ID_LOGS
+        from config import CHANNEL_ID_TERION, LEADS_GROUP_CHAT_ID, THREAD_ID_HOT_LEADS
         try:
-            await main_bot.get_chat(CHANNEL_ID_TERION)
-            logger.info("✅ Канал TG: OK")
+            if CHANNEL_ID_TERION:
+                await main_bot.get_chat(CHANNEL_ID_TERION)
+                logger.info("✅ Канал TERION: OK")
+            else:
+                logger.warning("⚠️ Канал TERION: не настроен в .env")
         except Exception as e:
-            logger.error(f"❌ Канал TG: {e}")
-        try:
-            await content_bot.get_chat(CHANNEL_ID_DOM_GRAD)
-            logger.info("✅ Канал ДОМ ГРАНД: OK")
-        except Exception as e:
-            logger.error(f"❌ Канал ДОМ ГРАНД: {e}")
+            logger.error(f"❌ Канал TERION: {e}")
         try:
             await main_bot.get_chat(LEADS_GROUP_CHAT_ID)
             logger.info("✅ Рабочая группа: OK")
         except Exception as e:
             logger.error(f"❌ Рабочая группа: {e}")
-        from config import VK_API_TOKEN, VK_GROUP_ID
-        if VK_API_TOKEN and VK_GROUP_ID:
-            try:
-                import aiohttp
-                async with aiohttp.ClientSession() as session:
-                    async with session.get(
-                        "https://api.vk.com/method/groups.getById",
-                        params={"access_token": VK_API_TOKEN, "v": "5.199", "group_ids": VK_GROUP_ID}
-                    ) as resp:
-                        data = await resp.json()
-                        if "response" in data and data["response"]:
-                            group_name = data["response"][0].get("name", "VK")
-                            logger.info(f"✅ Интеграция VK ({group_name}): OK")
-                        else:
-                            logger.warning("⚠️ Интеграция VK: группа не найдена")
-            except Exception as e:
-                logger.warning(f"⚠️ Интеграция VK: {e}")
+        if THREAD_ID_HOT_LEADS:
+            logger.info(f"✅ Топик горячих лидов (THREAD_ID_HOT_LEADS={THREAD_ID_HOT_LEADS}): настроен")
         else:
-            logger.warning("⚠️ Интеграция VK: токен или group_id не настроены")
-        for thread_id, name in [
-            (THREAD_ID_DRAFTS, "Черновики"),
-            (THREAD_ID_CONTENT_PLAN, "Контент-план"),
-            (THREAD_ID_TRENDS_SEASON, "Тренды/Сезон"),
-            (THREAD_ID_LOGS, "Логи")
-        ]:
-            try:
-                await main_bot.get_chat(LEADS_GROUP_CHAT_ID)
-                logger.info(f"✅ Топик {name}: OK")
-            except Exception as e:
-                logger.error(f"❌ Топик {name}: {e}")
+            logger.warning("⚠️ Топик горячих лидов (THREAD_ID_HOT_LEADS): не настроен")
     except Exception as e:
         logger.error(f"Ошибка проверки связей: {e}")
 
