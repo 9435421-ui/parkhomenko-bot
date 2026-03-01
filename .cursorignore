@@ -1,0 +1,55 @@
+﻿# Не индексировать (экономит токены на контексте)
+node_modules/
+__pycache__/
+*.pyc
+.env
+.venv/
+venv/
+*.log
+*.tmp
+*.bak
+backup_*
+test_*
+*.test.py
+
+# Большие файлы
+*.mp4
+*.mp3
+*.pdf
+*.zip
+*.tar.gz
+
+# Локальные данные
+data/backups/
+data/temp/
+database/*.db
+database/*.sqlite
+database/*.sqlite3
+
+# Архивы и временные файлы
+*.zip
+kipping...
+*.md.bak
+
+# Backups
+backups/
+*.backup
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Логи
+logs/
+bot.log
+nohup.out
+
+# Uploads
+uploads/
+uploads_plans/
+temp/
+tmp/

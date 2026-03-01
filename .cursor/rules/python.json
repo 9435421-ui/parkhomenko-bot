@@ -1,0 +1,8 @@
+{
+  "python": {
+    "formatter": "black",
+    "linter": "pylint",
+    "docstring_format": "google",
+    "max_line_length": 88
+  }
+}

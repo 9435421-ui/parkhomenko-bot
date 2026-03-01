@@ -12,7 +12,17 @@ import threading
 load_dotenv()
 
 BOT_TOKEN = os.getenv("BOT_TOKEN")
-CHANNEL_ID = int(os.getenv("CHANNEL_ID"))
+CHANNEL_ID_STR = os.getenv("CHANNEL_ID", "")
+# Поддержка как числового ID, так и строки с @
+if CHANNEL_ID_STR.startswith("@"):
+    # Если передан username канала (например, @channel_name), используем как строку
+    CHANNEL_ID = CHANNEL_ID_STR
+else:
+    # Если передан числовой ID, конвертируем в int
+    try:
+        CHANNEL_ID = int(CHANNEL_ID_STR) if CHANNEL_ID_STR else None
+    except ValueError:
+        raise ValueError(f"CHANNEL_ID должен быть числовым ID (например, -1001234567890) или username канала (например, @channel_name), получено: {CHANNEL_ID_STR}")
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 LEADS_GROUP_CHAT_ID = int(os.getenv("LEADS_GROUP_CHAT_ID", "-1003370698977"))
 THREAD_ID_KVARTIRY = int(os.getenv("THREAD_ID_KVARTIRY", "2"))

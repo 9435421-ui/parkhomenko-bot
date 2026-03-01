@@ -1,0 +1,11 @@
+{
+  "apiProvider": "openai",
+  "openAiBaseUrl": "https://api.routerai.ru/v1",
+  "openAiApiKey": "sk-C7HSqD44cq--3mZaoCghl-_WfGmGetcv",
+  "openAiModelId": "google/gemini-flash-1.5",
+  "maxTokens": 2000,
+  "contextWindow": 4000,
+  "autoApprove": false,
+  "alwaysApproveResubmit": false,
+  "rateLimitSeconds": 10
+}

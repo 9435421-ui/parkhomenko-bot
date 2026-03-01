@@ -1,210 +1,176 @@
 from aiogram import Router, F
-from aiogram.types import Message
+from aiogram.types import Message, CallbackQuery, ReplyKeyboardRemove
 from aiogram.fsm.state import StatesGroup, State
 from aiogram.fsm.context import FSMContext
 from config import ADMIN_GROUP_ID
 from datetime import datetime, time
-from utils.yandex_gpt import yandex_gpt
+from database.db import db
+from services.lead_service import lead_service
+from keyboards.main_menu import (
+    get_object_type_keyboard,
+    get_remodeling_status_keyboard,
+    get_bti_documents_keyboard,
+    get_main_menu
+)
+import logging
 
+logger = logging.getLogger(__name__)
 quiz_router = Router()
 
-
 class QuizOrder(StatesGroup):
+    extra_contact = State()
+    object_type = State()
+    house_material = State()      # Для домов
+    commercial_purpose = State()  # Для коммерции
     city = State()
-    obj_type = State()
-    floor = State()
-    total_floors = State()
-    area = State()
-    status = State()
-    changes = State()
-    has_plan = State()
-    complexity = State()
-    goal = State()
-    urgency = State()
-    contact = State()
-    phone = State()
-    name = State()
-    email = State()
-    final = State()
-    bti_doc = State()
-    legal_doc = State()
-    total_floors = State()
-    changes = State()
-    has_plan = State()
-    complexity = State()
-    goal = State()
-    urgency = State()
-    phone = State()
-    name = State()
-    email = State()
+    floor_info = State()          # Этаж/Этажность
+    remodeling_status = State()
+    change_plan = State()
+    bti_status = State()
 
+@quiz_router.callback_query(F.data == "mode:quiz")
+async def start_quiz_callback(callback: CallbackQuery, state: FSMContext):
+    """Начало квиза через callback"""
+    await state.clear()
+    await db.update_user_state(callback.from_user.id, mode="quiz")
+    await state.set_state(QuizOrder.extra_contact)
+    await callback.message.answer(
+        "📝 Начинаем опрос для подготовки анализа вашей ситуации.\n\n"
+        "Шаг 1: Если у вас есть дополнительный способ связи (WhatsApp/почта/другой номер) — напишите его, или отправьте «нет».",
+        reply_markup=ReplyKeyboardRemove()
+    )
+    await callback.answer()
+
+@quiz_router.message(QuizOrder.extra_contact)
+async def process_extra_contact(message: Message, state: FSMContext):
+    contact = message.text if message.text.lower() != "нет" else None
+    await state.update_data(extra_contact=contact)
+    await state.set_state(QuizOrder.object_type)
+    await message.answer(
+        "Шаг 2: Выберите тип объекта:",
+        reply_markup=get_object_type_keyboard()
+    )
+
+@quiz_router.callback_query(QuizOrder.object_type, F.data.startswith("obj:"))
+async def process_object_type(callback: CallbackQuery, state: FSMContext):
+    obj_type = callback.data.split(":")[1]
+    await state.update_data(object_type=obj_type)
+    
+    if obj_type == "dom":
+        await state.set_state(QuizOrder.house_material)
+        from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
+        kb = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="Кирпич", callback_data="mat:kirpich")],
+            [InlineKeyboardButton(text="Брус", callback_data="mat:brus")],
+            [InlineKeyboardButton(text="Каркас", callback_data="mat:karkas")],
+            [InlineKeyboardButton(text="Пеноблок", callback_data="mat:penoblok")],
+            [InlineKeyboardButton(text="Другое", callback_data="mat:other")]
+        ])
+        await callback.message.edit_text("Шаг 2.5: Выберите материал дома:", reply_markup=kb)
+    elif obj_type == "kommercia":
+        await state.set_state(QuizOrder.commercial_purpose)
+        from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
+        kb = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="Общепит", callback_data="purp:food")],
+            [InlineKeyboardButton(text="Торговля", callback_data="purp:trade")],
+            [InlineKeyboardButton(text="Офис", callback_data="purp:office")],
+            [InlineKeyboardButton(text="Медицина", callback_data="purp:med")],
+            [InlineKeyboardButton(text="Другое", callback_data="purp:other")]
+        ])
+        await callback.message.edit_text("Шаг 2.5: Выберите назначение помещения:", reply_markup=kb)
+    else: # Квартира
+        await state.set_state(QuizOrder.city)
+        await callback.message.edit_text("Шаг 3: В каком городе/регионе находится объект?")
+    await callback.answer()
+
+@quiz_router.callback_query(QuizOrder.house_material, F.data.startswith("mat:"))
+async def process_house_material(callback: CallbackQuery, state: FSMContext):
+    material = callback.data.split(":")[1]
+    await state.update_data(house_material=material)
+    await state.set_state(QuizOrder.city)
+    await callback.message.edit_text("Шаг 3: В каком городе/регионе находится объект?")
+    await callback.answer()
+
+@quiz_router.callback_query(QuizOrder.commercial_purpose, F.data.startswith("purp:"))
+async def process_commercial_purpose(callback: CallbackQuery, state: FSMContext):
+    purpose = callback.data.split(":")[1]
+    await state.update_data(commercial_purpose=purpose)
+    await state.set_state(QuizOrder.city)
+    await callback.message.edit_text("Шаг 3: В каком городе/регионе находится объект?")
+    await callback.answer()
 
 @quiz_router.message(QuizOrder.city)
-async def ask_city(message: Message, state: FSMContext):
+async def process_city(message: Message, state: FSMContext):
     await state.update_data(city=message.text)
-    await state.set_state(QuizOrder.obj_type)
-    await message.answer("Какой тип объекта? (Квартира / Коммерция)")
+    await state.set_state(QuizOrder.floor_info)
+    await message.answer("Шаг 4: Укажите этаж и общую этажность дома (например: 5/9):")
 
+@quiz_router.message(QuizOrder.floor_info)
+async def process_floor(message: Message, state: FSMContext):
+    await state.update_data(floor_info=message.text)
+    await state.set_state(QuizOrder.remodeling_status)
+    await message.answer(
+        "Шаг 5: Статус перепланировки:",
+        reply_markup=get_remodeling_status_keyboard()
+    )
 
-@quiz_router.message(QuizOrder.obj_type)
-async def ask_obj_type(message: Message, state: FSMContext):
-    await state.update_data(obj_type=message.text)
-    await state.set_state(QuizOrder.floor)
-    await message.answer("Этаж и общая этажность дома? (например: 5/10)")
+@quiz_router.callback_query(QuizOrder.remodeling_status, F.data.startswith("remodel:"))
+async def process_remodeling_status(callback: CallbackQuery, state: FSMContext):
+    status = callback.data.split(":")[1]
+    await state.update_data(remodeling_status=status)
+    await state.set_state(QuizOrder.change_plan)
+    await callback.message.edit_text("Шаг 6: Опишите планируемые или уже выполненные изменения:")
+    await callback.answer()
 
+@quiz_router.message(QuizOrder.change_plan)
+async def process_change_plan(message: Message, state: FSMContext):
+    await state.update_data(change_plan=message.text)
+    await state.set_state(QuizOrder.bti_status)
+    await message.answer(
+        "Шаг 7: Статус документов БТИ:",
+        reply_markup=get_bti_documents_keyboard()
+    )
 
-@quiz_router.message(QuizOrder.floor)
-async def ask_floor(message: Message, state: FSMContext):
-    await state.update_data(floor=message.text)
-    await state.set_state(QuizOrder.area)
-    await message.answer("Площадь объекта (кв.м.)?")
-
-
-@quiz_router.message(QuizOrder.area)
-async def ask_area(message: Message, state: FSMContext):
-    await state.update_data(area=message.text)
-    await state.set_state(QuizOrder.status)
-    await message.answer("Статус: Планируется или уже выполнена перепланировка?")
-
-
-@quiz_router.message(QuizOrder.status)
-async def ask_status(message: Message, state: FSMContext):
-    await state.update_data(status=message.text)
-    await state.set_state(QuizOrder.changes)
-    await message.answer("Описание изменений: Что хотите сделать или уже сделали?")
-
-
-@quiz_router.message(QuizOrder.changes)
-async def ask_changes(message: Message, state: FSMContext):
-    await state.update_data(changes=message.text)
-    await state.set_state(QuizOrder.has_plan)
-    await message.answer("Наличие плана: У вас есть план помещения?")
-
-
-@quiz_router.message(QuizOrder.has_plan)
-async def ask_has_plan(message: Message, state: FSMContext):
-    await state.update_data(has_plan=message.text)
-    if message.text.lower() == "да":
-        await state.set_state(QuizOrder.complexity)
-        await message.answer("Есть ли сложные зоны? (Стены/Мокрые зоны/Нет)")
-    else:
-        await state.set_state(QuizOrder.complexity)
-        await message.answer("Есть ли сложные зоны? (Стены/Мокрые зоны/Нет)")
-
-
-@quiz_router.message(QuizOrder.complexity)
-async def ask_complexity(message: Message, state: FSMContext):
-    await state.update_data(complexity=message.text)
-    await state.set_state(QuizOrder.goal)
-    await message.answer("Какова цель перепланировки? (Инвест/Для жизни)")
-
-
-@quiz_router.message(QuizOrder.goal)
-async def ask_goal(message: Message, state: FSMContext):
-    await state.update_data(goal=message.text)
-    await state.set_state(QuizOrder.bti_doc)
-    await message.answer("Есть ли документы БТИ? (Да/Частично/Нет)")
-
-
-@quiz_router.message(QuizOrder.bti_doc)
-async def ask_bti(message: Message, state: FSMContext):
-    await state.update_data(bti_doc=message.text)
-    await state.set_state(QuizOrder.urgency)
-    await message.answer("Насколько срочно нужно решить вопрос? (Срочно/Можно подождать)")
-
-
-@quiz_router.message(QuizOrder.urgency)
-async def ask_urgency(message: Message, state: FSMContext):
-    await state.update_data(urgency=message.text)
-    await state.set_state(QuizOrder.phone)
-    await message.answer("Оставьте, пожалуйста, ваш номер телефона для связи.")
-
-
-@quiz_router.message(QuizOrder.phone)
-async def ask_phone(message: Message, state: FSMContext):
-    await state.update_data(phone=message.text)
-    await state.set_state(QuizOrder.name)
-    await message.answer("Как вас зовут?")
-
-
-@quiz_router.message(QuizOrder.name)
-async def ask_name(message: Message, state: FSMContext):
-    await state.update_data(name=message.text)
-    await state.set_state(QuizOrder.email)
-    await message.answer("Введите ваш email для связи.")
-
-
-@quiz_router.message(QuizOrder.email)
-async def finish_quiz(message: Message, state: FSMContext):
-    await state.update_data(email=message.text)
+@quiz_router.callback_query(QuizOrder.bti_status, F.data.startswith("bti:"))
+async def finish_quiz(callback: CallbackQuery, state: FSMContext):
+    bti = callback.data.split(":")[1]
+    await state.update_data(bti_status=bti)
     data = await state.get_data()
+    user = callback.from_user
+    
+    # Отправка лида через сервис (с распределением по топикам)
+    lead_data = {
+        'name': user.full_name,
+        'phone': user.username or f"id{user.id}",
+        'extra_contact': data.get('extra_contact'),
+        'object_type': data.get('object_type'),
+        'city': data.get('city'),
+        'floor_info': data.get('floor_info'),
+        'remodeling_status': data.get('remodeling_status'),
+        'change_plan': data.get('change_plan'),
+        'bti_status': bti
+    }
+    
+    await lead_service.send_lead_to_group(callback.bot, lead_data, user.id)
 
-    summary = (
-        f"📋 Новая заявка от пользователя @{message.from_user.username or message.from_user.id}:\n\n"
-        f"🏙 Город: {data.get('city')}\n"
-        f"🏗 Тип объекта: {data.get('obj_type')}\n"
-        f"📅 Стадия: {data.get('status')}\n"
-        f"🧱 Сложность: {data.get('complexity')}\n"
-        f"🎯 Цель: {data.get('goal')}\n"
-        f"📄 БТИ: {data.get('bti_doc')}\n"
-        f"⏱ Сроность: {data.get('urgency')}\n"
-        f"📞 Телефон: {data.get('phone')}\n"
-        f"👤 Имя: {data.get('name')}\n"
-        f"📧 Email: {data.get('email')}"
+    # Сохранение в БД
+    await db.add_lead(
+        user_id=user.id,
+        name=user.full_name,
+        phone=data.get('extra_contact') or "",
+        object_type=data.get('object_type'),
+        city=data.get('city'),
+        status=data.get('remodeling_status'),
+        details=data.get('change_plan')
     )
 
-    await message.bot.send_message(chat_id=ADMIN_GROUP_ID, text=summary)
-
-    # Выдача чек-листа
-    checklist = (
-        "📋 <b>Чек-лист документов для перепланировки:</b>\n\n"
-        "1. <b>ЕГРН</b> - выписка из реестра прав собственности\n"
-        "2. <b>БТИ</b> - технический паспорт и поэтажный план\n"
-        "3. <b>Согласие</b> - документы от всех собственников\n"
-        "4. Проект перепланировки (если требуется)\n\n"
-        "<i>Правильно оформленные документы упрощают пользование имуществом.</i>"
+    await callback.message.edit_text(
+        "✅ Спасибо! Ваша заявка принята.\n\n"
+        "Юлия Пархоменко свяжется с вами в ближайшее время для детального анализа.\n"
+        "Обычно это занимает от 30 минут до 2 часов в рабочее время.",
+        reply_markup=get_main_menu()
     )
-
-    await message.answer(checklist, parse_mode="HTML")
-    await message.answer("Спасибо! Юлия Пархоменко свяжется с вами для анализа.")
-
-    # Режим ожидания
-    await message.answer("График работы (МСК): Пн-Пт 9-20, Сб 10-13, Вс вых.")
-    if datetime.now().time() > time(20, 0) or datetime.now().time() < time(9, 0):
-        await message.answer("Сейчас вне рабочего времени. Юлия Пархоменко свяжется с вами в ближайшее рабочее время.")
-    else:
-        await message.answer("Юлия Пархоменко свяжется с вами в ближайшее время.")
-
-    await message.answer("Если у вас остались доп. вопросы или документы, вы можете оставить их в этом чате или оставьте голосовое сообщение.")
+    
     await state.clear()
-
-
-# Обработчик голосовых сообщений
-@quiz_router.message(F.voice)
-async def handle_voice(message: Message, state: FSMContext):
-    # Преобразуем голос в текст
-    voice_text = await convert_voice_to_text(message.voice.file_id)
-    await message.answer(f"Голосовое сообщение получено:\n\n{voice_text}")
-    await message.bot.send_message(chat_id=ADMIN_GROUP_ID, text=f"Голосовое сообщение от @{message.from_user.username}:\n\n{voice_text}")
-
-
-# Обработчик анти-мата
-@quiz_router.message(F.text)
-async def handle_text(message: Message, state: FSMContext):
-    forbidden_words = ["бля", "хуй", "пизда", "ебать", "сука", "блять", "нахуй", "пидор", "гей", "хуйня"]
-    text = message.text.lower()
-    if any(word in text for word in forbidden_words):
-        await message.answer("Доступ ограничен за нарушение правил общения.")
-        await message.bot.kick_chat_member(chat_id=message.chat.id, user_id=message.from_user.id)
-        await message.bot.send_message(chat_id=ADMIN_GROUP_ID, text=f"Пользователь @{message.from_user.username} заблокирован за нарушение правил.")
-        return
-
-
-async def convert_voice_to_text(file_id: str) -> str:
-    """Преобразует голосовое сообщение в текст с помощью Яндекс.ГПТ"""
-    yandex_gpt = yandex_gpt
-    # Получаем файл голосового сообщения
-    file_path = await yandex_gpt.bot.download_file_by_id(file_id)
-    # Конвертируем в текст
-    voice_text = yandex_gpt.transcribe_audio(file_path)
-    return voice_text
+    await db.update_user_state(user.id, mode="main")
+    await callback.answer()
