@@ -1,6 +1,10 @@
 """
-Основной бот ТЕРИОН - aiogram 2.x + Content Factory.
-aiogram 2.x версия для совместимости с vkbottle
+Основной бот ТЕРИОН - aiogram 3.x + Content Factory.
+Запуск ДВУХ ботов с РАЗДЕЛЬНЫМИ Dispatchers:
+- main_bot (АНТОН): консультант по перепланировкам
+- content_bot (ДОМ ГРАНД): контент и посты
+
+aiogram 3.x версия для Python 3.12
 """
 import logging
 import os
@@ -9,8 +13,9 @@ import sys
 import asyncio
 from pathlib import Path
 
-from aiogram import Bot, Dispatcher, executor
-from aiogram.contrib.fsm_storage.memory import MemoryStorage
+from aiogram import Bot, Dispatcher
+from aiogram.fsm.storage.memory import MemoryStorage
+from aiogram.client.default import DefaultBotProperties
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
 from config import BOT_TOKEN, CONTENT_BOT_TOKEN, LEADS_GROUP_CHAT_ID
@@ -54,11 +59,6 @@ def _release_lock():
         pass
 
 
-main_bot = None
-content_bot = None
-scheduler = None
-
-
 async def check_and_publish_scheduled_posts():
     try:
         posts = await db.get_posts_to_publish()
@@ -83,14 +83,64 @@ async def check_and_publish_scheduled_posts():
         logger.error("Error in check_and_publish: %s", e)
 
 
-async def on_startup_main(dp):
-    global scheduler
-    logger.info("Starting main bot (Anton)...")
+async def main():
+    _acquire_lock()
     
+    logger.info("🚀 Переход на Aiogram 3.x выполнен. Конфликт Python 3.12 исчерпан.")
+    logger.info("🎯 Запуск ЭКОСИСТЕМЫ TERION...")
+    
+    # Создаем ботов
+    main_bot = Bot(token=BOT_TOKEN or "", default=DefaultBotProperties(parse_mode="HTML"))
+    content_bot = Bot(token=CONTENT_BOT_TOKEN or "", default=DefaultBotProperties(parse_mode="HTML"))
+    
+    # Сохраняем main_bot для использования в других модулях
+    from utils.bot_config import set_main_bot
+    set_main_bot(main_bot)
+    
+    # Инициализация publisher
+    from services import publisher
+    publisher.publisher = AutoPoster(content_bot)
+    
+    # Создаем диспетчеры
+    storage = MemoryStorage()
+    dp_main = Dispatcher(storage=storage)
+    dp_content = Dispatcher(storage=storage)
+    
+    # Регистрация обработчиков
+    register_all_handlers(dp_main)
+    
+    # Инициализация ресурсов
     await db.connect()
     await kb.index_documents()
-    register_all_handlers(dp)
     
+    # Проверка YandexGPT
+    logger.info("🧠 Проверка YandexGPT...")
+    try:
+        from config import YANDEX_API_KEY, FOLDER_ID
+        if YANDEX_API_KEY and FOLDER_ID:
+            import aiohttp
+            async with aiohttp.ClientSession() as session:
+                url = "https://llm.api.cloud.yandex.net/foundationModels/v1/completion"
+                headers = {
+                    "Authorization": f"Api-Key {YANDEX_API_KEY}",
+                    "Content-Type": "application/json"
+                }
+                payload = {
+                    "modelUri": f"gpt://{FOLDER_ID}/yandexgpt-lite",
+                    "completionOptions": {"temperature": 0.3, "maxTokens": 10},
+                    "messages": [{"role": "user", "text": "Тест"}]
+                }
+                async with session.post(url, headers=headers, json=payload, timeout=10) as resp:
+                    if resp.status == 200:
+                        logger.info("✅ YandexGPT: подключение успешно")
+                    else:
+                        logger.warning(f"⚠️ YandexGPT: ошибка HTTP {resp.status}")
+        else:
+            logger.warning("⚠️ YANDEX_API_KEY или FOLDER_ID не настроены")
+    except Exception as e:
+        logger.warning(f"⚠️ YandexGPT не отвечает, лиды будут сырыми")
+    
+    # Инициализация планировщика
     scheduler = AsyncIOScheduler()
     scheduler.add_job(check_and_publish_scheduled_posts, "interval", hours=1)
     
@@ -99,49 +149,19 @@ async def on_startup_main(dp):
     scheduler.add_job(creative_agent.scout_topics, 'interval', hours=6)
     
     scheduler.start()
-    logger.info("Scheduler started")
-
-
-async def on_shutdown_main(dp):
-    logger.info("Stopping main bot...")
-    if scheduler:
-        scheduler.shutdown()
+    logger.info("✅ Планировщик запущен")
+    
+    # Запускаем polling
+    await dp_main.start_polling(main_bot, skip_updates=True)
+    
+    # Очистка при завершении
+    scheduler.shutdown()
     _release_lock()
 
 
-async def on_startup_content(dp):
-    logger.info("Starting content bot...")
-
-
-async def on_shutdown_content(dp):
-    logger.info("Stopping content bot...")
-
-
-def main():
-    global main_bot, content_bot
-    
-    _acquire_lock()
-    
-    main_bot = Bot(token=BOT_TOKEN or "", parse_mode="HTML")
-    content_bot = Bot(token=CONTENT_BOT_TOKEN or "", parse_mode="HTML")
-    
-    from utils.bot_config import set_main_bot
-    set_main_bot(main_bot)
-    
-    from services import publisher
-    publisher.publisher = AutoPoster(content_bot)
-    
-    storage = MemoryStorage()
-    dp_main = Dispatcher(main_bot, storage=storage)
-    dp_content = Dispatcher(content_bot, storage=storage)
-    
-    dp_main.register_startup_hook(on_startup_main)
-    dp_main.register_shutdown_hook(on_shutdown_main)
-    dp_content.register_startup_hook(on_startup_content)
-    dp_content.register_shutdown_hook(on_shutdown_content)
-    
-    executor.start_polling(dp_main, skip_updates=True)
-
-
 if __name__ == "__main__":
-    main()
+    try:
+        asyncio.run(main())
+    except KeyboardInterrupt:
+        logger.info("🛑 Бот остановлен")
+        sys.exit(0)
