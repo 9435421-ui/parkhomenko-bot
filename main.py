@@ -30,9 +30,9 @@ from middleware.logging import UnhandledCallbackMiddleware
 from services.scout_parser import ScoutParser
 from agents.creative_agent import creative_agent
 from services.lead_hunter import LeadHunter
-# from services.competitor_spy import competitor_spy  # Файл не существует, импорт закомментирован
-# from services.publisher import publisher  # Файл не существует, импорт закомментирован
-# from services.image_generator import image_generator  # Файл не существует, импорт закомментирован
+from services.competitor_spy import competitor_spy
+from services.publisher import AutoPoster
+from services.image_generator import image_generator
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
@@ -90,7 +90,9 @@ async def main():
     content_bot = Bot(token=CONTENT_BOT_TOKEN or "", default=DefaultBotProperties(parse_mode="HTML"))
     from utils.bot_config import set_main_bot
     set_main_bot(main_bot)
-    # publisher.bot = main_bot  # publisher не существует, закомментировано
+    
+    from services import publisher
+    publisher.publisher = AutoPoster(content_bot)
 
     # 3. Проверка связей (те же экземпляры main_bot, content_bot — сессии не закрываем)
     logger.info("🔍 Проверка связей...")
@@ -167,9 +169,12 @@ async def main():
                         except Exception as e:
                             logger.warning(f"⚠️ Ошибка загрузки изображения для поста #{post.get('id')}: {e}")
                     
-                    # await publisher.publish_all(text, image_bytes)  # publisher не существует, закомментировано
-                    # TODO: Реализовать публикацию постов через main_bot или content_bot
-                    logger.info("⚠️ Публикация поста #%s пропущена (publisher не реализован)", post.get("id"))
+                    from services.publisher import publisher as pub_instance
+                    if pub_instance:
+                        await pub_instance.publish_all(text, image_bytes)
+                        logger.info("✅ Пост #%s опубликован через publisher", post.get("id"))
+                    else:
+                        logger.warning("⚠️ Публикация поста #%s пропущена (publisher не инициализирован)", post.get("id"))
                     await db.mark_as_published(post["id"])
                     logger.info("✅ Пост #%s из контент-плана помечен как опубликованный", post["id"])
                 except Exception as e:
@@ -190,16 +195,16 @@ async def main():
     scheduler.add_job(hunter.hunt, 'interval', minutes=30)
 
     # Гео-шпион 24/7: чаты ЖК (Перекрёсток, Самолёт, ПИК и т.д.) — каждые 5 мин
-    # Закомментировано: competitor_spy не существует
-    # async def run_geo_spy_job():
-    #     if not competitor_spy.geo_monitoring_enabled:
-    #         return
-    #     try:
-    #         leads = await competitor_spy.scan_geo_chats()
-    #         if leads:
-    #             logger.info("🎯 GEO-Spy: найдено %s лидов", len(leads))
-    #     except Exception as e:
-    #         logger.error("GEO-Spy: %s", e)
+    async def run_geo_spy_job():
+        if not competitor_spy.geo_monitoring_enabled:
+            return
+        try:
+            leads = await competitor_spy.scan_geo_chats()
+            if leads:
+                logger.info("🎯 GEO-Spy: найдено %s лидов", len(leads))
+        except Exception as e:
+            logger.error("GEO-Spy: %s", e)
+    
     # scheduler.add_job(run_geo_spy_job, "interval", seconds=competitor_spy.geo_check_interval)
 
     # Поиск идей для контента раз в 6 часов (темы ещё отправляются в группу после создания content_bot)
