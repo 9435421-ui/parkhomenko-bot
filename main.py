@@ -8,7 +8,37 @@
 Остальные модули получают бота через utils.bot_config.get_main_bot() или из контекста (message.bot, callback.bot).
 Неубивайка: lock bot.lock, один процесс на инстанс.
 """
-import asyncio
+# === ПРОВЕРКА ЗАВИСИМОСТЕЙ ПЕРЕД СТАРТОМ ===
+REQUIRED_PACKAGES = {
+    'aiogram': 'aiogram',
+    'telethon': 'telethon',
+    'aiosqlite': 'aiosqlite',
+    'vkbottle': 'vkbottle',
+    'yandex_chain': 'yandex-chain',
+    'dotenv': 'python-dotenv',
+    'aiohttp': 'aiohttp',
+    'apscheduler': 'apscheduler',
+}
+
+missing_packages = []
+for module, package in REQUIRED_PACKAGES.items():
+    try:
+        __import__(module)
+    except ImportError:
+        missing_packages.append(package)
+
+if missing_packages:
+    print("=" * 70)
+    print("❌ ОШИБКА: Не установлены необходимые библиотеки!")
+    print("=" * 70)
+    print("\nУстановите недостающие пакеты командой:")
+    print(f"   pip install {' '.join(missing_packages)}")
+    print("\nИли установите все зависимости:")
+    print("   pip install -r requirements.txt")
+    print("=" * 70)
+    import sys
+    sys.exit(1)
+
 import logging
 import os
 import signal
