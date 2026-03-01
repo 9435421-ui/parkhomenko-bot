@@ -506,6 +506,13 @@ class ScoutParser:
             logger.warning("⚠️ VK_API_TOKEN не настроен или невалиден")
             return []
         
+        # Проверка формата токена (должен начинаться с буквы или цифры)
+        if VK_API_TOKEN and len(VK_API_TOKEN) > 0:
+            first_char = VK_API_TOKEN[0]
+            if not (first_char.isalnum()):
+                logger.error("❌ Ошибка формата VK_API_TOKEN в .env")
+                return []
+        
         # Ключевые слова для поиска
         search_queries = [
             "перепланировка",
