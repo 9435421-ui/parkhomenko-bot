@@ -5,7 +5,7 @@ load_dotenv()
 
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 CONTENT_BOT_TOKEN = os.getenv("CONTENT_BOT_TOKEN")
-VK_API_TOKEN = os.getenv("VK_API_TOKEN")
+VK_API_TOKEN = os.getenv("VK_USER_TOKEN") or os.getenv("VK_TOKEN")
 VK_GROUP_ID = os.getenv("VK_GROUP_ID")
 # Telegram Client API (for Telethon - discovery and parsing)
 api_id_str = os.getenv("API_ID")
