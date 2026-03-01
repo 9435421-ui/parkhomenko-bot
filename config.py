@@ -71,8 +71,13 @@ THREAD_ID_DRAFTS = int(os.getenv("THREAD_ID_DRAFTS", "85"))
 THREAD_ID_SEASONAL = int(os.getenv("THREAD_ID_SEASONAL", "87"))
 THREAD_ID_TRENDS_SEASON = int(os.getenv("THREAD_ID_TRENDS_SEASON", "0"))
 THREAD_ID_CONTENT_PLAN = int(os.getenv("THREAD_ID_CONTENT_PLAN", "0"))
+THREAD_ID_HOT_LEADS = int(os.getenv("THREAD_ID_HOT_LEADS", "0"))
 VK_QUIZ_LINK = os.getenv("VK_QUIZ_LINK", "https://vk.com/app123456")
 CONTENT_HASHTAGS = os.getenv("CONTENT_HASHTAGS", "#перепланировка #москва")
+
+# Channel ID для TERION (используется Discovery и другими модулями)
+CHANNEL_ID_TERION_STR = os.getenv("CHANNEL_ID_TERION")
+CHANNEL_ID_TERION = parse_channel_id(CHANNEL_ID_TERION_STR) if CHANNEL_ID_TERION_STR else None
 
 # Database path - используем DATABASE_PATH из .env, fallback на стандартный путь
 DATABASE_PATH = os.getenv("DATABASE_PATH", "database/terion.db")
