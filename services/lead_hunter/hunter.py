@@ -929,7 +929,7 @@ class LeadHunter:
             return
         content = (lead.get("content") or lead.get("intent") or "")[:300]
         text = (
-            "🕵️ <b>Новый лид (шпион)</b>\n\n"
+            "🕵️ <b>[ШПИОН] Новый лид</b>\n\n"
             f"📄 {content}{'…' if len(lead.get('content') or '') > 300 else ''}\n\n"
             f"📍 Источник: {source_name or '—'}\n"
             f"⭐ Горячность: {lead.get('hotness', 0)}/10\n"
@@ -961,7 +961,7 @@ class LeadHunter:
             return
         content = lead.get("content", "") or ""
         text = (
-            "🔥 <b>ГОРЯЧИЙ ЛИД (AI Жюля)</b>\n\n"
+            "🔥 <b>[ШПИОН] ГОРЯЧИЙ ЛИД (AI Жюля)</b>\n\n"
             f"📄 {content[:500]}{'…' if len(content) > 500 else ''}\n\n"
             f"🎯 Интент: {lead.get('intent', '—')}\n"
             f"⭐ Горячность: {lead.get('hotness', 0)}\n"
