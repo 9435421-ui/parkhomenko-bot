@@ -145,7 +145,7 @@ async def main():
     scheduler.add_job(check_and_publish_scheduled_posts, "interval", hours=1)
     
     hunter = LeadHunter()
-    scheduler.add_job(hunter.hunt, 'interval', minutes=5)
+    scheduler.add_job(hunter.hunt, 'interval', minutes=30)
     scheduler.add_job(creative_agent.scout_topics, 'interval', hours=6)
     
     scheduler.start()
