@@ -18,7 +18,8 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 # Проверка обязательных переменных окружения
-if not CONTENT_CHANNEL_ID:
+# Используем is None вместо not, чтобы значение 0 (тестовый режим) не вызывало ошибку
+if CONTENT_CHANNEL_ID is None:
     raise RuntimeError("Ошибка: ID канала не настроен в .env. Установите переменную CONTENT_CHANNEL_ID")
 
 if not YANDEX_API_KEY or not FOLDER_ID:
