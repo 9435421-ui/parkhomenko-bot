@@ -1153,7 +1153,7 @@ class LeadHunter:
 
             # Глубокий анализ намерения через Yandex GPT агент (новая логика)
             try:
-                analysis = await self._analyze_intent(post.text)
+                analysis = await self._analyze_intent(getattr(post, "text", "") or "")
                 # Обновляем analysis_data на основе результатов анализа
                 if analysis.get("is_lead"):
                     analysis_data["priority_score"] = analysis.get("hotness", 0) * 2  # Преобразуем hotness (1-5) в priority_score (0-10)

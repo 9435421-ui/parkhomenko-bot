@@ -443,6 +443,7 @@ class ScoutParser:
                             for item in data["response"]["items"]:
                                 text = item.get("text", "")
                                 if not text:
+                                    logger.debug("Пропущен пост без текста")
                                     continue
                                 
                                 # В VK определяем тип отправителя
@@ -581,6 +582,7 @@ class ScoutParser:
                         for item in items:
                             text = item.get("text", "")
                             if not text:
+                                logger.debug("Пропущен пост без текста")
                                 continue
                             
                             # Получаем ID источника
