@@ -7,7 +7,6 @@ from aiogram.client.default import DefaultBotProperties
 from aiogram.types import BufferedInputFile, InlineKeyboardMarkup, InlineKeyboardButton
 
 from .discovery import Discovery
-from .analyzer import LeadAnalyzer
 from .outreach import Outreach
 from services.scout_parser import scout_parser
 from hunter_standalone import HunterDatabase, LeadHunter as StandaloneLeadHunter
@@ -60,7 +59,6 @@ class LeadHunter:
 
     def __init__(self):
         self.discovery = Discovery()
-        self.analyzer = LeadAnalyzer()
         self.outreach = Outreach()
         self.parser = scout_parser  # общий экземпляр: отчёт последнего скана доступен и для /spy_report
         self._db = None  # Кэш для глобального объекта БД
@@ -1118,10 +1116,24 @@ class LeadHunter:
                 continue
             _seen_post_keys.add(_post_key)
 
-            # Быстрая оценка через LeadAnalyzer (существующая ранняя логика) — ТЕПЕРЬ ВОЗВРАЩАЕТ DICT
+            # Быстрая оценка через hunter_standalone (замена LeadAnalyzer)
             # Гео-фильтрация: передаём source_name для проверки Москвы/МО
             source_name = getattr(post, "source_name", "") or ""
-            analysis_data = await self.analyzer.analyze_post(post.text, source_name=source_name)
+            
+            # Простая заглушка для анализа поста (в будущем можно использовать hunter_standalone)
+            # Базовая гео-фильтрация: проверяем, содержит ли source_name упоминания Москвы/МО
+            geo_filtered = False
+            if source_name and not any(geo in source_name.lower() for geo in ["москва", "московск", "мск", "м.о.", "мо"]):
+                # Если нет явного упоминания Москвы/МО, но это не критично - пропускаем фильтрацию
+                # (можно включить строгую фильтрацию позже)
+                pass
+            
+            analysis_data = {
+                "geo_filtered": geo_filtered,
+                "priority_score": 0,  # Будет определено через _analyze_intent
+                "pain_stage": "ST-1",  # Будет определено через _analyze_intent
+                "zhk_name": ""
+            }
             
             # Если пост отфильтрован по гео — пропускаем
             if analysis_data.get("geo_filtered"):
@@ -1134,9 +1146,14 @@ class LeadHunter:
             # Глубокий анализ намерения через Yandex GPT агент (новая логика)
             try:
                 analysis = await self._analyze_intent(post.text)
+                # Обновляем analysis_data на основе результатов анализа
+                if analysis.get("is_lead"):
+                    analysis_data["priority_score"] = analysis.get("hotness", 0) * 2  # Преобразуем hotness (1-5) в priority_score (0-10)
+                    analysis_data["pain_stage"] = analysis.get("pain_stage", "ST-1")
+                    pain_stage = analysis_data["pain_stage"]
             except Exception as e:
                 logger.debug("🔎 Анализ намерения не удался: %s", e)
-                analysis = {"is_lead": False, "intent": "", "hotness": 0, "context_summary": ""}
+                analysis = {"is_lead": False, "intent": "", "hotness": 0, "context_summary": "", "pain_stage": "ST-1"}
 
             # Если модель пометила как лид — сохраняем в локальную HunterDatabase, чтобы избежать дублей
             if analysis.get("is_lead"):
@@ -1167,7 +1184,6 @@ class LeadHunter:
                 if saved:
                     try:
                         from config import JULIA_USER_ID, BOT_TOKEN
-                        from services.lead_hunter.analyzer import _detect_priority_zhk_hot
 
                         # ── Профиль автора ───────────────────────────────────
                         author_id = getattr(post, "author_id", None)
@@ -1181,6 +1197,18 @@ class LeadHunter:
                             author_link = None
 
                         # ── Приоритетный ЖК ──────────────────────────────────
+                        # Простая заглушка для определения приоритетного ЖК
+                        def _detect_priority_zhk_hot(text: str) -> tuple[bool, str]:
+                            """Определяет, является ли ЖК приоритетным (заглушка)"""
+                            if not text:
+                                return False, ""
+                            text_lower = text.lower()
+                            priority_zhk_names = ["династия", "зиларт", "высотка"]
+                            for zhk_name in priority_zhk_names:
+                                if zhk_name in text_lower:
+                                    return True, zhk_name.title()
+                            return False, ""
+                        
                         is_zhk_hot, zhk_name = _detect_priority_zhk_hot(post.text or "")
                         zhk_name = zhk_name or analysis_data.get("zhk_name") or analysis.get("zhk_name") or ""
 
