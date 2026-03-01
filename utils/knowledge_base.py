@@ -51,8 +51,8 @@ class KnowledgeBase:
     async def get_context(
         self,
         query: str,
-        max_chunks: int = 3,
-        context_size: int = 500
+        max_chunks: int = 2,
+        context_size: int = 400
     ) -> str:
         """
         Получить релевантный контекст по запросу
