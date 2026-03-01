@@ -101,7 +101,11 @@ class KnowledgeBase:
                 f"📄 Из документа '{doc['filename']}':\n{snippet}"
             )
         
-        return "\n\n".join(context_parts)
+        full_context = "\n\n".join(context_parts)
+        # Жесткая обрезка до 1500 символов суммарно для предотвращения ошибок лимита промпта
+        if len(full_context) > 1500:
+            full_context = full_context[:1500] + "..."
+        return full_context
     
     def _extract_keywords(self, text: str) -> List[str]:
         """Извлечение ключевых слов из текста"""
