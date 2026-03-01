@@ -150,6 +150,37 @@ async def main():
     except Exception as e:
         logger.error(f"Ошибка проверки связей: {e}")
 
+    # 4. Проверка YandexGPT
+    logger.info("🧠 Проверка YandexGPT...")
+    try:
+        from config import YANDEX_API_KEY, FOLDER_ID
+        if YANDEX_API_KEY and FOLDER_ID:
+            # Тестовый запрос к YandexGPT
+            try:
+                import aiohttp
+                async with aiohttp.ClientSession() as session:
+                    url = "https://llm.api.cloud.yandex.net/foundationModels/v1/completion"
+                    headers = {
+                        "Authorization": f"Api-Key {YANDEX_API_KEY}",
+                        "Content-Type": "application/json"
+                    }
+                    payload = {
+                        "modelUri": f"gpt://{FOLDER_ID}/yandexgpt-lite",
+                        "completionOptions": {"temperature": 0.3, "maxTokens": 10},
+                        "messages": [{"role": "user", "text": "Тест"}]
+                    }
+                    async with session.post(url, headers=headers, json=payload, timeout=10) as resp:
+                        if resp.status == 200:
+                            logger.info("✅ YandexGPT: подключение успешно")
+                        else:
+                            logger.warning(f"⚠️ YandexGPT: ошибка HTTP {resp.status}")
+            except Exception as e:
+                logger.warning(f"⚠️ Внимание: Интеллект Антона (YandexGPT) не отвечает, лиды будут сырыми")
+        else:
+            logger.warning("⚠️ YANDEX_API_KEY или FOLDER_ID не настроены")
+    except Exception as e:
+        logger.warning(f"⚠️ Внимание: Интеллект Антона (YandexGPT) не отвечает, лиды будут сырыми")
+
     scheduler = AsyncIOScheduler()
 
     async def check_and_publish_scheduled_posts():
