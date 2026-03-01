@@ -12,8 +12,8 @@
 """
 import os
 import sys
+import time
 import asyncio
-from dotenv import load_dotenv
 from telethon import TelegramClient
 from telethon.errors import SessionPasswordNeededError
 
@@ -27,12 +27,20 @@ SESSION_NAME = 'anton_discovery'
 
 async def main():
     """Основная функция авторизации"""
+    # Проверяем версию Telethon
+    try:
+        import telethon
+        telethon_version = telethon.__version__
+    except:
+        telethon_version = "неизвестна"
+    
     print("=" * 60)
     print("🔐 АВТОРИЗАЦИЯ TELEGRAM СЕССИИ ДЛЯ DISCOVERY")
     print("=" * 60)
     print(f"\n📁 Файл сессии: {SESSION_NAME}.session")
     print(f"🔑 API ID: {API_ID}")
     print(f"🔑 API Hash: {API_HASH[:10]}...")
+    print(f"📦 Telethon версия: {telethon_version}")
     print("\n" + "-" * 60)
     
     # Создаем клиент Telethon
@@ -64,11 +72,17 @@ async def main():
         
         # Отправляем код подтверждения
         print(f"\n📨 Отправка кода подтверждения на {phone}...")
+        # Небольшая пауза перед отправкой кода
+        await asyncio.sleep(2)
         await client.send_code_request(phone)
         
         # Запрашиваем код подтверждения
         print("\n🔐 Введите код подтверждения из Telegram:")
-        code = input("Код: ").strip()
+        print("💡 Если код не пришел в течение 30 секунд, попробуйте:")
+        print("   - Перезапустить скрипт")
+        print("   - Проверить раздел 'Устройства' в настройках Telegram")
+        print("   - Убедиться, что номер телефона введен правильно")
+        code = input("\nКод: ").strip()
         
         if not code:
             print("❌ Код подтверждения не может быть пустым")
