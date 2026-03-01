@@ -31,7 +31,16 @@ class AdminStates(StatesGroup):
 
 def check_admin(user_id: int) -> bool:
     """Проверка прав администратора"""
-    return user_id == ADMIN_ID or (JULIA_USER_ID and user_id == JULIA_USER_ID)
+    # Проверяем ADMIN_ID (основной админ)
+    if user_id == ADMIN_ID:
+        logger.debug(f"✅ Доступ разрешен: user_id={user_id} совпадает с ADMIN_ID={ADMIN_ID}")
+        return True
+    # Проверяем JULIA_USER_ID (если задан и не равен 0)
+    if JULIA_USER_ID and JULIA_USER_ID != 0 and user_id == JULIA_USER_ID:
+        logger.debug(f"✅ Доступ разрешен: user_id={user_id} совпадает с JULIA_USER_ID={JULIA_USER_ID}")
+        return True
+    logger.warning(f"⛔ Доступ запрещен: user_id={user_id}, ADMIN_ID={ADMIN_ID}, JULIA_USER_ID={JULIA_USER_ID}")
+    return False
 
 
 def get_admin_keyboard() -> InlineKeyboardMarkup:
