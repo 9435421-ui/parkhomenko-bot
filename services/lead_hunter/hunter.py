@@ -7,7 +7,7 @@ from aiogram.client.default import DefaultBotProperties
 from aiogram.types import BufferedInputFile, InlineKeyboardMarkup, InlineKeyboardButton
 
 from .discovery import Discovery
-from .outreach import Outreach
+# from .outreach import Outreach  # Файл outreach.py не существует, импорт удален
 from services.scout_parser import scout_parser
 from hunter_standalone import HunterDatabase, LeadHunter as StandaloneLeadHunter
 
@@ -59,7 +59,7 @@ class LeadHunter:
 
     def __init__(self):
         self.discovery = Discovery()
-        self.outreach = Outreach()
+        # self.outreach = Outreach()  # Файл outreach.py не существует, закомментировано
         self.parser = scout_parser  # общий экземпляр: отчёт последнего скана доступен и для /spy_report
         self._db = None  # Кэш для глобального объекта БД
     
