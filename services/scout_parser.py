@@ -441,7 +441,14 @@ class ScoutParser:
                         data = await resp.json()
                         if "response" in data and "items" in data["response"]:
                             for item in data["response"]["items"]:
+                                post_id = item.get("id")
                                 text = item.get("text", "")
+                                
+                                # Парсим комментарии к посту, даже если в самом посте нет текста (может быть картинка с вопросом в комментах)
+                                if post_id:
+                                    comment_leads = await self.parse_vk_comments(owner_id, post_id, source_name, link, db=db)
+                                    posts.extend(comment_leads)
+
                                 if not text:
                                     logger.debug("Пропущен пост без текста")
                                     continue
@@ -485,6 +492,10 @@ class ScoutParser:
                                         url=f"https://vk.com/wall{owner_id}_{item['id']}",
                                         source_link=link  # Для использования geo_tag в hunter.py
                                     ))
+                    # Парсим обсуждения группы
+                    board_leads = await self.parse_vk_board(owner_id, source_name, link, db=db)
+                    posts.extend(board_leads)
+
                 except Exception as e:
                     logger.error(f"❌ Ошибка VK ({owner_id}): {e}")
         
@@ -495,6 +506,97 @@ class ScoutParser:
         if not hasattr(self, 'last_scan_report'):
             self.last_scan_report = []
         
+        return posts
+
+    async def parse_vk_comments(self, owner_id: str, post_id: str, source_name: str, link: str, db=None) -> List[ScoutPost]:
+        """Парсинг комментариев к посту ВК"""
+        posts = []
+        url = f"https://api.vk.com/method/wall.getComments?owner_id={owner_id}&post_id={post_id}&count=100&need_likes=1&access_token={VK_API_TOKEN}&v=5.131"
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.get(url) as resp:
+                    data = await resp.json()
+                    if "response" in data and "items" in data["response"]:
+                        for item in data["response"]["items"]:
+                            text = item.get("text", "")
+                            if not text:
+                                continue
+                            
+                            from_id = item.get("from_id", 0)
+                            if from_id == 0: continue
+                            
+                            author_id = from_id if from_id > 0 else None
+                            sender_type = "user" if from_id > 0 else "channel"
+                            
+                            if await self._detect_lead_async(
+                                text=text,
+                                platform="vk",
+                                sender_type=sender_type,
+                                author_id=author_id,
+                                url=f"https://vk.com/wall{owner_id}_{post_id}?reply={item['id']}",
+                                db=db
+                            ):
+                                posts.append(ScoutPost(
+                                    source_type="vk",
+                                    source_name=f"{source_name} (коммент)",
+                                    source_id=owner_id,
+                                    post_id=f"{post_id}_{item['id']}",
+                                    text=text,
+                                    author_id=author_id,
+                                    url=f"https://vk.com/wall{owner_id}_{post_id}?reply={item['id']}",
+                                    is_comment=True,
+                                    source_link=link
+                                ))
+        except Exception as e:
+            logger.error(f"❌ Ошибка VK comments ({owner_id}_{post_id}): {e}")
+        return posts
+
+    async def parse_vk_board(self, group_id: str, source_name: str, link: str, db=None) -> List[ScoutPost]:
+        """Парсинг обсуждений (board) ВК"""
+        posts = []
+        # Сначала получаем список тем
+        group_id_abs = group_id.lstrip("-")
+        url_topics = f"https://api.vk.com/method/board.getTopics?group_id={group_id_abs}&count=10&order=1&access_token={VK_API_TOKEN}&v=5.131"
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.get(url_topics) as resp:
+                    data = await resp.json()
+                    if "response" in data and "items" in data["response"]:
+                        for topic in data["response"]["items"]:
+                            topic_id = topic["id"]
+                            # Получаем сообщения в теме
+                            url_msgs = f"https://api.vk.com/method/board.getComments?group_id={group_id_abs}&topic_id={topic_id}&count=50&sort=desc&access_token={VK_API_TOKEN}&v=5.131"
+                            async with session.get(url_msgs) as resp_msgs:
+                                data_msgs = await resp_msgs.json()
+                                if "response" in data_msgs and "items" in data_msgs["response"]:
+                                    for item in data_msgs["response"]["items"]:
+                                        text = item.get("text", "")
+                                        if not text: continue
+                                        
+                                        from_id = item.get("from_id", 0)
+                                        if from_id <= 0: continue # Только от пользователей
+                                        
+                                        if await self._detect_lead_async(
+                                            text=text,
+                                            platform="vk",
+                                            sender_type="user",
+                                            author_id=from_id,
+                                            url=f"https://vk.com/topic-{group_id_abs}_{topic_id}?post={item['id']}",
+                                            db=db
+                                        ):
+                                            posts.append(ScoutPost(
+                                                source_type="vk",
+                                                source_name=f"{source_name} (обсуждение)",
+                                                source_id=f"-{group_id_abs}",
+                                                post_id=f"topic_{topic_id}_{item['id']}",
+                                                text=text,
+                                                author_id=from_id,
+                                                url=f"https://vk.com/topic-{group_id_abs}_{topic_id}?post={item['id']}",
+                                                is_comment=True,
+                                                source_link=link
+                                            ))
+        except Exception as e:
+            logger.error(f"❌ Ошибка VK board ({group_id}): {e}")
         return posts
 
     async def search_vk_global(self, db=None, hours_back: int = 24) -> List[ScoutPost]:
