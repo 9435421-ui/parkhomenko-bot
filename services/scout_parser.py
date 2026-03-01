@@ -1,6 +1,14 @@
 """
 Scout Parser — глобальный поиск лидов с гео-фильтрацией TERION.
 """
+import pydantic
+import sys
+
+# Костыль для совместимости vkbottle 4.3.12 с pydantic v2
+if pydantic.VERSION.startswith("2"):
+    from pydantic import v1 as pydantic_v1
+    sys.modules["pydantic.main"] = pydantic_v1.main
+
 import asyncio
 import logging
 import os
