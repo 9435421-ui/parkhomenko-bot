@@ -7,6 +7,10 @@ BOT_TOKEN = os.getenv("BOT_TOKEN")
 CONTENT_BOT_TOKEN = os.getenv("CONTENT_BOT_TOKEN")
 VK_API_TOKEN = os.getenv("VK_API_TOKEN")
 VK_GROUP_ID = os.getenv("VK_GROUP_ID")
+# Telegram Client API (for Telethon - discovery and parsing)
+api_id_str = os.getenv("API_ID")
+API_ID = int(api_id_str) if api_id_str else None
+API_HASH = os.getenv("API_HASH")
 LEADS_GROUP_CHAT_ID = int(os.getenv("LEADS_GROUP_CHAT_ID", "-1003370698977"))
 
 def parse_channel_id(channel_id_str: str | None) -> int | str | None:
