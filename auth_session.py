@@ -17,27 +17,9 @@ from dotenv import load_dotenv
 from telethon import TelegramClient
 from telethon.errors import SessionPasswordNeededError
 
-# Загружаем переменные окружения
-load_dotenv()
-
-API_ID = os.getenv("API_ID")
-API_HASH = os.getenv("API_HASH")
-
-# Проверяем наличие API_ID и API_HASH
-if not API_ID or not API_HASH:
-    print("❌ Ошибка: API_ID и API_HASH должны быть заданы в файле .env")
-    print("\nДобавьте в .env:")
-    print("API_ID=your_telegram_api_id")
-    print("API_HASH=your_telegram_api_hash")
-    print("\nПолучить можно на https://my.telegram.org/apps")
-    sys.exit(1)
-
-# Преобразуем API_ID в int
-try:
-    API_ID = int(API_ID)
-except ValueError:
-    print(f"❌ Ошибка: API_ID должен быть числом, получено: {API_ID}")
-    sys.exit(1)
+# API credentials для авторизации Telethon сессии
+API_ID = 39163454
+API_HASH = "182611453d5822018d0772847a3f58a6"
 
 # Имя файла сессии (должно совпадать с тем, что используется в Discovery)
 SESSION_NAME = 'anton_discovery'
