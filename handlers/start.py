@@ -32,6 +32,9 @@ async def start_quiz(message_or_callback: Message | CallbackQuery, state: FSMCon
 @router.message(F.text == "/start")
 async def cmd_start(message: Message):
     """Обработчик команды /start"""
+    from aiogram.utils.keyboard import InlineKeyboardBuilder
+    from keyboards.main_menu import get_main_menu
+    
     await message.answer(
         "👋 Здравствуйте! Я Антон, ИИ-помощник эксперта "
         "Пархоменко Юлии Владимировны по согласованию перепланировок.\n\n"
