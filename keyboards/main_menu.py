@@ -6,10 +6,7 @@ from os import getenv
 
 
 def get_main_menu() -> InlineKeyboardMarkup:
-    """Главное меню бота"""
-    # URL Mini App (настроить в .env или использовать локальный)
-    mini_app_url = getenv("MINI_APP_URL", "https://your-domain.com/mini_app/")
-    
+    """Главное меню бота (только для админа)"""
     return InlineKeyboardMarkup(
         inline_keyboard=[
             [InlineKeyboardButton(
@@ -21,12 +18,8 @@ def get_main_menu() -> InlineKeyboardMarkup:
                 callback_data="mode:dialog"
             )],
             [InlineKeyboardButton(
-                text="💰 Инвест-калькулятор",
+                text="🧮 Калькулятор перепланировки",
                 callback_data="mode:invest"
-            )],
-            [InlineKeyboardButton(
-                text="🌐 Mini App: Инвест-калькулятор",
-                web_app=WebAppInfo(url=mini_app_url)
             )]
         ]
     )

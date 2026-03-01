@@ -44,6 +44,9 @@ async def dialog_handler(message: Message, state: FSMContext):
         user_name=message.from_user.first_name
     )
     
+    # Добавляем CTA (Call to Action)
+    response_text += "\n\n---\n📝 Чтобы получить точный расчет и бесплатную консультацию, нажмите /start и выберите «Оставить заявку»."
+    
     await db.add_dialog_message(user_id, "user", message.text)
     await db.add_dialog_message(user_id, "assistant", response_text)
     
