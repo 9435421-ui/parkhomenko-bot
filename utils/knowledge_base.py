@@ -52,7 +52,7 @@ class KnowledgeBase:
         self,
         query: str,
         max_chunks: int = 3,
-        context_size: int = 800
+        context_size: int = 500
     ) -> str:
         """
         Получить релевантный контекст по запросу
