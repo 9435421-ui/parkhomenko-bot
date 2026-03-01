@@ -1023,17 +1023,12 @@ class LeadHunter:
         
         all_posts = tg_posts + vk_posts + vk_global_posts
 
-        # Если лидов не найдено, пробуем найти новые источники через Discovery
+        # Если лидов не найдено, пробуем найти новые источники через Discovery (только Telegram)
         if not all_posts:
-            logger.info("🔎 Лидов не найдено. Запуск Discovery для поиска новых источников...")
+            logger.info("🔎 Лидов не найдено. Запуск Discovery для поиска новых Telegram-каналов...")
             # Поиск новых Telegram каналов
             new_sources = await self.discovery.find_new_sources()
-            # Поиск новых VK групп
-            try:
-                vk_sources = await self.discovery.scout_vk_resources()
-                new_sources.extend(vk_sources)
-            except Exception as e:
-                logger.warning(f"⚠️ Ошибка при поиске VK групп: {e}")
+            # VK-группы добавляются автоматически через search_vk_global выше
             added_count = 0
             activated_count = 0
             skipped_count = 0
