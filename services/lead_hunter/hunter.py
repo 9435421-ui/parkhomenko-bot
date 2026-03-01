@@ -1011,7 +1011,17 @@ class LeadHunter:
         
         tg_posts = await self.parser.parse_telegram(db=main_db)
         vk_posts = await self.parser.parse_vk(db=main_db)  # Передаём БД для загрузки групп из target_resources
-        all_posts = tg_posts + vk_posts
+        
+        # ── Глобальный поиск ВК через newsfeed.search ─────────────────────────────
+        vk_global_posts = []
+        try:
+            vk_global_posts = await self.parser.search_vk_global(db=main_db, hours_back=24)
+            if vk_global_posts:
+                logger.info(f"🌍 VK Global Search: найдено {len(vk_global_posts)} лидов через newsfeed.search")
+        except Exception as e:
+            logger.warning(f"⚠️ Ошибка при глобальном поиске VK: {e}")
+        
+        all_posts = tg_posts + vk_posts + vk_global_posts
 
         # Если лидов не найдено, пробуем найти новые источники через Discovery
         if not all_posts:
@@ -1098,9 +1108,10 @@ class LeadHunter:
 
         tg_ok = [r for r in (self.parser.last_scan_report or []) if r.get("type") == "telegram" and r.get("status") == "ok"]
         vk_ok = [r for r in (self.parser.last_scan_report or []) if r.get("type") == "vk" and r.get("status") == "ok"]
+        vk_global_count = len(vk_global_posts) if 'vk_global_posts' in locals() else 0
         logger.info(
-            "🔍 ScoutParser: просканировано TG каналов=%s, VK групп=%s, постов с ключевыми словами=%s",
-            len(tg_ok), len(vk_ok), len(all_posts)
+            "🔍 ScoutParser: TG каналов=%s, VK групп=%s, VK global=%s, постов с ключевыми словами=%s",
+            len(tg_ok), len(vk_ok), vk_global_count, len(all_posts)
         )
 
         from hunter_standalone.database import HunterDatabase as LocalHunterDatabase

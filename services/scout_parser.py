@@ -488,6 +488,190 @@ class ScoutParser:
         
         return posts
 
+    async def search_vk_global(self, db=None, hours_back: int = 24) -> List[ScoutPost]:
+        """
+        Глобальный поиск по всему ВКонтакте через newsfeed.search.
+        Ищет посты по ключевым словам, фильтрует по времени (по умолчанию 24 часа),
+        автоматически добавляет активные сообщества в БД.
+        
+        Args:
+            db: Database instance
+            hours_back: Сколько часов назад искать записи (по умолчанию 24)
+        
+        Returns:
+            List[ScoutPost]: Найденные лиды
+        """
+        posts = []
+        if not VK_API_TOKEN or "vk1.a" not in VK_API_TOKEN:
+            logger.warning("⚠️ VK_API_TOKEN не настроен или невалиден")
+            return []
+        
+        # Ключевые слова для поиска
+        search_queries = [
+            "перепланировка",
+            "согласование МЖИ",
+            "узаконить перепланировку",
+            "нежилое помещение",
+            "изменение назначения",
+            "коммерция в ЖК",
+            "предписание МЖИ",
+            "штраф за перепланировку"
+        ]
+        
+        # Рассчитываем timestamp для фильтра по времени
+        start_time = int((datetime.now() - timedelta(hours=hours_back)).timestamp())
+        
+        # Множество для отслеживания найденных групп (чтобы не добавлять дубликаты)
+        discovered_groups = set()
+        
+        logger.info(f"🌍 Запуск глобального поиска VK за последние {hours_back} часов...")
+        
+        async with aiohttp.ClientSession() as session:
+            for query in search_queries:
+                logger.info(f"🔍 Поиск по запросу: '{query}'")
+                
+                # VK API newsfeed.search
+                # count=200 максимум, extended=1 для получения информации о группах
+                url = (
+                    f"https://api.vk.com/method/newsfeed.search"
+                    f"?q={query}"
+                    f"&count=200"
+                    f"&extended=1"
+                    f"&start_time={start_time}"
+                    f"&fields=members_count,activity,description"
+                    f"&access_token={VK_API_TOKEN}"
+                    f"&v=5.131"
+                )
+                
+                try:
+                    async with session.get(url) as resp:
+                        data = await resp.json()
+                        
+                        if "error" in data:
+                            error_msg = data["error"].get("error_msg", "Unknown error")
+                            logger.error(f"❌ VK API error: {error_msg}")
+                            continue
+                        
+                        if "response" not in data:
+                            continue
+                        
+                        response = data["response"]
+                        items = response.get("items", [])
+                        profiles = {p["id"]: p for p in response.get("profiles", [])}
+                        groups = {g["id"]: g for g in response.get("groups", [])}
+                        
+                        logger.info(f"   Найдено записей: {len(items)}")
+                        
+                        for item in items:
+                            text = item.get("text", "")
+                            if not text:
+                                continue
+                            
+                            # Получаем ID источника
+                            owner_id = item.get("owner_id", 0)
+                            post_id = item.get("id", 0)
+                            
+                            # Определяем тип источника (группа или пользователь)
+                            if owner_id < 0:
+                                # Это группа
+                                group_id = abs(owner_id)
+                                group_info = groups.get(group_id, {})
+                                source_name = group_info.get("name", f"club{group_id}")
+                                source_link = f"https://vk.com/club{group_id}"
+                                members_count = group_info.get("members_count", 0)
+                                
+                                # Добавляем группу в discovered для последующего сохранения в БД
+                                discovered_groups.add((
+                                    group_id,
+                                    source_name,
+                                    source_link,
+                                    members_count,
+                                    group_info.get("activity", ""),
+                                    group_info.get("description", "")
+                                ))
+                                
+                                sender_type = "channel"
+                                author_id = None
+                            else:
+                                # Это пользователь
+                                user_info = profiles.get(owner_id, {})
+                                first_name = user_info.get("first_name", "")
+                                last_name = user_info.get("last_name", "")
+                                source_name = f"{first_name} {last_name}".strip() or f"id{owner_id}"
+                                source_link = f"https://vk.com/id{owner_id}"
+                                sender_type = "user"
+                                author_id = owner_id
+                            
+                            # URL поста
+                            post_url = f"https://vk.com/wall{owner_id}_{post_id}"
+                            
+                            # Дата публикации
+                            date_ts = item.get("date", 0)
+                            published_at = datetime.fromtimestamp(date_ts) if date_ts else None
+                            
+                            # Проверяем является ли пост лидом
+                            if await self._detect_lead_async(
+                                text=text,
+                                platform="vk",
+                                sender_type=sender_type,
+                                author_id=author_id,
+                                url=post_url,
+                                db=db
+                            ):
+                                posts.append(ScoutPost(
+                                    source_type="vk",
+                                    source_name=source_name,
+                                    source_id=str(owner_id),
+                                    post_id=str(post_id),
+                                    text=text,
+                                    author_id=author_id,
+                                    author_name=source_name if sender_type == "user" else None,
+                                    url=post_url,
+                                    published_at=published_at,
+                                    source_link=source_link
+                                ))
+                                
+                except Exception as e:
+                    logger.error(f"❌ Ошибка при поиске '{query}': {e}")
+                
+                # Небольшая задержка между запросами чтобы не превысить лимиты VK API
+                await asyncio.sleep(0.5)
+        
+        # Автоматическое добавление найденных групп в БД
+        if db and discovered_groups:
+            logger.info(f"📊 Найдено {len(discovered_groups)} уникальных сообществ, добавляем в БД...")
+            added_count = 0
+            skipped_count = 0
+            
+            for group_id, name, link, members, activity, description in discovered_groups:
+                try:
+                    # Проверяем есть ли уже в БД
+                    existing = await db.get_target_resource_by_link(link)
+                    
+                    if not existing:
+                        # Добавляем новое сообщество
+                        await db.add_target_resource(
+                            resource_type="vk",
+                            link=link,
+                            title=name,
+                            notes=f"Найдено через newsfeed.search | Активность: {activity} | Участников: {members} | {description[:100] if description else ''}",
+                            status="active",
+                            participants_count=members,
+                            geo_tag=""  # Будет определено позже через set_geo
+                        )
+                        added_count += 1
+                        logger.info(f"   ➕ Добавлено: {name} ({members} участников)")
+                    else:
+                        skipped_count += 1
+                        
+                except Exception as e:
+                    logger.warning(f"   ⚠️ Ошибка добавления {link}: {e}")
+            
+            logger.info(f"✅ Добавлено {added_count} новых, пропущено {skipped_count} существующих")
+        
+        logger.info(f"🎯 Глобальный поиск VK завершен: найдено {len(posts)} лидов")
+        return posts
+
     def extract_geo_header(self, text: str, source_name: str = "") -> str:
         """
         Гео-привязка: если в сообщении есть номер корпуса или название ЖК — вынести в заголовок карточки.
