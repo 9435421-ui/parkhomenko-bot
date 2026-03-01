@@ -1,11 +1,12 @@
 """
 Обработчик для создателя контента
-aiogram 2.x версия
+aiogram 3.x версия
 """
-from aiogram import Dispatcher, types
+from aiogram import Router, Dispatcher
+
+creator_router = Router()
 
 
 def register_handlers(dp: Dispatcher):
     """Регистрация обработчиков создателя контента"""
-    # TODO: Реализовать обработчики создателя контента
-    pass
+    dp.include_router(creator_router)

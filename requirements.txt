@@ -1,5 +1,5 @@
 # Telegram Bot Framework
-aiogram==2.25.1
+aiogram>=3.0.0
 
 # Telegram Client (Telethon for parsing)
 telethon==1.33.1
@@ -14,7 +14,7 @@ python-dotenv==1.0.0
 aiosqlite==0.19.0
 
 # HTTP requests
-aiohttp==3.9.1
+aiohttp
 requests==2.31.0
 
 # Yandex GPT API
@@ -24,7 +24,7 @@ yandex-chain==0.0.10
 apscheduler==3.10.4
 
 # Data processing
-pydantic==1.10.12
+pydantic>=2.0.0
 
 # Timezone
 pytz==2024.1

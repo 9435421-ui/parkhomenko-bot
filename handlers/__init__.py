@@ -1,12 +1,12 @@
 """
 Обработчики команд и сообщений
-aiogram 2.x версия
+aiogram 3.x версия
 """
 from aiogram import Dispatcher
 
 
 def register_all_handlers(dp: Dispatcher):
-    """Регистрация всех обработчиков для aiogram 2.x"""
+    """Регистрация всех обработчиков для aiogram 3.x"""
     from .start import register_handlers as register_start
     from .quiz import register_handlers as register_quiz
     from .dialog import register_handlers as register_dialog
@@ -31,16 +31,3 @@ def register_all_handlers(dp: Dispatcher):
         register_creator(dp)
     except ImportError:
         pass
-
-
-# Для обратной совместимости
-start_router = None
-quiz_router = None
-dialog_router = None
-invest_router = None
-admin_router = None
-content_router = None
-creator_router = None
-
-__all__ = ['register_all_handlers', 'start_router', 'quiz_router', 'dialog_router', 
-           'invest_router', 'admin_router', 'content_router', 'creator_router']
