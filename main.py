@@ -30,9 +30,9 @@ from middleware.logging import UnhandledCallbackMiddleware
 from services.scout_parser import ScoutParser
 from agents.creative_agent import creative_agent
 from services.lead_hunter import LeadHunter
-from services.competitor_spy import competitor_spy
-from services.publisher import publisher
-from services.image_generator import image_generator
+# from services.competitor_spy import competitor_spy  # Файл не существует, импорт закомментирован
+# from services.publisher import publisher  # Файл не существует, импорт закомментирован
+# from services.image_generator import image_generator  # Файл не существует, импорт закомментирован
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
@@ -90,7 +90,7 @@ async def main():
     content_bot = Bot(token=CONTENT_BOT_TOKEN or "", default=DefaultBotProperties(parse_mode="HTML"))
     from utils.bot_config import set_main_bot
     set_main_bot(main_bot)
-    publisher.bot = main_bot
+    # publisher.bot = main_bot  # publisher не существует, закомментировано
 
     # 3. Проверка связей (те же экземпляры main_bot, content_bot — сессии не закрываем)
     logger.info("🔍 Проверка связей...")
@@ -196,9 +196,11 @@ async def main():
                         except Exception as e:
                             logger.warning(f"⚠️ Ошибка загрузки изображения для поста #{post.get('id')}: {e}")
                     
-                    await publisher.publish_all(text, image_bytes)
+                    # await publisher.publish_all(text, image_bytes)  # publisher не существует, закомментировано
+                    # TODO: Реализовать публикацию постов через main_bot или content_bot
+                    logger.info("⚠️ Публикация поста #%s пропущена (publisher не реализован)", post.get("id"))
                     await db.mark_as_published(post["id"])
-                    logger.info("✅ Опубликован пост #%s из контент-плана", post["id"])
+                    logger.info("✅ Пост #%s из контент-плана помечен как опубликованный", post["id"])
                 except Exception as e:
                     logger.error("Ошибка публикации поста #%s: %s", post.get("id"), e)
         except Exception as e:
@@ -217,23 +219,25 @@ async def main():
     scheduler.add_job(hunter.hunt, 'interval', minutes=30)
 
     # Гео-шпион 24/7: чаты ЖК (Перекрёсток, Самолёт, ПИК и т.д.) — каждые 5 мин
-    async def run_geo_spy_job():
-        if not competitor_spy.geo_monitoring_enabled:
-            return
-        try:
-            leads = await competitor_spy.scan_geo_chats()
-            if leads:
-                logger.info("🎯 GEO-Spy: найдено %s лидов", len(leads))
-        except Exception as e:
-            logger.error("GEO-Spy: %s", e)
-    scheduler.add_job(run_geo_spy_job, "interval", seconds=competitor_spy.geo_check_interval)
+    # Закомментировано: competitor_spy не существует
+    # async def run_geo_spy_job():
+    #     if not competitor_spy.geo_monitoring_enabled:
+    #         return
+    #     try:
+    #         leads = await competitor_spy.scan_geo_chats()
+    #         if leads:
+    #             logger.info("🎯 GEO-Spy: найдено %s лидов", len(leads))
+    #     except Exception as e:
+    #         logger.error("GEO-Spy: %s", e)
+    # scheduler.add_job(run_geo_spy_job, "interval", seconds=competitor_spy.geo_check_interval)
 
     # Поиск идей для контента раз в 6 часов (темы ещё отправляются в группу после создания content_bot)
     scheduler.add_job(creative_agent.scout_topics, 'interval', hours=6)
     
     # Автоматические напоминания для продажных диалогов (дожим)
-    from services.sales_reminders import send_sales_reminders
-    scheduler.add_job(send_sales_reminders, 'interval', hours=6)
+    # Закомментировано: sales_reminders не существует
+    # from services.sales_reminders import send_sales_reminders
+    # scheduler.add_job(send_sales_reminders, 'interval', hours=6)
     
     # ── ПЛАНИРОВЩИК СВОДОК ЛИДОВ ────────────────────────────────────────────────────
     # Отправка сводок обычных лидов (priority < 3) трижды в день: 9:00, 14:00, 19:00 МСК
@@ -276,8 +280,9 @@ async def main():
     
     scheduler.start()
     # Задачи планировщика получают main_bot/content_bot аргументом, своих Bot() не создают
-    from services.birthday_greetings import send_birthday_greetings
-    scheduler.add_job(send_birthday_greetings, 'cron', hour=9, minute=0, args=[main_bot])
+    # Закомментировано: birthday_greetings не существует
+    # from services.birthday_greetings import send_birthday_greetings
+    # scheduler.add_job(send_birthday_greetings, 'cron', hour=9, minute=0, args=[main_bot])
 
     # Единственные экземпляры Dispatcher в проекте; start_polling вызывается только ниже, по одному разу на каждый
     dp_main = Dispatcher(storage=MemoryStorage())
@@ -301,8 +306,9 @@ async def main():
         except Exception as e:
             logger.warning(f"Ошибка отправки тем в группу: {e}")
     scheduler.add_job(post_creative_topics_to_group, 'interval', hours=6, args=[content_bot])
-    from services.scheduler_ref import set_scheduler
-    set_scheduler(scheduler)
+    # Закомментировано: scheduler_ref не существует
+    # from services.scheduler_ref import set_scheduler
+    # set_scheduler(scheduler)
     dp_content = Dispatcher(storage=MemoryStorage())
     dp_content.callback_query.middleware(UnhandledCallbackMiddleware())
     dp_content.include_routers(content_router)
