@@ -94,8 +94,12 @@ class AutoPoster:
                     # Используем message_template напрямую (без GPT)
                     message_text = holiday['message_template']
 
+                    # Экранируем HTML-спецсимволы для безопасной вставки в HTML
+                    holiday_name_escaped = escape(holiday['name'])
+                    message_text_escaped = escape(message_text)
+
                     # Добавляем название праздника в начало
-                    full_message = f"🎉 <b>{holiday['name']}</b>\n\n{message_text}"
+                    full_message = f"🎉 <b>{holiday_name_escaped}</b>\n\n{message_text_escaped}"
 
                     # Публикуем в канал
                     logger.info(f"Публикуем поздравление с {holiday['name']}")
