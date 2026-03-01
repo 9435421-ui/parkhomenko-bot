@@ -151,6 +151,10 @@ async def main():
     scheduler.start()
     logger.info("✅ Планировщик запущен")
     
+    # Принудительный запуск LeadHunter сразу после старта
+    logger.info("🏹 LeadHunter: принудительный запуск первого цикла...")
+    asyncio.create_task(hunter.hunt())
+    
     # Запускаем polling
     await dp_main.start_polling(main_bot, skip_updates=True)
     

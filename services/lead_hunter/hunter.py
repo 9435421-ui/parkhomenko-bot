@@ -1117,7 +1117,20 @@ class LeadHunter:
         _business_hours = self._is_business_hours_msk()
         logger.info("🕐 Бизнес-часы МСК: %s", "да (09:00–20:00)" if _business_hours else "нет — горячие лиды не отправляются")
 
+        STOP_WORDS = ['продам', 'вакансия', 'ищу работу', 'резюме', 'подпишитесь', 'реклама', 'курсы', 'обучение', 'скидки']
+        
         for post in all_posts:
+            text = getattr(post, "text", "") or ""
+            text_lower = text.lower()
+            
+            # Фильтрация по стоп-словам с исключением для "цена/сколько стоит"
+            has_stop_word = any(sw in text_lower for sw in STOP_WORDS)
+            is_priority_exception = any(exc in text_lower for exc in ["цена", "сколько стоит"])
+            
+            if has_stop_word and not is_priority_exception:
+                logger.debug(f"🔇 Пост пропущен (стоп-слово): {text[:50]}...")
+                continue
+
             _post_key = f"{getattr(post, 'source_type', '')}:{getattr(post, 'source_id', '')}:{getattr(post, 'post_id', '')}"
             if _post_key in _seen_post_keys:
                 logger.debug("⏭️ Анти-дубль: post %s уже обработан в этом цикле", _post_key)
