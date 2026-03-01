@@ -97,10 +97,12 @@ async def main():
     # 3. Проверка связей (те же экземпляры main_bot, content_bot — сессии не закрываем)
     logger.info("🔍 Проверка связей...")
     try:
-        from config import CHANNEL_ID_TERION, LEADS_GROUP_CHAT_ID, THREAD_ID_HOT_LEADS
+        from config import CHANNEL_ID_TERION, CHANNEL_ID, LEADS_GROUP_CHAT_ID, THREAD_ID_HOT_LEADS
+        # Используем CHANNEL_ID_TERION или CHANNEL_ID как fallback
+        terion_channel = CHANNEL_ID_TERION or CHANNEL_ID
         try:
-            if CHANNEL_ID_TERION:
-                await main_bot.get_chat(CHANNEL_ID_TERION)
+            if terion_channel:
+                await main_bot.get_chat(terion_channel)
                 logger.info("✅ Канал TERION: OK")
             else:
                 logger.warning("⚠️ Канал TERION: не настроен в .env")
@@ -114,7 +116,7 @@ async def main():
         if THREAD_ID_HOT_LEADS:
             logger.info(f"✅ Топик горячих лидов (THREAD_ID_HOT_LEADS={THREAD_ID_HOT_LEADS}): настроен")
         else:
-            logger.warning("⚠️ Топик горячих лидов (THREAD_ID_HOT_LEADS): не настроен")
+            logger.info("ℹ️ Топик горячих лидов (THREAD_ID_HOT_LEADS): не используется")
     except Exception as e:
         logger.error(f"Ошибка проверки связей: {e}")
 
@@ -192,7 +194,7 @@ async def main():
     # Поиск клиентов каждые 30 минут (каналы TG + VK)
     # Использует обновленный ScoutParser с фильтрами анти-спама и режимом модерации
     # Все найденные лиды отправляются в админ-канал (топик THREAD_ID_HOT_LEADS) для модерации
-    scheduler.add_job(hunter.hunt, 'interval', minutes=30)
+    scheduler.add_job(hunter.hunt, 'interval', minutes=5)
 
     # Гео-шпион 24/7: чаты ЖК (Перекрёсток, Самолёт, ПИК и т.д.) — каждые 5 мин
     async def run_geo_spy_job():
