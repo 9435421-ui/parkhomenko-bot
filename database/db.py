@@ -4,6 +4,7 @@
 import aiosqlite
 import os
 import logging
+import shutil
 from pathlib import Path
 from typing import Optional, Dict, List
 from datetime import datetime
@@ -49,19 +50,36 @@ class Database:
     async def connect(self):
         """Подключение к базе данных с режимом WAL для избежания ошибки 'database is locked'"""
         os.makedirs(os.path.dirname(self.db_path), exist_ok=True)
-        # ── WAL режим для избежания "database is locked" при параллельных запросах ─────
-        # timeout=30 заставит ждать освобождения базы до 30 секунд вместо немедленной ошибки
-        self.conn = await aiosqlite.connect(self.db_path, timeout=30.0)
-        self.conn.row_factory = aiosqlite.Row
-        # Включаем WAL режим для поддержки параллельных чтений
-        async with self.conn.cursor() as cursor:
-            # await cursor.execute("PRAGMA journal_mode=WAL")  # Удаляем или комментируем эту строку
-            await cursor.execute("PRAGMA busy_timeout=5000")  # Ожидание 5 секунд вместо блокировки
-            await cursor.execute("PRAGMA synchronous=NORMAL")  # Баланс между производительностью и надежностью
-            await self.conn.commit()
-        await self._create_tables()
-        await self._migrate_sources_table()
-        logger.info(f"✅ База данных подключена (WAL режим): {self.db_path}")
+        
+        try:
+            # ── WAL режим для избежания "database is locked" при параллельных запросах ─────
+            # timeout=30 заставит ждать освобождения базы до 30 секунд вместо немедленной ошибки
+            self.conn = await aiosqlite.connect(self.db_path, timeout=30.0)
+            self.conn.row_factory = aiosqlite.Row
+            # Включаем WAL режим для поддержки параллельных чтений
+            async with self.conn.cursor() as cursor:
+                await cursor.execute("PRAGMA journal_mode=WAL")  # Включаем WAL режим
+                await cursor.execute("PRAGMA busy_timeout=5000")  # Ожидание 5 секунд вместо блокировки
+                await cursor.execute("PRAGMA synchronous=NORMAL")  # Баланс между производительностью и надежностью
+                await self.conn.commit()
+            await self._create_tables()
+            await self._migrate_sources_table()
+            logger.info(f"✅ База данных подключена (WAL режим): {self.db_path}")
+        except (aiosqlite.DatabaseError, Exception) as e:
+            logger.error(f"❌ Ошибка базы данных при подключении: {e}")
+            if os.path.exists(self.db_path):
+                backup_path = f"{self.db_path}.bak_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+                logger.warning(f"⚠️ База повреждена. Создаю бэкап {backup_path} и новую БД.")
+                try:
+                    if self.conn:
+                        await self.conn.close()
+                except:
+                    pass
+                shutil.move(self.db_path, backup_path)
+                # Рекурсивный вызов для создания новой чистой базы
+                await self.connect()
+            else:
+                raise e
     
     async def close(self):
         if self.conn:
