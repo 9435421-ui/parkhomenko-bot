@@ -102,10 +102,18 @@ def load_env():
     """Загрузка переменных окружения из .env файла"""
     try:
         from dotenv import load_dotenv
-        load_dotenv()
-        logger.info("Переменные окружения загружены из .env")
+        env_path = os.path.join(os.getcwd(), '.env')
+        logger.info(f"🔍 Текущая директория: {os.getcwd()}")
+        logger.info(f"🔍 Проверка наличия .env: {os.path.exists(env_path)}")
+        
+        if os.path.exists(env_path):
+            load_dotenv(env_path)
+            logger.info(f"✅ Переменные окружения загружены из {env_path}")
+        else:
+            logger.warning(f"⚠️ Файл {env_path} не найден")
+            
     except ImportError:
-        logger.warning("Модуль python-dotenv не установлен, переменные окружения не загружены")
+        logger.warning("Модуль python-dotenv не установлен")
         return False
     except Exception as e:
         logger.error(f"Ошибка загрузки .env файла: {e}")
