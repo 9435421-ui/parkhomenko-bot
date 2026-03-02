@@ -10,10 +10,21 @@ import asyncio
 from pathlib import Path
 from datetime import datetime
 
-from aiogram import Bot, Dispatcher
-from aiogram.fsm.storage.memory import MemoryStorage
-from aiogram.client.default import DefaultBotProperties
-from aiogram.client.webhook import WebhookInfo
+try:
+    from aiogram import Bot, Dispatcher
+    try:
+        # aiogram 3.x
+        from aiogram.fsm.storage.memory import MemoryStorage
+        from aiogram.client.default import DefaultBotProperties
+        AIOGRAM_VERSION = 3
+    except ImportError:
+        # aiogram 2.x
+        from aiogram.contrib.fsm_storage.memory import MemoryStorage
+        AIOGRAM_VERSION = 2
+except ImportError:
+    logger.error("❌ aiogram не установлен")
+    sys.exit(1)
+
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
 from config import BOT_TOKEN, LEADS_GROUP_CHAT_ID
@@ -60,8 +71,10 @@ def _release_lock():
 async def clear_webhook(bot: Bot):
     """Очистка webhook перед запуском polling"""
     try:
-        webhook_info: WebhookInfo = await bot.get_webhook_info()
-        if webhook_info.url:
+        webhook_info = await bot.get_webhook_info()
+        # В aiogram 2.x и 3.x структура WebhookInfo может отличаться,
+        # но поле url есть в обоих
+        if hasattr(webhook_info, 'url') and webhook_info.url:
             logger.info(f"⚠️ Очистка webhook: {webhook_info.url}")
             await bot.delete_webhook()
             logger.info("✅ Webhook очищен")
@@ -101,9 +114,14 @@ async def start_anton_bot():
     _acquire_lock()
 
     # Создаем бота АНТОН
-    main_bot = Bot(token=BOT_TOKEN or "", default=DefaultBotProperties(parse_mode="HTML"))
-    storage = MemoryStorage()
-    dp_main = Dispatcher(storage=storage)
+    if AIOGRAM_VERSION == 3:
+        main_bot = Bot(token=BOT_TOKEN or "", default=DefaultBotProperties(parse_mode="HTML"))
+        storage = MemoryStorage()
+        dp_main = Dispatcher(storage=storage)
+    else:
+        main_bot = Bot(token=BOT_TOKEN or "", parse_mode="HTML")
+        storage = MemoryStorage()
+        dp_main = Dispatcher(main_bot, storage=storage)
 
     # Очистка webhook
     await clear_webhook(main_bot)
