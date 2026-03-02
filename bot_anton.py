@@ -1,17 +1,12 @@
 """
-Основной бот ТЕРИОН - aiogram 3.x + Content Factory.
-Поддержка независимого запуска ботов:
-- anton: консультант по перепланировкам
-- content: контент и посты
-
-aiogram 3.x версия для Python 3.12
+Бот АНТОН - основной консультант по перепланировкам
+aiogram 3.x версия
 """
 import logging
 import os
 import signal
 import sys
 import asyncio
-import argparse
 from pathlib import Path
 from datetime import datetime
 
@@ -21,7 +16,7 @@ from aiogram.client.default import DefaultBotProperties
 from aiogram.client.webhook import WebhookInfo
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
-from config import BOT_TOKEN, CONTENT_BOT_TOKEN, LEADS_GROUP_CHAT_ID
+from config import BOT_TOKEN, LEADS_GROUP_CHAT_ID
 from handlers import register_all_handlers
 from database import db
 from utils import kb
@@ -32,7 +27,7 @@ from services.publisher import AutoPoster
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
-LOCK_FILE = Path(__file__).resolve().parent / "bot.lock"
+LOCK_FILE = Path(__file__).resolve().parent / "bot_anton.lock"
 
 
 def _acquire_lock():
@@ -170,89 +165,9 @@ async def start_anton_bot():
     _release_lock()
 
 
-async def start_content_bot():
-    """Запуск бота ДОМ ГРАНД (контент и посты)"""
-    logger.info("🚀 Запуск бота ДОМ ГРАНД...")
-    _acquire_lock()
-
-    # Создаем бота ДОМ ГРАНД
-    content_bot = Bot(token=CONTENT_BOT_TOKEN or "", default=DefaultBotProperties(parse_mode="HTML"))
-    storage = MemoryStorage()
-    dp_content = Dispatcher(storage=storage)
-
-    # Очистка webhook
-    await clear_webhook(content_bot)
-
-    # Инициализация publisher
-    from services import publisher
-    publisher.publisher = AutoPoster(content_bot)
-
-    # Инициализация ресурсов
-    await db.connect()
-    await kb.index_documents()
-
-    # Проверка YandexGPT
-    logger.info("🧠 Проверка YandexGPT...")
-    try:
-        from config import YANDEX_API_KEY, FOLDER_ID
-        if YANDEX_API_KEY and FOLDER_ID:
-            import aiohttp
-            async with aiohttp.ClientSession() as session:
-                url = "https://llm.api.cloud.yandex.net/foundationModels/v1/completion"
-                headers = {
-                    "Authorization": f"Api-Key {YANDEX_API_KEY}",
-                    "Content-Type": "application/json"
-                }
-                payload = {
-                    "modelUri": f"gpt://{FOLDER_ID}/yandexgpt-lite",
-                    "completionOptions": {"temperature": 0.3, "maxTokens": 10},
-                    "messages": [{"role": "user", "text": "Тест"}]
-                }
-                async with session.post(url, headers=headers, json=payload, timeout=10) as resp:
-                    if resp.status == 200:
-                        logger.info("✅ YandexGPT: подключение успешно")
-                    else:
-                        logger.warning(f"⚠️ YandexGPT: ошибка HTTP {resp.status}")
-        else:
-            logger.warning("⚠️ YANDEX_API_KEY или FOLDER_ID не настроены")
-    except Exception as e:
-        logger.warning(f"⚠️ YandexGPT не отвечает, лиды будут сырыми")
-
-    # Инициализация планировщика
-    scheduler = AsyncIOScheduler()
-    scheduler.add_job(check_and_publish_scheduled_posts, "interval", hours=1)
-
-    scheduler.start()
-    logger.info("✅ Планировщик запущен")
-
-    # Запускаем polling для ДОМ ГРАНД
-    await dp_content.start_polling(content_bot, skip_updates=True)
-
-    # Очистка при завершении
-    scheduler.shutdown()
-    _release_lock()
-
-
-async def main():
-    parser = argparse.ArgumentParser(description="TERION Bot Launcher")
-    parser.add_argument("--anton", action="store_true", help="Запустить бота АНТОН (консультант)")
-    parser.add_argument("--content", action="store_true", help="Запустить бота ДОМ ГРАНД (контент)")
-    args = parser.parse_args()
-
-    if not args.anton and not args.content:
-        parser.print_help()
-        sys.exit(1)
-
-    if args.anton:
-        await start_anton_bot()
-
-    if args.content:
-        await start_content_bot()
-
-
 if __name__ == "__main__":
     try:
-        asyncio.run(main())
+        asyncio.run(start_anton_bot())
     except KeyboardInterrupt:
-        logger.info("🛑 Бот остановлен")
+        logger.info("🛑 Бот АНТОН остановлен")
         sys.exit(0)

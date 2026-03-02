@@ -3,33 +3,74 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
+# Bot tokens
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 CONTENT_BOT_TOKEN = os.getenv("CONTENT_BOT_TOKEN")
+
+# VK API
 VK_API_TOKEN = os.getenv("VK_USER_TOKEN") or os.getenv("VK_TOKEN")
 VK_GROUP_ID = os.getenv("VK_GROUP_ID")
+
 # Telegram Client API (for Telethon - discovery and parsing)
 api_id_str = os.getenv("API_ID")
 API_ID = int(api_id_str) if api_id_str else None
 API_HASH = os.getenv("API_HASH")
+
+# Chat IDs
 LEADS_GROUP_CHAT_ID = int(os.getenv("LEADS_GROUP_CHAT_ID", "-1003370698977"))
+ADMIN_GROUP_ID = int(os.getenv("ADMIN_GROUP_ID", "0"))
+THREAD_ID_HOT_LEADS = int(os.getenv("THREAD_ID_HOT_LEADS", "0"))
+
+# AI services
+YANDEX_API_KEY = os.getenv("YANDEX_API_KEY")
+FOLDER_ID = os.getenv("FOLDER_ID")
+OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY")
+
+# Database
+DATABASE_PATH = os.getenv("DATABASE_PATH", "database/terion.db")
+
+# Admin settings
+ADMIN_ID = int(os.getenv("ADMIN_ID", "0"))
+JULIA_USER_ID = int(os.getenv("JULIA_USER_ID", "0"))
+JULIA_CONTACT = os.getenv("JULIA_CONTACT", "@terion_expert")
+
+# Thread IDs
+THREAD_ID_LOGS = int(os.getenv("THREAD_ID_LOGS", "88"))
+THREAD_ID_DRAFTS = int(os.getenv("THREAD_ID_DRAFTS", "85"))
+THREAD_ID_SEASONAL = int(os.getenv("THREAD_ID_SEASONAL", "87"))
+THREAD_ID_TRENDS_SEASON = int(os.getenv("THREAD_ID_TRENDS_SEASON", "0"))
+THREAD_ID_CONTENT_PLAN = int(os.getenv("THREAD_ID_CONTENT_PLAN", "0"))
+
+# VK quiz
+VK_QUIZ_LINK = os.getenv("VK_QUIZ_LINK", "https://vk.com/app123456")
+CONTENT_HASHTAGS = os.getenv("CONTENT_HASHTAGS", "#перепланировка #москва")
+
+# Channel configuration
+CHANNEL_ID_TERION_STR = os.getenv("CHANNEL_ID_TERION")
+CHANNEL_ID_TERION = parse_channel_id(CHANNEL_ID_TERION_STR) if CHANNEL_ID_TERION_STR else None
+
+# Channel display information
+CHANNEL_NAME = os.getenv("TARGET_CHANNEL_USERNAME", "@terion_channel")
+_channel_username = CHANNEL_NAME.lstrip("@") if CHANNEL_NAME.startswith("@") else CHANNEL_NAME
+CHANNEL_LINK = os.getenv("TARGET_CHANNEL_LINK", f"https://t.me/{_channel_username}")
 
 def parse_channel_id(channel_id_str: str | None) -> int | str | None:
     """
     Эталонная функция для парсинга ID канала из строки.
     Поддерживает как числовой ID (например, -1001234567890), так и username (например, @channel_name).
-    
+
     Args:
         channel_id_str: Строка с ID канала или username, может быть None или пустой строкой
-        
+
     Returns:
         int если это числовой ID, str если это username (начинается с @), None если пустая строка или None
-        
+
     Note:
         Функция не проверяет значение на 0 - если явно задан 0, значит так нужно для тестов или безопасности.
     """
     if not channel_id_str:
         return None
-    
+
     if channel_id_str.startswith("@"):
         # Если передан username канала (например, @channel_name), используем как строку
         return channel_id_str
@@ -43,6 +84,7 @@ def parse_channel_id(channel_id_str: str | None) -> int | str | None:
                 f"или username канала (например, @channel_name), получено: {channel_id_str}"
             )
 
+# Channel IDs for different purposes
 CHANNEL_ID_STR = os.getenv("CHANNEL_ID")
 CHANNEL_ID = parse_channel_id(CHANNEL_ID_STR) if CHANNEL_ID_STR else None
 
@@ -51,39 +93,7 @@ CONTENT_CHANNEL_ID = parse_channel_id(CONTENT_CHANNEL_ID_STR) if CONTENT_CHANNEL
 
 NOTIFICATIONS_CHANNEL_ID_STR = os.getenv("NOTIFICATIONS_CHANNEL_ID")
 NOTIFICATIONS_CHANNEL_ID = parse_channel_id(NOTIFICATIONS_CHANNEL_ID_STR) if NOTIFICATIONS_CHANNEL_ID_STR else None
+
 THREAD_ID_KVARTIRY = int(os.getenv("THREAD_ID_KVARTIRY", "0"))
 THREAD_ID_KOMMERCIA = int(os.getenv("THREAD_ID_KOMMERCIA", "0"))
 THREAD_ID_DOMA = int(os.getenv("THREAD_ID_DOMA", "0"))
-YANDEX_API_KEY = os.getenv("YANDEX_API_KEY")
-FOLDER_ID = os.getenv("FOLDER_ID")
-OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY")
-# DATABASE_URL оставлен для обратной совместимости, но рекомендуется использовать DATABASE_PATH
-DATABASE_URL = os.getenv("DATABASE_URL")
-UPLOAD_PLANS_DIR = os.getenv("UPLOAD_PLANS_DIR")
-UPLOAD_DIR = os.getenv("UPLOAD_DIR")
-ADMIN_ID = int(os.getenv("ADMIN_ID", "0"))
-ADMIN_GROUP_ID = int(os.getenv("ADMIN_GROUP_ID", "0"))
-MINI_APP_URL = os.getenv("MINI_APP_URL")
-JULIA_USER_ID = int(os.getenv("JULIA_USER_ID", "0"))
-JULIA_CONTACT = os.getenv("JULIA_CONTACT", "@terion_expert")
-THREAD_ID_LOGS = int(os.getenv("THREAD_ID_LOGS", "88"))
-THREAD_ID_DRAFTS = int(os.getenv("THREAD_ID_DRAFTS", "85"))
-THREAD_ID_SEASONAL = int(os.getenv("THREAD_ID_SEASONAL", "87"))
-THREAD_ID_TRENDS_SEASON = int(os.getenv("THREAD_ID_TRENDS_SEASON", "0"))
-THREAD_ID_CONTENT_PLAN = int(os.getenv("THREAD_ID_CONTENT_PLAN", "0"))
-THREAD_ID_HOT_LEADS = int(os.getenv("THREAD_ID_HOT_LEADS", "0"))
-VK_QUIZ_LINK = os.getenv("VK_QUIZ_LINK", "https://vk.com/app123456")
-CONTENT_HASHTAGS = os.getenv("CONTENT_HASHTAGS", "#перепланировка #москва")
-
-# Channel ID для TERION (используется Discovery и другими модулями)
-CHANNEL_ID_TERION_STR = os.getenv("CHANNEL_ID_TERION")
-CHANNEL_ID_TERION = parse_channel_id(CHANNEL_ID_TERION_STR) if CHANNEL_ID_TERION_STR else None
-
-# Database path - используем DATABASE_PATH из .env, fallback на стандартный путь
-DATABASE_PATH = os.getenv("DATABASE_PATH", "database/terion.db")
-
-# Channel display information (для отображения в интерфейсе)
-CHANNEL_NAME = os.getenv("TARGET_CHANNEL_USERNAME", "@terion_channel")
-# Формируем ссылку из username, если не задана явно
-_channel_username = CHANNEL_NAME.lstrip("@") if CHANNEL_NAME.startswith("@") else CHANNEL_NAME
-CHANNEL_LINK = os.getenv("TARGET_CHANNEL_LINK", f"https://t.me/{_channel_username}")
