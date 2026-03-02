@@ -39,6 +39,7 @@ data/*.db
 *.log
 logs/
 bot.log
+*.log.*
 
 # IDE
 .vscode/
@@ -47,6 +48,9 @@ bot.log
 *.swo
 *~
 .DS_Store
+Thumbs.db
+ehthumbs.db
+Desktop.ini
 
 # Uploads
 uploads/
@@ -54,6 +58,8 @@ uploads_plans/
 temp/
 tmp/
 
+# hunter_standalone (не игнорировать)
+hunter_standalone/
 # Telegram
 nohup.out
 # Telethon session files (содержат авторизационные данные)
