@@ -97,3 +97,6 @@ NOTIFICATIONS_CHANNEL_ID = parse_channel_id(NOTIFICATIONS_CHANNEL_ID_STR) if NOT
 THREAD_ID_KVARTIRY = int(os.getenv("THREAD_ID_KVARTIRY", "0"))
 THREAD_ID_KOMMERCIA = int(os.getenv("THREAD_ID_KOMMERCIA", "0"))
 THREAD_ID_DOMA = int(os.getenv("THREAD_ID_DOMA", "0"))
+
+# Mini App URL
+MINI_APP_URL = os.getenv("MINI_APP_URL", "https://t.me/Parkhovenko_i_kompaniya_bot")
