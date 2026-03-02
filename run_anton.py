@@ -16,6 +16,28 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+def load_env():
+    """Загрузка переменных окружения из .env файла"""
+    try:
+        from dotenv import load_dotenv
+        env_path = os.path.join(os.getcwd(), '.env')
+        logger.info(f"🔍 Текущая директория: {os.getcwd()}")
+        logger.info(f"🔍 Проверка наличия .env: {os.path.exists(env_path)}")
+        
+        if os.path.exists(env_path):
+            load_dotenv(env_path)
+            logger.info(f"✅ Переменные окружения загружены из {env_path}")
+        else:
+            logger.warning(f"⚠️ Файл {env_path} не найден")
+            
+    except ImportError:
+        logger.warning("Модуль python-dotenv не установлен")
+        return False
+    except Exception as e:
+        logger.error(f"Ошибка загрузки .env файла: {e}")
+        return False
+    return True
+
 def check_and_fix_database():
     """Проверка и восстановление базы данных"""
     db_path = Path("database/terion.db")
@@ -88,6 +110,9 @@ def check_env_variables():
 def main():
     """Основная функция запуска бота"""
     logger.info("🚀 Запуск бота АНТОН...")
+    
+    # Загружаем переменные окружения
+    load_env()
     
     # Проверяем и восстанавливаем базу данных
     if not check_and_fix_database():
