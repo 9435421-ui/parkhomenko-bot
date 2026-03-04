@@ -10,7 +10,7 @@ from datetime import datetime
 class Database:
     """Класс для работы с SQLite базой данных"""
     
-    def __init__(self, db_path: str = "database/bot.db"):
+    def __init__(self, db_path: str = "parkhomenko_bot.db"):
         self.db_path = db_path
         self.conn: Optional[aiosqlite.Connection] = None
     
@@ -274,6 +274,25 @@ class Database:
                     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                 )
             """)
+
+            # Таблица системных логов (Self-Healing & Monitoring)
+            await cursor.execute("""
+                CREATE TABLE IF NOT EXISTS system_logs (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    level TEXT,
+                    module TEXT,
+                    message TEXT,
+                    stack_trace TEXT,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+
+            # Индексы для оптимизации поиска по чатам и лидам
+            await cursor.execute("CREATE INDEX IF NOT EXISTS idx_target_resources_status ON target_resources(status)")
+            await cursor.execute("CREATE INDEX IF NOT EXISTS idx_target_resources_platform ON target_resources(platform)")
+            await cursor.execute("CREATE INDEX IF NOT EXISTS idx_spy_leads_created ON spy_leads(created_at)")
+            await cursor.execute("CREATE INDEX IF NOT EXISTS idx_spy_leads_author ON spy_leads(author_id)")
+
             await self.conn.commit()
             for key, body in [
                 ("mji_prescription", "Срочный выезд и аудит документов"),
@@ -733,6 +752,25 @@ class Database:
                 (datetime.now(), birthday_id)
             )
             await self.conn.commit()
+
+    # === SYSTEM LOGS ===
+    async def add_system_log(self, level: str, module: str, message: str, stack_trace: str = None):
+        """Записать системную ошибку или событие в БД."""
+        async with self.conn.cursor() as cursor:
+            await cursor.execute(
+                "INSERT INTO system_logs (level, module, message, stack_trace) VALUES (?, ?, ?, ?)",
+                (level, module, message, stack_trace)
+            )
+            await self.conn.commit()
+
+    async def get_system_logs(self, limit: int = 50) -> List[Dict]:
+        """Получить последние системные логи."""
+        async with self.conn.cursor() as cursor:
+            await cursor.execute(
+                "SELECT * FROM system_logs ORDER BY created_at DESC LIMIT ?",
+                (limit,)
+            )
+            return [dict(row) for row in await cursor.fetchall()]
 
 
     # === ЦЕЛЕВЫЕ РЕСУРСЫ (Data-Driven Scout) ===

@@ -37,6 +37,20 @@ from services.image_generator import image_generator
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
+class DbLogHandler(logging.Handler):
+    """Кастомный обработчик логов для записи в БД."""
+    def emit(self, record):
+        if record.levelno >= logging.ERROR:
+            try:
+                msg = self.format(record)
+                stack = record.exc_text if record.exc_info else None
+                asyncio.create_task(db.add_system_log(record.levelname, record.name, msg, stack))
+            except:
+                pass
+
+# Добавляем обработчик в корневой логгер
+logging.getLogger().addHandler(DbLogHandler())
+
 # Аудит: видим PID, чтобы убедиться, что процесс не запускается дважды
 print(f"DEBUG: Started process with PID {os.getpid()}")
 

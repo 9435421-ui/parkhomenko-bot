@@ -23,20 +23,27 @@ async def main():
     await db.connect()
     hunter = LeadHunter()
 
-    while True:
-        try:
-            await hunter.hunt()
-        except Exception as e:
-            logger.error(f"❌ Ошибка в цикле охоты: {e}")
+    try:
+        while True:
+            try:
+                await hunter.hunt()
+            except Exception as e:
+                logger.error(f"❌ Ошибка в цикле охоты: {e}")
 
-        # Пауза 30 минут
-        logger.info("😴 Сон 30 минут до следующей охоты...")
-        await asyncio.sleep(1800)
+            # Пауза 30 минут
+            logger.info("😴 Сон 30 минут до следующей охоты...")
+            await asyncio.sleep(1800)
+    finally:
+        # Корректное закрытие сессий при выходе
+        if hasattr(hunter.parser, 'client') and hunter.parser.client:
+            await hunter.parser.client.disconnect()
+            logger.info("🔌 Сессия Telethon закрыта.")
+        await db.close()
 
 if __name__ == "__main__":
     try:
         asyncio.run(main())
-    except KeyboardInterrupt:
+    except (KeyboardInterrupt, SystemExit):
         logger.info("👋 Остановка охотника...")
     except Exception as e:
         logger.error(f"💥 Критическая ошибка: {e}")

@@ -116,6 +116,16 @@ class ScoutParser:
         r"план\s+(квартир|помещен)",
     ]
 
+    # === ЧЕРНЫЙ СПИСОК (Стоп-слова для фильтрации мусора) ===
+    STOP_WORDS = [
+        r"продам", r"куплю", r"аренда", r"сдам", r"вакансия", r"ищу\s+работу",
+        r"услуги\s+сантехника", r"маникюр", r"ресницы", r"доставка",
+        r"скидки", r"акция", r"распродажа", r"подпишись", r"розыгрыш",
+        r"крипта", r"инвестиции", r"заработок", r"удаленка",
+        r"ремонт\s+телефонов", r"компьютерная\s+помощь",
+        r"посоветуйте\s+врача", r"детский\s+сад", r"школа",
+    ]
+
     # === МАРКЕРЫ ДЕЙСТВИЯ (Intent v3.0: живой лид = вопрос + термин + маркер) ===
     COMMERCIAL_MARKERS = [
         r"стоимость",
@@ -360,9 +370,21 @@ class ScoutParser:
         if not text:
             return False
         text_lower = text.lower()
+
+        # Проверка JUNK_PHRASES (реклама услуг)
         for pat in self.JUNK_PHRASES:
             if re.search(pat, text_lower):
                 return True
+
+        # Проверка STOP_WORDS (общий мусор)
+        for pat in self.STOP_WORDS:
+            if re.search(pat, text_lower):
+                return True
+
+        # Фильтр ботов: слишком много ссылок или капс
+        if text.count("http") > 2 or text.count("@") > 2:
+            return True
+
         return False
 
     def detect_lead(self, text: str, platform: str = "telegram") -> bool:
@@ -453,7 +475,7 @@ class ScoutParser:
 
         prompt = f"""
 Ты — Антон, ИИ-ассистент компании TERION (эксперты по перепланировкам).
-Твоя задача: написать ОЧЕНЬ короткий, вежливый и экспертный комментарий к посту пользователя, который столкнулся с проблемой или вопросом по перепланировке.
+Твоя задача: написать ОЧЕНЬ короткий, вежливый и экспертный комментарий к посту пользователя, который столкнулся with проблемой или вопросом по перепланировке.
 
 Текст поста: "{post_text}"
 
@@ -555,11 +577,20 @@ class ScoutParser:
         from config import API_ID, API_HASH
 
         posts = []
-        client = TelegramClient('anton_parser', API_ID, API_HASH)
+        try:
+            from session_manager import SESSION_FILE
+            client = TelegramClient(SESSION_FILE, API_ID, API_HASH)
+            await client.connect()
+        except Exception as e:
+            logger.error(f"❌ Ошибка подключения к Telegram: {e}")
+            return []
 
-        await client.connect()
         if not await client.is_user_authorized():
             logger.error("❌ Антон не авторизован в Telegram!")
+            print("\n⚠️ ВНИМАНИЕ: Требуется авторизация аккаунта для шпиона.")
+            print("👉 Запустите команду: python3 session_manager.py")
+            print("После успешного ввода кода из Telegram перезапустите бота.\n")
+            await client.disconnect()
             return []
 
         tg_limit = int(os.getenv("SCOUT_TG_MESSAGES_LIMIT", "50"))
@@ -700,6 +731,9 @@ class ScoutParser:
                             logger.info("🏢 Режим Разведка: добавлен чат %s", link)
                         except Exception as e:
                             logger.debug("Не удалось добавить ресурс %s: %s", link, e)
+            except (asyncio.CancelledError, KeyboardInterrupt):
+                await client.disconnect()
+                raise
             except Exception as e:
                 logger.error(f"❌ Ошибка парсинга ТГ {channel['name']}: {e}")
                 self.last_scan_report.append({
@@ -742,6 +776,9 @@ class ScoutParser:
                         )
                         existing_links.add(link_to_store.rstrip("/"))
                         logger.info("🔗 Добавлен ресурс по ссылке из сообщения: %s", link_to_store)
+            except (asyncio.CancelledError, KeyboardInterrupt):
+                await client.disconnect()
+                raise
             except Exception as e:
                 logger.debug("Не удалось разрешить ссылку %s: %s", url, e)
 
@@ -1111,6 +1148,8 @@ class ScoutParser:
                         await db.set_setting("scout_vk_lead_" + str(group["id"]), datetime.now().isoformat())
                     except Exception:
                         pass
+            except (asyncio.CancelledError, KeyboardInterrupt):
+                raise
             except Exception as e:
                 logger.error(f"❌ Ошибка группы {group['name']}: {e}")
                 self.last_scan_report.append({
