@@ -49,6 +49,9 @@ THREAD_ID_KVARTIRY = int(os.getenv("THREAD_ID_KVARTIRY", "2"))
 THREAD_ID_KOMMERCIA = int(os.getenv("THREAD_ID_KOMMERCIA", "5"))
 THREAD_ID_DOMA = int(os.getenv("THREAD_ID_DOMA", "8"))
 
+# === ADMIN GROUP ===
+ADMIN_GROUP_ID = int(os.getenv("ADMIN_GROUP_ID", "0"))
+
 # Channel display information
 CHANNEL_NAME = os.getenv("TARGET_CHANNEL_USERNAME", "@terion_channel")
 _channel_username = CHANNEL_NAME.lstrip("@") if CHANNEL_NAME.startswith("@") else CHANNEL_NAME
