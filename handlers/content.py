@@ -34,7 +34,6 @@ import io
 from database import db
 from handlers.vk_publisher import VKPublisher
 from content_agent import ContentAgent
-from hunter_standalone import HunterDatabase
 from config import (
     CONTENT_BOT_TOKEN,
     BOT_TOKEN,
