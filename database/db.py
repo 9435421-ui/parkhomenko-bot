@@ -3,83 +3,24 @@
 """
 import aiosqlite
 import os
-import logging
-import shutil
-from pathlib import Path
 from typing import Optional, Dict, List
 from datetime import datetime
-
-logger = logging.getLogger(__name__)
 
 
 class Database:
     """Класс для работы с SQLite базой данных"""
     
-    def __init__(self, db_path: str = None):
-        """
-        Инициализация базы данных.
-        
-        Логика выбора пути:
-        1. Если db_path передан явно - используем его
-        2. Если DATABASE_PATH задан в окружении - используем его точно как есть
-        3. Иначе - используем дефолтный путь database/terion.db (или database/bot.db если terion.db не существует)
-        """
-        if db_path is None:
-            # Проверяем переменную окружения DATABASE_PATH
-            env_db_path = os.getenv("DATABASE_PATH")
-            if env_db_path:
-                # Если переменная задана - используем её точно как есть
-                db_path = env_db_path
-            else:
-                # Fallback: проверяем существование terion.db, иначе используем bot.db
-                terion_path = Path("database/terion.db")
-                bot_path = Path("database/bot.db")
-                
-                if terion_path.exists():
-                    db_path = str(terion_path)
-                elif bot_path.exists():
-                    db_path = str(bot_path)
-                else:
-                    # Если ни один файл не существует, используем terion.db по умолчанию
-                    db_path = str(terion_path)
-        
-        # Нормализуем путь для надежности
-        self.db_path = str(Path(db_path).resolve())
+    def __init__(self, db_path: str = "parkhomenko_bot.db"):
+        self.db_path = db_path
         self.conn: Optional[aiosqlite.Connection] = None
     
     async def connect(self):
-        """Подключение к базе данных с режимом WAL для избежания ошибки 'database is locked'"""
+        """Подключение к базе данных"""
         os.makedirs(os.path.dirname(self.db_path), exist_ok=True)
-        
-        try:
-            # ── WAL режим для избежания "database is locked" при параллельных запросах ─────
-            # timeout=30 заставит ждать освобождения базы до 30 секунд вместо немедленной ошибки
-            self.conn = await aiosqlite.connect(self.db_path, timeout=30.0)
-            self.conn.row_factory = aiosqlite.Row
-            # Включаем WAL режим для поддержки параллельных чтений
-            async with self.conn.cursor() as cursor:
-                await cursor.execute("PRAGMA journal_mode=WAL")  # Включаем WAL режим
-                await cursor.execute("PRAGMA busy_timeout=5000")  # Ожидание 5 секунд вместо блокировки
-                await cursor.execute("PRAGMA synchronous=NORMAL")  # Баланс между производительностью и надежностью
-                await self.conn.commit()
-            await self._create_tables()
-            await self._migrate_sources_table()
-            logger.info(f"✅ База данных подключена (WAL режим): {self.db_path}")
-        except (aiosqlite.DatabaseError, Exception) as e:
-            logger.error(f"❌ Ошибка базы данных при подключении: {e}")
-            if os.path.exists(self.db_path):
-                backup_path = f"{self.db_path}.bak_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
-                logger.warning(f"⚠️ База повреждена. Создаю бэкап {backup_path} и новую БД.")
-                try:
-                    if self.conn:
-                        await self.conn.close()
-                except:
-                    pass
-                shutil.move(self.db_path, backup_path)
-                # Рекурсивный вызов для создания новой чистой базы
-                await self.connect()
-            else:
-                raise e
+        self.conn = await aiosqlite.connect(self.db_path)
+        self.conn.row_factory = aiosqlite.Row
+        await self._create_tables()
+        print(f"✅ База данных подключена: {self.db_path}")
     
     async def close(self):
         if self.conn:
@@ -173,35 +114,11 @@ class Database:
                     publish_date TIMESTAMP,
                     status TEXT DEFAULT 'draft',
                     image_url TEXT,
-                    image_prompt TEXT,
                     admin_id INTEGER DEFAULT NULL,
                     published_at TIMESTAMP DEFAULT NULL,
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                 )
             """)
-            # Миграция: добавление поля image_prompt если его нет
-            try:
-                await cursor.execute("PRAGMA table_info(content_plan)")
-                columns = await cursor.fetchall()
-                column_names = [col_info[1] for col_info in columns]
-                if "image_prompt" not in column_names:
-                    await cursor.execute("ALTER TABLE content_plan ADD COLUMN image_prompt TEXT")
-                    await self.conn.commit()
-                    logger.debug("✅ Добавлена колонка image_prompt в content_plan")
-            except Exception as e:
-                logger.warning(f"Ошибка при проверке image_prompt: {e}")
-            
-            # Миграция: добавление поля updated_at если его нет
-            try:
-                await cursor.execute("PRAGMA table_info(content_plan)")
-                columns = await cursor.fetchall()
-                column_names = [col_info[1] for col_info in columns]
-                if "updated_at" not in column_names:
-                    await cursor.execute("ALTER TABLE content_plan ADD COLUMN updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP")
-                    await self.conn.commit()
-                    logger.debug("✅ Добавлена колонка updated_at в content_plan")
-            except Exception as e:
-                logger.warning(f"⚠️ Ошибка при добавлении колонки image_prompt: {e}")
             
             # Таблица для дней рождения клиентов
             await cursor.execute("""
@@ -300,23 +217,18 @@ class Database:
                 await self.conn.commit()
             except Exception:
                 pass
-            # ── DB MIGRATION: Автоматическое добавление полей pain_stage и priority ───
-            # Проверяем наличие полей перед добавлением (избегаем ошибок при повторном запуске)
+            # Миграция: колонка last_post_id в target_resources
+            try:
+                await cursor.execute("ALTER TABLE target_resources ADD COLUMN last_post_id INTEGER DEFAULT 0")
+                await self.conn.commit()
+            except Exception:
+                pass
+            # Миграция spy_leads: pain_stage, priority_score
             for col, ctype in [("pain_stage", "TEXT"), ("priority_score", "INTEGER")]:
                 try:
-                    # Проверяем, существует ли колонка
-                    await cursor.execute("PRAGMA table_info(spy_leads)")
-                    columns = await cursor.fetchall()
-                    column_names = [col_info[1] for col_info in columns]
-                    
-                    if col not in column_names:
-                        await cursor.execute(f"ALTER TABLE spy_leads ADD COLUMN {col} {ctype}")
-                        await self.conn.commit()
-                        logger.debug(f"✅ Добавлена колонка {col} в spy_leads")
-                    else:
-                        logger.debug(f"ℹ️ Колонка {col} уже существует в spy_leads")
-                except Exception as e:
-                    logger.warning(f"⚠️ Ошибка при добавлении колонки {col} в spy_leads: {e}")
+                    await cursor.execute(f"ALTER TABLE spy_leads ADD COLUMN {col} {ctype}")
+                    await self.conn.commit()
+                except Exception:
                     pass
             # Data-Driven Scout: status (pending/active/archived), platform, geo_tag, participants_count
             try:
@@ -353,24 +265,6 @@ class Database:
                 await self.conn.commit()
             except Exception:
                 pass
-            # Миграция: колонка priority для приоритета ресурса (1-10)
-            try:
-                await cursor.execute("ALTER TABLE target_resources ADD COLUMN priority INTEGER DEFAULT 5")
-                await self.conn.commit()
-            except Exception:
-                pass
-            # Миграция: колонка last_scanned_at для отслеживания последнего сканирования
-            try:
-                await cursor.execute("ALTER TABLE target_resources ADD COLUMN last_scanned_at TIMESTAMP NULL")
-                await self.conn.commit()
-            except Exception:
-                pass
-            # Миграция: колонка last_lead_at для отслеживания времени последнего найденного лида
-            try:
-                await cursor.execute("ALTER TABLE target_resources ADD COLUMN last_lead_at TIMESTAMP NULL")
-                await self.conn.commit()
-            except Exception:
-                pass
             # Модуль «Ассистент Продаж»: скрипты подсказок для карточки лида
             await cursor.execute("""
                 CREATE TABLE IF NOT EXISTS sales_templates (
@@ -380,6 +274,25 @@ class Database:
                     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                 )
             """)
+
+            # Таблица системных логов (Self-Healing & Monitoring)
+            await cursor.execute("""
+                CREATE TABLE IF NOT EXISTS system_logs (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    level TEXT,
+                    module TEXT,
+                    message TEXT,
+                    stack_trace TEXT,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+
+            # Индексы для оптимизации поиска по чатам и лидам
+            await cursor.execute("CREATE INDEX IF NOT EXISTS idx_target_resources_status ON target_resources(status)")
+            await cursor.execute("CREATE INDEX IF NOT EXISTS idx_target_resources_platform ON target_resources(platform)")
+            await cursor.execute("CREATE INDEX IF NOT EXISTS idx_spy_leads_created ON spy_leads(created_at)")
+            await cursor.execute("CREATE INDEX IF NOT EXISTS idx_spy_leads_author ON spy_leads(author_id)")
+
             await self.conn.commit()
             for key, body in [
                 ("mji_prescription", "Срочный выезд и аудит документов"),
@@ -390,85 +303,6 @@ class Database:
                     (key, body),
                 )
             await self.conn.commit()
-            
-            # Таблица sources для Telethon (источники для мониторинга)
-            await cursor.execute("""
-                CREATE TABLE IF NOT EXISTS sources (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    type TEXT NOT NULL,
-                    source_id TEXT NOT NULL,
-                    name TEXT,
-                    category TEXT,
-                    keywords TEXT,
-                    is_active BOOLEAN DEFAULT 1,
-                    last_scanned TIMESTAMP NULL,
-                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    UNIQUE(type, source_id)
-                )
-            """)
-            await self.conn.commit()
-            
-            # Таблица продажных диалогов (5-шаговый скрипт)
-            await cursor.execute("""
-                CREATE TABLE IF NOT EXISTS sales_conversations (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    user_id INTEGER NOT NULL,
-                    source_type TEXT NOT NULL,
-                    source_id TEXT NOT NULL,
-                    post_id TEXT NOT NULL,
-                    keyword TEXT,
-                    context TEXT,
-                    object_type TEXT,
-                    sales_step INTEGER DEFAULT 1,
-                    document_received BOOLEAN DEFAULT FALSE,
-                    skipped_steps TEXT,
-                    reminder_attempts INTEGER DEFAULT 0,
-                    status TEXT DEFAULT 'active',
-                    sales_started_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    last_interaction_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    last_reminder_at TIMESTAMP NULL,
-                    completed BOOLEAN DEFAULT FALSE,
-                    UNIQUE(user_id, source_type, source_id, post_id)
-                )
-            """)
-            await self.conn.commit()
-
-    async def _migrate_sources_table(self):
-        """
-        Миграция таблицы sources: проверка и добавление колонки updated_at, если её нет.
-        Вызывается при каждом запуске бота для обеспечения совместимости со старыми базами данных.
-        """
-        try:
-            async with self.conn.cursor() as cursor:
-                # Проверяем, существует ли таблица sources
-                await cursor.execute("""
-                    SELECT name FROM sqlite_master 
-                    WHERE type='table' AND name='sources'
-                """)
-                table_exists = await cursor.fetchone()
-                
-                if not table_exists:
-                    logger.debug("ℹ️ Таблица sources не существует, миграция не требуется")
-                    return
-                
-                # Проверяем наличие колонки updated_at
-                await cursor.execute("PRAGMA table_info(sources)")
-                columns = await cursor.fetchall()
-                column_names = [col_info[1] for col_info in columns]
-                
-                if 'updated_at' not in column_names:
-                    logger.info("🔧 Добавляю колонку updated_at в таблицу sources...")
-                    await cursor.execute("ALTER TABLE sources ADD COLUMN updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP")
-                    # Обновляем существующие записи
-                    await cursor.execute("UPDATE sources SET updated_at = COALESCE(last_scanned, CURRENT_TIMESTAMP) WHERE updated_at IS NULL")
-                    await self.conn.commit()
-                    logger.info("✅ Колонка updated_at успешно добавлена в таблицу sources")
-                else:
-                    logger.debug("ℹ️ Колонка updated_at уже существует в таблице sources")
-        except Exception as e:
-            logger.error(f"❌ Ошибка при миграции таблицы sources: {e}")
-            # Не прерываем работу бота, если миграция не удалась
-            # Возможно, таблица еще не создана или есть другие проблемы
 
     async def get_or_create_user(self, user_id: int, username: Optional[str] = None,
                                 first_name: Optional[str] = None, last_name: Optional[str] = None) -> Dict:
@@ -613,26 +447,6 @@ class Database:
             await cursor.execute("UPDATE leads SET thread_id = ? WHERE id = ?", (thread_id, lead_id))
             await self.conn.commit()
 
-    async def update_lead_status(self, lead_id: int, status: str):
-        """Обновить статус лида: warm / hot / done / archived и т.д."""
-        async with self.conn.cursor() as cursor:
-            await cursor.execute(
-                "UPDATE leads SET remodeling_status = ? WHERE id = ?",
-                (status, lead_id)
-            )
-            await self.conn.commit()
-
-    async def count_published_today(self) -> int:
-        """Количество опубликованных постов за сегодня (для лимита 1-2 поста в день)."""
-        async with self.conn.cursor() as cursor:
-            await cursor.execute(
-                """SELECT COUNT(*) FROM content_plan
-                   WHERE status = 'published'
-                   AND DATE(published_at) = DATE('now')"""
-            )
-            row = await cursor.fetchone()
-            return row[0] if row else 0
-
     # === ЛИДЫ ОТ ШПИОНА (spy_leads) ===
     async def add_spy_lead(
         self,
@@ -675,108 +489,44 @@ class Database:
             rows = await cursor.fetchall()
             return [dict(row) for row in rows]
 
+    async def get_top_pain_lead(self) -> Optional[Dict]:
+        """Получить самый свежий 'болезненный' лид (ST-3 или ST-4) для инсайта недели."""
+        async with self.conn.cursor() as cursor:
+            await cursor.execute(
+                """SELECT * FROM spy_leads 
+                   WHERE pain_stage IN ('ST-3', 'ST-4') 
+                   AND created_at >= datetime('now', '-7 days') 
+                   ORDER BY created_at DESC LIMIT 1"""
+            )
+            row = await cursor.fetchone()
+            return dict(row) if row else None
+
     async def get_spy_leads_since_hours(self, since_hours: int = 12) -> List[Dict]:
         """Лиды за последние N часов (ревизия: кто попался, какие боли)."""
         async with self.conn.cursor() as cursor:
             await cursor.execute(
-                """SELECT id, source_type, source_name, author_id, username, profile_url, text, url, created_at, pain_stage, priority_score
-                   FROM spy_leads WHERE created_at >= datetime('now', ?)
+                """SELECT * FROM spy_leads WHERE created_at >= datetime('now', ?)
                    ORDER BY created_at DESC""",
                 (f"-{since_hours} hours",),
             )
             rows = await cursor.fetchall()
             return [dict(row) for row in rows]
-    
-    async def get_regular_leads_for_summary(self, since_hours: int = 24) -> List[Dict]:
-        """Получить обычные лиды (priority_score < 3) для сводки.
-        
-        Фильтр "Живой человек": исключает лиды от каналов (только от пользователей).
-        Лиды должны иметь author_id (не пустой) и не быть от каналов.
 
-        Args:
-            since_hours: За какой период получать лиды (по умолчанию 24 часа)
-
-        Returns:
-            Список лидов с priority_score < 3, отсортированных по дате создания
-        """
+    async def get_latest_spy_leads(self, limit: int = 5) -> List[Dict]:
+        """Получить последние найденные лиды."""
         async with self.conn.cursor() as cursor:
             await cursor.execute(
-                """SELECT id, source_type, source_name, author_id, username, profile_url, text, url, created_at, pain_stage, priority_score
-                   FROM spy_leads
-                   WHERE created_at >= datetime('now', '-' || ? || ' hours')
-                     AND (priority_score IS NULL OR priority_score < 3)
-                     AND (pain_stage IS NULL OR pain_stage NOT IN ('ST-3', 'ST-4'))
-                     AND author_id IS NOT NULL
-                     AND author_id != ''
-                     AND author_id != '0'
-                   ORDER BY created_at DESC""",
-                (since_hours,),
+                "SELECT * FROM spy_leads ORDER BY created_at DESC LIMIT ?",
+                (limit,),
             )
             rows = await cursor.fetchall()
             return [dict(row) for row in rows]
-    
-    async def get_hot_leads_for_immediate_send(self) -> List[Dict]:
-        """Получить горячие лиды (HOT_TRIGGERS, ST-1/ST-2) для немедленной отправки.
-        
-        Фильтр "Живой человек": исключает лиды от каналов (только от пользователей).
-        Лиды должны иметь author_id (не пустой) и не быть от каналов.
-
-        Returns:
-            Список горячих лидов, которые еще не были отправлены в топик "Горячие лиды"
-        """
-        async with self.conn.cursor() as cursor:
-            # Получаем лиды с высоким приоритетом или стадиями ST-1/ST-2
-            # которые еще не были отправлены (нет флага sent_to_hot_leads)
-            # Фильтр "Живой человек": только от пользователей (author_id не пустой)
-            await cursor.execute(
-                """SELECT id, source_type, source_name, author_id, username, profile_url, text, url, created_at, pain_stage, priority_score
-                   FROM spy_leads
-                   WHERE (
-                       priority_score >= 3
-                       OR pain_stage IN ('ST-1', 'ST-2', 'ST-3', 'ST-4')
-                   )
-                     AND author_id IS NOT NULL
-                     AND author_id != ''
-                     AND author_id != '0'
-                   AND (sent_to_hot_leads IS NULL OR sent_to_hot_leads = 0)
-                   ORDER BY created_at DESC
-                   LIMIT 50""",
-            )
-            rows = await cursor.fetchall()
-            return [dict(row) for row in rows]
-    
-    async def mark_lead_sent_to_hot_leads(self, lead_id: int) -> None:
-        """Отметить лид как отправленный в топик "Горячие лиды"."""
-        if not self.conn:
-            await self.connect()
-        
-        async with self.conn.cursor() as cursor:
-            # Проверяем наличие колонки sent_to_hot_leads
-            await cursor.execute("PRAGMA table_info(spy_leads)")
-            columns = await cursor.fetchall()
-            column_names = [col_info[1] for col_info in columns]
-            
-            if "sent_to_hot_leads" not in column_names:
-                try:
-                    await cursor.execute("ALTER TABLE spy_leads ADD COLUMN sent_to_hot_leads INTEGER DEFAULT 0")
-                    await self.conn.commit()
-                    logger.debug("✅ Добавлена колонка sent_to_hot_leads в spy_leads")
-                except Exception as e:
-                    logger.warning(f"⚠️ Ошибка при добавлении колонки sent_to_hot_leads: {e}")
-            
-            await cursor.execute(
-                "UPDATE spy_leads SET sent_to_hot_leads = 1 WHERE id = ?",
-                (lead_id,),
-            )
-            await self.conn.commit()
 
     async def get_spy_lead(self, lead_id: int) -> Optional[Dict]:
-        """Получить лид из spy_leads по id (для кнопки «Ответить от имени Антона» и режима модерации)."""
+        """Получить лид из spy_leads по id (для кнопки «Ответить от имени Антона»)."""
         async with self.conn.cursor() as cursor:
             await cursor.execute(
-                """SELECT id, source_type, source_name, author_id, username, profile_url, text, url, 
-                          pain_stage, priority_score, intent, context_summary, geo_tag
-                   FROM spy_leads WHERE id = ?""",
+                "SELECT id, source_type, source_name, author_id, username, profile_url, text, url FROM spy_leads WHERE id = ?",
                 (lead_id,),
             )
             row = await cursor.fetchone()
@@ -795,32 +545,6 @@ class Database:
             )
             row = await cursor.fetchone()
             return dict(row) if row else None
-    
-    async def check_recent_contact(self, author_id: str, hours: int = 48) -> bool:
-        """
-        Проверяет, был ли контакт с пользователем в последние N часов.
-        Используется для фильтрации повторных лидов от одного пользователя.
-        
-        Args:
-            author_id: ID автора (строка)
-            hours: Количество часов для проверки (по умолчанию 48)
-        
-        Returns:
-            True если был контакт в указанный период, False иначе
-        """
-        if not author_id:
-            return False
-        async with self.conn.cursor() as cursor:
-            await cursor.execute(
-                """SELECT COUNT(*) FROM spy_leads
-                   WHERE (author_id = ? OR author_id = ?)
-                   AND contacted_at IS NOT NULL
-                   AND datetime(contacted_at) >= datetime('now', '-' || ? || ' hours')""",
-                (str(author_id), author_id, hours),
-            )
-            row = await cursor.fetchone()
-            count = row[0] if row else 0
-            return count > 0
 
     async def mark_spy_lead_contacted(self, lead_id: int) -> None:
         """Отметить лид как «с ним уже начали диалог» (Антон написал первым)."""
@@ -830,32 +554,6 @@ class Database:
                 (lead_id,),
             )
             await self.conn.commit()
-    
-    async def mark_lead_in_work(self, lead_id: int) -> None:
-        """Отметить лид как «взят в работу» (статус обновлен через кнопку «В работу»)."""
-        if not self.conn:
-            await self.connect()
-        
-        async with self.conn.cursor() as cursor:
-            # Проверяем наличие колонки status
-            await cursor.execute("PRAGMA table_info(spy_leads)")
-            columns = await cursor.fetchall()
-            column_names = [col_info[1] for col_info in columns]
-            
-            if "status" not in column_names:
-                try:
-                    await cursor.execute("ALTER TABLE spy_leads ADD COLUMN status TEXT DEFAULT 'new'")
-                    await self.conn.commit()
-                    logger.debug("✅ Добавлена колонка status в spy_leads")
-                except Exception as e:
-                    logger.warning(f"⚠️ Ошибка при добавлении колонки status: {e}")
-            
-            await cursor.execute(
-                "UPDATE spy_leads SET status = 'in_work', contacted_at = datetime('now') WHERE id = ?",
-                (lead_id,),
-            )
-            await self.conn.commit()
-            logger.info(f"✅ Лид #{lead_id} помечен как 'в работе'")
 
     async def get_top_trends(self, since_days: int = 7, limit: int = 15) -> List[Dict]:
         """
@@ -975,7 +673,7 @@ class Database:
     # Разрешённые поля для update_content_plan_entry (whitelist)
     ALLOWED_CONTENT_PLAN_FIELDS = {
         'type', 'channel', 'title', 'body', 'cta', 'theme',
-        'publish_date', 'status', 'image_url', 'image_prompt', 'admin_id', 'published_at', 'updated_at'
+        'publish_date', 'status', 'image_url', 'admin_id', 'published_at'
     }
 
     async def update_content_plan_entry(self, post_id: int, **kwargs):
@@ -985,9 +683,6 @@ class Database:
         
         if not filtered_kwargs:
             return  # Нечего обновлять
-        
-        # Добавляем обновление updated_at при любом изменении
-        filtered_kwargs['updated_at'] = datetime.now()
         
         async with self.conn.cursor() as cursor:
             set_clause = ", ".join([f"{k} = ?" for k in filtered_kwargs.keys()])
@@ -1070,6 +765,25 @@ class Database:
             )
             await self.conn.commit()
 
+    # === SYSTEM LOGS ===
+    async def add_system_log(self, level: str, module: str, message: str, stack_trace: str = None):
+        """Записать системную ошибку или событие в БД."""
+        async with self.conn.cursor() as cursor:
+            await cursor.execute(
+                "INSERT INTO system_logs (level, module, message, stack_trace) VALUES (?, ?, ?, ?)",
+                (level, module, message, stack_trace)
+            )
+            await self.conn.commit()
+
+    async def get_system_logs(self, limit: int = 50) -> List[Dict]:
+        """Получить последние системные логи."""
+        async with self.conn.cursor() as cursor:
+            await cursor.execute(
+                "SELECT * FROM system_logs ORDER BY created_at DESC LIMIT ?",
+                (limit,)
+            )
+            return [dict(row) for row in await cursor.fetchall()]
+
 
     # === ЦЕЛЕВЫЕ РЕСУРСЫ (Data-Driven Scout) ===
     async def add_target_resource(
@@ -1102,13 +816,13 @@ class Database:
                 return rid
             try:
                 await cursor.execute(
-                    """INSERT INTO target_resources (type, link, title, notes, status, participants_count, geo_tag, platform, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-                    (resource_type, link, title, notes, status, participants_count, geo_tag, platform, datetime.now()),
+                    """INSERT INTO target_resources (type, link, title, notes, status, participants_count, geo_tag, platform) VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+                    (resource_type, link, title, notes, status, participants_count, geo_tag, platform),
                 )
             except Exception:
                 await cursor.execute(
-                    "INSERT INTO target_resources (type, link, title, notes, updated_at) VALUES (?, ?, ?, ?, ?)",
-                    (resource_type, link, title, notes, datetime.now()),
+                    "INSERT INTO target_resources (type, link, title, notes) VALUES (?, ?, ?, ?)",
+                    (resource_type, link, title, notes),
                 )
             await self.conn.commit()
             return cursor.lastrowid
@@ -1127,13 +841,7 @@ class Database:
             return dict(row) if row else None
 
     async def get_active_targets_for_scout(self, platform: Optional[str] = None) -> List[Dict]:
-        """
-        Список целей для парсера/хантера. 
-        Поля: link, title, geo_tag, id, is_high_priority, last_lead_at, last_post_id.
-        
-        Args:
-            platform: Фильтр по платформе ('telegram' или 'vk'). Если None - возвращает все активные ресурсы.
-        """
+        """Список целей для парсера/хантера. Поля: link, title, geo_tag, id, is_high_priority, last_lead_at, last_post_id."""
         async with self.conn.cursor() as cursor:
             query = """SELECT id, link, title, COALESCE(geo_tag, '') AS geo_tag,
                           COALESCE(is_high_priority, 0) AS is_high_priority, last_lead_at, last_post_id,
@@ -1141,7 +849,6 @@ class Database:
                        FROM target_resources
                        WHERE (status = 'active' OR (is_active = 1 AND (status IS NULL OR status = '')))"""
             params = []
-            
             if platform:
                 query += " AND (platform = ? OR type = ?)"
                 params.extend([platform, platform])
@@ -1152,21 +859,7 @@ class Database:
                 return [dict(row) for row in rows]
             except Exception as e:
                 logger.error(f"Ошибка получения целей для скаута: {e}")
-                # Fallback для старых БД без новых полей
-                try:
-                    fallback_query = """SELECT id, link, title, COALESCE(geo_tag, '') AS geo_tag,
-                              COALESCE(is_high_priority, 0) AS is_high_priority, last_post_id
-                           FROM target_resources
-                           WHERE (status = 'active' OR (is_active = 1 AND (status IS NULL OR status = '')))"""
-                    fallback_params = []
-                    if platform:
-                        fallback_query += " AND (platform = ? OR type = ?)"
-                        fallback_params.extend([platform, platform])
-                    await cursor.execute(fallback_query, fallback_params)
-                    rows = await cursor.fetchall()
-                    return [dict(row) for row in rows]
-                except Exception:
-                    return []
+                return []
 
     async def update_target_last_lead_at(self, link: str) -> None:
         """Обновить время последнего найденного лида по ресурсу (для исключения из скана через 48ч)."""
@@ -1318,6 +1011,13 @@ class Database:
                 (last_post_id, datetime.now(), resource_id)
             )
             await self.conn.commit()
+
+    async def reset_all_last_post_ids(self):
+        """Сбросить все last_post_id для повторного сканирования всех сообщений."""
+        async with self.conn.cursor() as cursor:
+            await cursor.execute("UPDATE target_resources SET last_post_id = 0")
+            await self.conn.commit()
+            logger.info("🔄 Все last_post_id в target_resources сброшены в 0.")
     
     # === КЛЮЧЕВЫЕ СЛОВА ===
     async def add_spy_keyword(self, keyword: str) -> int:
@@ -1403,90 +1103,6 @@ class Database:
             )
             rows = await cursor.fetchall()
             return {row['model_used']: {'count': row['count'], 'total': row['total_cost']} for row in rows}
-    
-    # === МЕТОДЫ ДЛЯ ПРОДАЖНЫХ ДИАЛОГОВ (5-шаговый скрипт) ===
-    
-    async def save_sales_conversation(self, data: Dict) -> int:
-        """Сохраняет новую продажную беседу"""
-        async with self.conn.cursor() as cursor:
-            await cursor.execute("""
-                INSERT INTO sales_conversations 
-                (user_id, source_type, source_id, post_id, keyword, context, sales_step, sales_started_at, last_interaction_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """, (
-                data.get("user_id"),
-                data.get("source_type"),
-                data.get("source_id"),
-                data.get("post_id"),
-                data.get("keyword"),
-                data.get("context"),
-                data.get("sales_step", 1),
-                data.get("sales_started_at", datetime.now()),
-                data.get("last_interaction_at", datetime.now()),
-            ))
-            await self.conn.commit()
-            return cursor.lastrowid
-    
-    async def get_sales_conversation(
-        self, 
-        user_id: int, 
-        source_type: str, 
-        source_id: str, 
-        post_id: str
-    ) -> Optional[Dict]:
-        """Получает активную продажную беседу"""
-        async with self.conn.cursor() as cursor:
-            await cursor.execute("""
-                SELECT * FROM sales_conversations 
-                WHERE user_id = ? AND source_type = ? AND source_id = ? AND post_id = ?
-                AND status = 'active'
-                ORDER BY last_interaction_at DESC
-                LIMIT 1
-            """, (user_id, source_type, source_id, post_id))
-            row = await cursor.fetchone()
-            return dict(row) if row else None
-    
-    async def update_sales_conversation(self, conversation_id: int, **kwargs) -> None:
-        """Обновляет продажную беседу"""
-        allowed_fields = [
-            "sales_step", "object_type", "document_received", "skipped_steps",
-            "reminder_attempts", "status", "last_interaction_at", "last_reminder_at",
-            "completed", "context"
-        ]
-        updates = {k: v for k, v in kwargs.items() if k in allowed_fields}
-        if not updates:
-            return
-        
-        # Преобразуем datetime в строку для SQLite
-        for key, value in updates.items():
-            if isinstance(value, datetime):
-                updates[key] = value.isoformat()
-        
-        set_clause = ", ".join([f"{k} = ?" for k in updates.keys()])
-        values = list(updates.values()) + [conversation_id]
-        
-        async with self.conn.cursor() as cursor:
-            await cursor.execute(
-                f"UPDATE sales_conversations SET {set_clause} WHERE id = ?",
-                values
-            )
-            await self.conn.commit()
-    
-    async def get_conversations_for_reminder(self, hours: int = 24) -> List[Dict]:
-        """Получает беседы, которым нужно отправить напоминание"""
-        async with self.conn.cursor() as cursor:
-            # SQLite: datetime('now', '-' || hours || ' hours') для проверки прошедшего времени
-            await cursor.execute(f"""
-                SELECT * FROM sales_conversations
-                WHERE status = 'active'
-                AND sales_step = 3
-                AND document_received = 0
-                AND reminder_attempts < 2
-                AND datetime(last_interaction_at, '+{hours} hours') <= datetime('now')
-                AND (last_reminder_at IS NULL OR datetime(last_reminder_at, '+{hours} hours') <= datetime('now'))
-                ORDER BY last_interaction_at ASC
-            """)
-            return [dict(row) for row in await cursor.fetchall()]
     
     async def cleanup_old_texts(self):
         """Удалить тексты старше 3 месяцев"""
