@@ -446,27 +446,11 @@ class LeadHunter:
             os.environ.setdefault("YANDEX_API_KEY", os.getenv("YANDEX_API_KEY"))
 
         system_prompt = (
-            "Ты — технический эксперт компании TERION. Твоя цель — классифицировать сообщения и найти потенциальных клиентов (лидов), которым нужно согласование перепланировки или проектирование в Москве и МО."
-            "\n\n"
-            "КРИТЕРИИ ЛИДА (is_lead: true):\n"
-            "- Живые обращения, вопросы или личные ситуации пользователей.\n"
-            "- Примеры: «Можно ли снести стену?», «Где узаконить?», «Нужен проект», «Пришел штраф от МЖИ», «Ищу проектировщика».\n"
-            "- Текст написан от первого лица («Я хочу», «У нас в квартире», «Подскажите мне»).\n"
-            "\n"
-            "КРИТЕРИИ ОТКЛОНЕНИЯ (is_lead: false, статус REJECT):\n"
-            "- Если текст является статьей, советом, чек-листом, рекламой услуг, новостью или юридической справкой — ПРИСВАИВАЙ СТАТУС REJECT.\n"
-            "- Экспертный контент и реклама других компаний.\n"
-            "- Новости ЖК (открытие школы, ремонт дороги, отключение воды).\n"
-            "- Посты от имени сообществ/каналов (broadcast), а не вопросы от частных лиц.\n"
-            "\n"
-            "ГЕО-ФИЛЬТР:\n"
-            "- Нам нужны ТОЛЬКО Москва и Московская область.\n"
-            "- Если в тексте явно указан другой город (СПб, Краснодар и т.д.) — is_lead: false.\n"
-            "\n"
-            "ЦЕЛЕВЫЕ КЛЮЧИ:\n"
-            "- проект перепланировки, узаконить, снос стены, объединение санузла, мокрые точки, согласование МЖИ, штраф за ремонт, техпаспорт БТИ.\n"
-            "\n"
-            "Отвечай ТОЛЬКО JSON-объектом: {\"is_lead\": bool, \"intent\": \"string\", \"hotness\": 1-5, \"context_summary\": \"string\", \"recommendation\": \"string\", \"pain_level\": 1-5}."
+            "Классифицируй сообщение: лид ли это (живой вопрос о перепланировке/БТИ в Москве/МО) или нет.\n"
+            "ЛИДЫ: «Можно ли снести стену?\", «Где узаконить?\", «Нужен проект», «Штраф за ремонт» (от первого лица).\n"
+            "НЕ ЛИДЫ: статьи, советы, реклама, новости ЖК, посты от каналов.\n"
+            "Стадии боли: ST-1=интерес, ST-2=уточнение, ST-3=действие, ST-4=срочно.\n"
+            "JSON: {\"is_lead\": bool, \"intent\": str, \"hotness\": 1-5, \"pain_stage\": \"ST-X\"}"
         )
         user_prompt = f"Проанализируй сообщение и верни JSON:\n\n\"{text}\""
 
@@ -1427,17 +1411,38 @@ class LeadHunter:
                                 res = await main_db.get_target_resource_by_link(source_link)
                                 if res:
                                     is_high = res.get("is_high_priority") or 0
-                                    name_part = (res.get("geo_tag") or "").strip() or res.get("title") or self.parser.extract_geo_header(post_text, source_name) or source_name
+                                    geo_from_parser = source_name
+                                    if hasattr(self.parser, 'extract_geo_header') and callable(self.parser.extract_geo_header):
+                                        try:
+                                            geo_from_parser = self.parser.extract_geo_header(post_text, source_name) or source_name
+                                        except Exception:
+                                            pass
+                                    name_part = (res.get("geo_tag") or "").strip() or res.get("title") or geo_from_parser
                                     if is_high:
                                         card_header = f"🏙 ПРИОРИТЕТНЫЙ ЖК (Высотка)\n{name_part}" if name_part else "🏙 ПРИОРИТЕТНЫЙ ЖК (Высотка)"
                                     else:
                                         card_header = name_part
                                 else:
-                                    card_header = self.parser.extract_geo_header(post_text, source_name)
+                                    card_header = source_name
+                                    if hasattr(self.parser, 'extract_geo_header') and callable(self.parser.extract_geo_header):
+                                        try:
+                                            card_header = self.parser.extract_geo_header(post_text, source_name) or source_name
+                                        except Exception:
+                                            pass
                             except Exception:
-                                card_header = self.parser.extract_geo_header(post_text, source_name)
+                                card_header = source_name
+                                if hasattr(self.parser, 'extract_geo_header') and callable(self.parser.extract_geo_header):
+                                    try:
+                                        card_header = self.parser.extract_geo_header(post_text, source_name) or source_name
+                                    except Exception:
+                                        pass
                         else:
-                            card_header = self.parser.extract_geo_header(post_text, source_name)
+                            card_header = source_name
+                            if hasattr(self.parser, 'extract_geo_header') and callable(self.parser.extract_geo_header):
+                                try:
+                                    card_header = self.parser.extract_geo_header(post_text, source_name) or source_name
+                                except Exception:
+                                    pass
                     # Лидогенерация: если нет username — вытягиваем ID для прямой ссылки tg://user?id=...
                     profile_url = ""
                     if author_id is not None and source_type == "vk":
@@ -1537,7 +1542,7 @@ class LeadHunter:
                     # Если geo_tag не найден, используем card_header или извлекаем из текста
                     if not geo_tag_value:
                         geo_tag_value = card_header or ""
-                        if post_text and hasattr(self, 'parser') and self.parser:
+                        if post_text and hasattr(self, 'parser') and self.parser and hasattr(self.parser, 'extract_geo_header'):
                             try:
                                 extracted = self.parser.extract_geo_header(post_text, geo_tag_value)
                                 if extracted and extracted != geo_tag_value:

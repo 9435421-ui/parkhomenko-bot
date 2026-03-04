@@ -138,7 +138,7 @@ class LeadHunter:
         
         try:
             from utils.router_ai import router_ai
-            response = await router_ai.generate_response(f"{system_prompt}\n\nТекст: \"{text}\"", model="kimi")
+            response = await router_ai.generate_response(f"{system_prompt}\n\nТекст: \"{text}\"", model="gpt-4o-mini")
             if response:
                 match = re.search(r'\{[\s\S]*\}', response)
                 if match:
