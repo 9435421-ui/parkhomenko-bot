@@ -347,14 +347,12 @@ class LeadAnalyzer:
             "автоматически присваивай pain_stage ST-4 и priority_score не ниже 8."
         )
 
-        prompt = f"""
+        system_prompt = f"""
 Ты — эксперт по анализу лидов для компании TERION (согласование перепланировок в Москве).
 
 Инструкция для оценки: {manual}
 
 {priority_zhk_hint}
-
-Текст сообщения из чата: "{text}"
 
 КРИТИЧЕСКИ ВАЖНО — ФИЛЬТРАЦИЯ СПАМА И РЕКЛАМЫ:
 1. Если сообщение содержит явную рекламу услуг (номера телефонов для заказа ремонта, ссылки на портфолио, призывы "пишите в ЛС для сметы", "звоните для консультации", "наша бригада"), присваивай priority_score=0 и помечай как SPAM (is_lead=false).
@@ -372,22 +370,32 @@ class LeadAnalyzer:
 
 ПРИОРИТЕТ (priority_score):
 - 0: СПАМ/РЕКЛАМА (не лид)
-- 1-3: Низкий приоритет (ST-1)
-- 4-5: Средний приоритет (ST-2)
-- 6-7: Высокий приоритет (ST-3)
-- 8-10: Критический приоритет (ST-4)
+- 1-10: Шкала приоритета.
 
-ВАЖНО: Верни ответ ТОЛЬКО в формате валидного JSON, без дополнительного текста:
-{{
-    "priority_score": число от 0 до 10 (0 = спам),
-    "pain_stage": "ST-1" | "ST-2" | "ST-3" | "ST-4",
-    "justification": "краткое пояснение, почему выбрана эта стадия",
-    "is_lead": true или false (false для спама)
-}}
+ВАЖНО: Верни ответ ТОЛЬКО в формате JSON.
 """
+        # Лимит системного промпта — 2500 символов
+        if len(system_prompt) > 2500:
+            logger.warning(f"⚠️ System prompt too long ({len(system_prompt)}), truncating...")
+            system_prompt = system_prompt[:2500]
+
+        user_prompt = f"""Текст сообщения из чата: "{text}"
+
+Верни ответ в формате:
+{{
+    "priority_score": число от 0 до 10,
+    "pain_stage": "ST-1" | "ST-2" | "ST-3" | "ST-4",
+    "justification": "краткое пояснение",
+    "is_lead": true | false
+}}"""
 
         try:
-            response = await router_ai.generate_response(prompt)
+            # Основная модель — gpt-4o-mini
+            response = await router_ai.generate_response(
+                user_prompt=user_prompt,
+                system_prompt=system_prompt,
+                model="gpt-4o-mini"
+            )
             
             # ── ОБРАБОТКА ОШИБКИ 401 (Unauthorized) ──────────────────────────────────
             # Проверяем, если response содержит информацию об ошибке 401

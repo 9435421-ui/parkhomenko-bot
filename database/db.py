@@ -13,13 +13,18 @@ logger = logging.getLogger(__name__)
 class Database:
     """Класс для работы с SQLite базой данных"""
     
-    def __init__(self, db_path: str = "database/bot.db"):
+    def __init__(self, db_path: str = None):
+        if db_path is None:
+            # Приоритет: переменная окружения DATABASE_PATH, иначе parkhomenko_bot.db
+            db_path = os.getenv("DATABASE_PATH", "parkhomenko_bot.db")
         self.db_path = db_path
         self.conn: Optional[aiosqlite.Connection] = None
     
     async def connect(self):
         """Подключение к базе данных с режимом WAL для избежания ошибки 'database is locked'"""
-        os.makedirs(os.path.dirname(self.db_path), exist_ok=True)
+        dir_name = os.path.dirname(self.db_path)
+        if dir_name:
+            os.makedirs(dir_name, exist_ok=True)
         # ── WAL режим для избежания "database is locked" при параллельных запросах ─────
         # timeout=30 заставит ждать освобождения базы до 30 секунд вместо немедленной ошибки
         self.conn = await aiosqlite.connect(self.db_path, timeout=30.0)

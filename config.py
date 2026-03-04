@@ -16,7 +16,7 @@ API_HASH = os.getenv("API_HASH")
 PHONE = os.getenv("PHONE")
 
 # === VK ===
-VK_TOKEN = "vk1.a.NxWQzWxYR4Y7cHGQPl0jh22qDrXWT8sMN449HBuRtuP7LrEvPkWbhPf2IstCWEqH5YMIEZTl3HyHdw3f9uuZzMTcaVZ9uFEzQ18Qrzr9ohSQ_9U7RcHOdo78BlnPwTH5b-A876NNPLD1VuIBBXCCccN_Nzm0M-k2uQGU5DLel6b9I_3RX6-OwjB_eGXUdXB02ZT6hfPPJ0a2SNXbXyTTGw"
+VK_TOKEN = os.getenv("VK_TOKEN")
 VK_GROUP_ID = int(os.getenv("VK_GROUP_ID", "235569022"))
 
 # === CHANNELS (ПУБЛИКАЦИЯ) ===
@@ -90,7 +90,8 @@ QUIZ_THREAD_ID = int(os.getenv("QUIZ_THREAD_ID", "2"))
 THREAD_ID_HOT_LEADS = int(os.getenv("THREAD_ID_HOT_LEADS", "811"))  # топик «Горячие лиды» в рабочей группе
 
 # === PATHS ===
-DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///parkhomenko_bot.db")
+DATABASE_PATH = os.getenv("DATABASE_PATH", "parkhomenko_bot.db")
+DATABASE_URL = f"sqlite:///{DATABASE_PATH}"
 UPLOAD_PLANS_DIR = os.getenv("UPLOAD_PLANS_DIR", "uploads_plans")
 UPLOAD_DIR = os.getenv("UPLOAD_DIR", "uploads")
 MINI_APP_URL = os.getenv("MINI_APP_URL", "https://ternion.ru/mini_app/")
