@@ -4,30 +4,11 @@ aiogram>=3.0.0
 # Telegram Client (Telethon for parsing)
 telethon==1.33.1
 
-# VK API
-vkbottle
+# Database
+aiosqlite==0.19.0
 
 # Environment variables
 python-dotenv==1.0.0
 
-# Database
-aiosqlite==0.19.0
-
-# HTTP requests
-aiohttp
-requests==2.31.0
-
-# Yandex GPT API
-yandex-chain==0.0.10
-
-# Scheduling
-apscheduler==3.10.4
-
-# Data processing
-pydantic
-
-# Timezone
-pytz==2024.1
-
-# OpenAI/OpenRouter API (for future integrations)
+# OpenAI/OpenRouter API
 openai==1.12.0
