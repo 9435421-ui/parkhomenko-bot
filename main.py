@@ -102,8 +102,9 @@ async def main():
     # 2. Один раз создаём экземпляры ботов (далее используем их везде, включая проверку связей)
     main_bot = Bot(token=BOT_TOKEN or "", default=DefaultBotProperties(parse_mode="HTML"))
     content_bot = Bot(token=CONTENT_BOT_TOKEN or "", default=DefaultBotProperties(parse_mode="HTML"))
-    from utils.bot_config import set_main_bot
+    from utils.bot_config import set_main_bot, set_content_bot
     set_main_bot(main_bot)
+    set_content_bot(content_bot)
     publisher.bot = main_bot
 
     # 3. Проверка связей (те же экземпляры main_bot, content_bot — сессии не закрываем)
@@ -173,6 +174,9 @@ async def main():
     
     # Поиск клиентов каждые 30 минут (каналы TG + VK)
     scheduler.add_job(hunter.hunt, 'interval', minutes=30)
+
+    # Инсайт недели: воскресенье, 18:00
+    scheduler.add_job(hunter.generate_weekly_insight, 'cron', day_of_week='sun', hour=18, minute=0)
 
     # Гео-шпион 24/7: чаты ЖК (Перекрёсток, Самолёт, ПИК и т.д.) — каждые 5 мин
     async def run_geo_spy_job():

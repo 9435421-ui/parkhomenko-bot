@@ -1012,3 +1012,42 @@ async def lead_reply_text(message: Message, state: FSMContext):
         await message.answer(
             f"❌ Не удалось отправить: {e}. Возможно, лид ещё не писал боту — тогда напишите ему вручную (профиль в карточке)."
         )
+
+
+# === ПУБЛИКАЦИЯ ИНСАЙТА В MAX ===
+@router.callback_query(F.data.startswith("publish_insight_max_"))
+async def cb_publish_insight_max(callback: CallbackQuery):
+    """Публикация подготовленного инсайта в канал MAX."""
+    if not check_admin(callback.from_user.id):
+        await callback.answer("⛔ Нет доступа", show_alert=True)
+        return
+
+    try:
+        lead_id = int(callback.data.replace("publish_insight_max_", ""))
+    except ValueError:
+        await callback.answer("❌ Неверный ID")
+        return
+
+    # Ищем черновик инсайта для этого лида
+    async with db.conn.execute(
+        "SELECT * FROM content_plan WHERE admin_id = ? AND type = 'insight' AND status = 'draft' ORDER BY created_at DESC LIMIT 1",
+        (lead_id,)
+    ) as cursor:
+        row = await cursor.fetchone()
+        post = dict(row) if row else None
+
+    if not post:
+        await callback.answer("❌ Черновик не найден или уже опубликован", show_alert=True)
+        return
+
+    await callback.answer("🚀 Публикую в MAX.ru...")
+
+    from services.publisher import publisher
+    success = await publisher.publish_to_max(post['body'], title="💡 Инсайт TERION")
+
+    if success:
+        await db.update_content_plan_entry(post['id'], status='published', published_at=datetime.now())
+        await callback.message.edit_reply_markup(reply_markup=None)
+        await callback.message.reply("✅ Инсайт успешно опубликован в MAX.ru!")
+    else:
+        await callback.message.reply("❌ Ошибка при публикации в MAX. Проверьте логи.")

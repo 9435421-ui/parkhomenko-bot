@@ -7,6 +7,7 @@ from typing import Optional
 from aiogram import Bot
 
 _main_bot: Optional[Bot] = None
+_content_bot: Optional[Bot] = None
 
 
 def set_main_bot(bot: Bot) -> None:
@@ -18,3 +19,14 @@ def set_main_bot(bot: Bot) -> None:
 def get_main_bot() -> Optional[Bot]:
     """Получить общий экземпляр основного бота. None до вызова set_main_bot из main.py."""
     return _main_bot
+
+
+def set_content_bot(bot: Bot) -> None:
+    """Установить экземпляр контент-бота."""
+    global _content_bot
+    _content_bot = bot
+
+
+def get_content_bot() -> Optional[Bot]:
+    """Получить экземпляр контент-бота."""
+    return _content_bot

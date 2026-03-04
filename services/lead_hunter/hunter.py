@@ -192,6 +192,23 @@ class LeadHunter:
 
         for post in all_posts:
             try:
+                # Мост 'Шпион -> MAX': фильтр резонансных новостей (ВК)
+                if post.source_type == "vk" and post.comments >= 5:
+                    logger.info(f"🔥 Резонансная тема в ВК: {post.url} ({post.comments} комм.)")
+                    try:
+                        from config import BOT_TOKEN, LEADS_GROUP_CHAT_ID, THREAD_ID_DRAFTS
+                        from utils.bot_config import get_content_bot
+                        bot = get_content_bot() or _bot_for_send() or Bot(token=BOT_TOKEN, default=DefaultBotProperties(parse_mode="HTML"))
+                        alert_text = (
+                            f"🔥 <b>ИДЕЯ ДЛЯ MAX.ru</b>\n\n"
+                            f"В ВК найдена резонансная тема ({post.comments} комм.):\n"
+                            f"«{post.text[:200]}...»\n\n"
+                            f"🔗 {post.url}"
+                        )
+                        await bot.send_message(LEADS_GROUP_CHAT_ID, alert_text, message_thread_id=THREAD_ID_DRAFTS)
+                    except Exception as e:
+                        logger.error(f"Error sending resonance alert: {e}")
+
                 analysis = await self._analyze_lead(post.text)
                 if not analysis.get("is_lead"):
                     continue
@@ -279,6 +296,61 @@ class LeadHunter:
             await bot.send_message(ADMIN_ID, text)
         except Exception:
             pass
+
+    async def generate_weekly_insight(self):
+        """Триггер 'Инсайт недели': выбирает кейс ST-3/ST-4 и готовит черновик для MAX."""
+        logger.info("🕯️ Генерация инсайта недели...")
+        lead = await main_db.get_top_pain_lead()
+        if not lead:
+            logger.info("🔎 Нет подходящих кейсов для инсайта недели.")
+            return
+
+        from utils.router_ai import router_ai
+        prompt = (
+            f"На основе этого реального запроса по перепланировке напиши поучительный пост-инсайт для жителей Москвы.\n"
+            f"Текст запроса: \"{lead['text']}\"\n\n"
+            f"ТРЕБОВАНИЯ:\n"
+            f"1. Обезличенно (без имен и точных адресов).\n"
+            f"2. Стиль Антона (ИИ-ассистент TERION): экспертно, но просто.\n"
+            f"3. Разбери ошибку или риск (почему это ST-3/ST-4).\n"
+            f"4. Дай четкую рекомендацию.\n"
+            f"5. Используй Markdown форматирование."
+        )
+
+        try:
+            content = await router_ai.generate_response(prompt, model="gpt-4o-mini")
+            if content:
+                from config import BOT_TOKEN, LEADS_GROUP_CHAT_ID, THREAD_ID_DRAFTS
+                from utils.bot_config import get_content_bot
+                bot = get_content_bot() or _bot_for_send() or Bot(token=BOT_TOKEN, default=DefaultBotProperties(parse_mode="HTML"))
+
+                # Показываем эксперту как это будет в MAX
+                formatted = publisher.format_max_post(content, title="💡 Инсайт недели: Кейс TERION", lead_id=lead['id'])
+                preview_text = (
+                    f"📝 <b>ЧЕРНОВИК ИНСАЙТА ДЛЯ MAX.ru</b>\n\n"
+                    f"<pre>{formatted[:3500]}</pre>\n\n"
+                    f"Для публикации нажмите кнопку ниже."
+                )
+
+                kb = InlineKeyboardMarkup(inline_keyboard=[
+                    [InlineKeyboardButton(text="🚀 Опубликовать в MAX", callback_data=f"publish_insight_max_{lead['id']}")]
+                ])
+
+                # Сохраняем черновик в БД для публикации по коллбэку
+                await main_db.save_post(
+                    post_type="insight",
+                    title="Инсайт недели",
+                    body=content,
+                    cta="Бесплатная консультация",
+                    publish_date=datetime.now(),
+                    status="draft",
+                    admin_id=lead['id'] # используем для связи с лидом
+                )
+
+                await bot.send_message(LEADS_GROUP_CHAT_ID, preview_text, reply_markup=kb, message_thread_id=THREAD_ID_DRAFTS)
+                logger.info("✅ Черновик инсайта отправлен в группу.")
+        except Exception as e:
+            logger.error(f"Error generating weekly insight: {e}")
 
     async def _send_raw_leads_file_to_group(self, all_posts):
         pass

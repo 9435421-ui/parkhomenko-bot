@@ -489,6 +489,18 @@ class Database:
             rows = await cursor.fetchall()
             return [dict(row) for row in rows]
 
+    async def get_top_pain_lead(self) -> Optional[Dict]:
+        """Получить самый свежий 'болезненный' лид (ST-3 или ST-4) для инсайта недели."""
+        async with self.conn.cursor() as cursor:
+            await cursor.execute(
+                """SELECT * FROM spy_leads
+                   WHERE pain_stage IN ('ST-3', 'ST-4')
+                   AND created_at >= datetime('now', '-7 days')
+                   ORDER BY created_at DESC LIMIT 1"""
+            )
+            row = await cursor.fetchone()
+            return dict(row) if row else None
+
     async def get_spy_leads_since_hours(self, since_hours: int = 12) -> List[Dict]:
         """Лиды за последние N часов (ревизия: кто попался, какие боли)."""
         async with self.conn.cursor() as cursor:

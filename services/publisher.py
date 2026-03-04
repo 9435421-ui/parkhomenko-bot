@@ -132,14 +132,35 @@ class Publisher:
             logger.error(f"❌ Ошибка загрузки фото в VK: {e}")
             return None
     
-    async def publish_to_max(self, text: str, title: str = "") -> bool:
-        """Публикация в Max.ru"""
+    def format_max_post(self, text: str, title: str = "", lead_id: int = None) -> str:
+        """Форматирование поста для MAX в стиле TERION."""
+        header = f"# {title or 'Инсайт TERION'}\n\n"
+
+        # Очистка текста от HTML тегов aiogram для чистого Markdown в MAX
+        import re
+        clean_text = re.sub(r"<[^>]+>", "", text)
+
+        body = f"{clean_text}\n\n"
+
+        footer = "---\n"
+        footer += "🤖 **ИИ-ассистент Антон**\n"
+        footer += "🏡 Команда TERION | Согласование перепланировок\n"
+        if lead_id:
+            footer += f"📎 ID кейса: {lead_id}\n"
+
+        return f"{header}{body}{footer}"
+
+    async def publish_to_max(self, text: str, title: str = "", is_raw: bool = False) -> bool:
+        """Публикация в Max.ru с форматированием TERION."""
         device_token = os.getenv("MAX_DEVICE_TOKEN", "").strip()
         subsite_id = os.getenv("MAX_SUBSITE_ID", "").strip()
 
         if not device_token or not subsite_id:
             logger.warning("⚠️ MAX_DEVICE_TOKEN или MAX_SUBSITE_ID не настроены")
             return False
+
+        # Форматируем текст если это не сырые данные
+        final_body = text if is_raw else self.format_max_post(text, title)
 
         url = f"https://api.max.ru/v1.9/subsite/{subsite_id}/content"
         headers = {
@@ -148,13 +169,9 @@ class Publisher:
             "Authorization": f"Bearer {device_token}",
         }
 
-        import re
-        body_plain = re.sub(r"<[^>]+>", "", text)
-        body_plain = re.sub(r"&nbsp;", " ", body_plain).strip()
-
         payload = {
-            "title": (title or "Новости TERION")[:200],
-            "body": body_plain[:5000],
+            "title": (title or "Инсайт TERION")[:200],
+            "body": final_body[:5000],
             "type": "post"
         }
 
