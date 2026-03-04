@@ -9,8 +9,8 @@ from aiogram.types import BufferedInputFile, InlineKeyboardMarkup, InlineKeyboar
 from services.lead_hunter.discovery import Discovery
 # from .outreach import Outreach  # Файл outreach.py не существует, импорт удален
 from services.scout_parser import scout_parser
-from services.lead_hunter.database import HunterDatabase
-from services.lead_hunter.hunter import LeadHunter as StandaloneLeadHunter
+from hunter_standalone.database import HunterDatabase
+# LeadHunter is defined in this same file, no need to import
 
 # Создаем отдельный логгер для модуля шпионажа
 logger = logging.getLogger(__name__)
@@ -1124,7 +1124,7 @@ class LeadHunter:
             len(tg_ok), len(vk_ok), vk_global_count, len(all_posts)
         )
 
-        from services.lead_hunter.database import HunterDatabase as LocalHunterDatabase
+        from hunter_standalone.database import HunterDatabase as LocalHunterDatabase
         # Анти-дубль: в рамках одного запуска не обрабатываем один и тот же post_id дважды
         _seen_post_keys: set[str] = set()
         _business_hours = self._is_business_hours_msk()
