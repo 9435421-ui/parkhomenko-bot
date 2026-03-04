@@ -2,19 +2,19 @@ import os
 import asyncio
 import logging
 from database.db import Database
-from config import VK_API_TOKEN
+from config import VK_TOKEN
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("CheckLeadHunter")
 
 async def check_vk_token():
     print("\n--- VK TOKEN CHECK ---")
-    if not VK_API_TOKEN:
-        print("[ERROR] VK_API_TOKEN is missing in .env")
+    if not VK_TOKEN:
+        print("[ERROR] VK_TOKEN is missing in .env")
         return
     
     import aiohttp
-    url = f"https://api.vk.com/method/groups.getById?access_token={VK_API_TOKEN}&v=5.131"
+    url = f"https://api.vk.com/method/groups.getById?access_token={VK_TOKEN}&v=5.131"
     async with aiohttp.ClientSession() as session:
         async with session.get(url) as resp:
             data = await resp.json()

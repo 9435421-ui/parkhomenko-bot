@@ -14,7 +14,7 @@ class VKService:
     """
     
     def __init__(self):
-        self.vk_token = os.getenv("VK_API_TOKEN", "")
+        self.vk_token = os.getenv("VK_TOKEN", "")
         self.vk_group_id = os.getenv("VK_GROUP_ID", "")
         self.api_version = "5.131"
         self.base_url = "https://api.vk.com/method/"
@@ -37,7 +37,7 @@ class VKService:
             bool: Успешность отправки
         """
         if not self.vk_token:
-            print("⚠️ VK_API_TOKEN не установлен")
+            print("⚠️ VK_TOKEN не установлен")
             return False
         
         # TODO: Реализовать отправку сообщений через VK API
