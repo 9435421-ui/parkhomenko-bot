@@ -29,7 +29,7 @@ from utils import kb
 from middleware.logging import UnhandledCallbackMiddleware
 from services.scout_parser import ScoutParser
 from agents.creative_agent import creative_agent
-from services.lead_hunter import LeadHunter
+from services.lead_hunter.hunter import LeadHunter
 from services.competitor_spy import competitor_spy
 from services.publisher import publisher
 from services.image_generator import image_generator

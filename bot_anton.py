@@ -32,7 +32,7 @@ from handlers import register_all_handlers
 from database import db
 from utils import kb
 from agents.creative_agent import creative_agent
-from services.lead_hunter import LeadHunter
+from services.lead_hunter.hunter import LeadHunter
 from services.publisher import AutoPoster
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')

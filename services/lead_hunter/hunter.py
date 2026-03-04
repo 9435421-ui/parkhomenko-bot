@@ -9,7 +9,8 @@ from aiogram.types import BufferedInputFile, InlineKeyboardMarkup, InlineKeyboar
 from services.lead_hunter.discovery import Discovery
 # from .outreach import Outreach  # Файл outreach.py не существует, импорт удален
 from services.scout_parser import scout_parser
-from services.lead_hunter import HunterDatabase, LeadHunter as StandaloneLeadHunter
+from services.lead_hunter.database import HunterDatabase
+from services.lead_hunter.hunter import LeadHunter as StandaloneLeadHunter
 
 # Создаем отдельный логгер для модуля шпионажа
 logger = logging.getLogger(__name__)

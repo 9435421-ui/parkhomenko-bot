@@ -28,11 +28,11 @@ except ImportError:
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
 from config import BOT_TOKEN, LEADS_GROUP_CHAT_ID
-from services.lead_hunter import LeadHunter
+from services.lead_hunter.hunter import LeadHunter
 from services.lead_hunter.discovery import Discovery
 from services.scout_parser import scout_parser
 from services.lead_hunter.database import HunterDatabase
-from services.lead_hunter import LeadHunter as StandaloneLeadHunter
+from services.lead_hunter.hunter import LeadHunter as StandaloneLeadHunter
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
