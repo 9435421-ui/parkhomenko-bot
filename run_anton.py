@@ -40,8 +40,8 @@ def load_env():
 
 def check_and_fix_database():
     """Проверка и восстановление базы данных"""
-    db_path = Path("database/terion.db")
-    backup_path = Path("database/terion.db.backup")
+    db_path = Path("parkhomenko_bot.db")
+    backup_path = Path("parkhomenko_bot.db.backup")
     
     if not db_path.exists():
         logger.info("База данных не найдена, создаем новую...")
@@ -125,8 +125,8 @@ def main():
         sys.exit(1)
     
     # Создаем бэкап базы данных
-    db_path = Path("database/terion.db")
-    backup_path = Path("database/terion.db.backup")
+    db_path = Path("parkhomenko_bot.db")
+    backup_path = Path("parkhomenko_bot.db.backup")
     if db_path.exists():
         try:
             shutil.copy2(str(db_path), str(backup_path))

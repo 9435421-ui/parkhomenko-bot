@@ -13,17 +13,9 @@ def get_db_path():
     if env_db_path:
         return str(Path(env_db_path).resolve())
     
-    # Fallback: проверяем существование terion.db, иначе используем bot.db
-    terion_path = Path("database/terion.db")
-    bot_path = Path("database/bot.db")
-    
-    if terion_path.exists():
-        return str(terion_path.resolve())
-    elif bot_path.exists():
-        return str(bot_path.resolve())
-    else:
-        # Если ни один файл не существует, используем terion.db по умолчанию
-        return str(terion_path.resolve())
+    # Дефолт: parkhomenko_bot.db
+    db_path = Path("parkhomenko_bot.db")
+    return str(db_path.resolve())
 
 def fix_sources_table():
     """Проверяет и добавляет колонку updated_at в таблицу sources"""

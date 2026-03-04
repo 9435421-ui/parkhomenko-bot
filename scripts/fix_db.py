@@ -103,8 +103,9 @@ async def check_and_add_updated_at_column(db_path: str = "database/bot.db"):
 
 async def main():
     """Главная функция"""
-    # Пробуем разные возможные пути к БД
+    # Пробуем разные возможные пути к БД, начиная с нового
     possible_paths = [
+        "parkhomenko_bot.db",
         "database/bot.db",
         "database/terion.db",
         "terion.db",

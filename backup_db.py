@@ -11,7 +11,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 # Получаем путь к базе данных из .env или используем значение по умолчанию
-DATABASE_PATH = os.getenv("DATABASE_PATH", "database/terion.db")
+DATABASE_PATH = os.getenv("DATABASE_PATH", "parkhomenko_bot.db")
 
 
 def backup_database():

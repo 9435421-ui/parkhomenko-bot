@@ -5,18 +5,26 @@ import aiosqlite
 import os
 from typing import Optional, Dict, List
 from datetime import datetime
+from dotenv import load_dotenv
+
+# Загружаем переменные окружения
+load_dotenv()
 
 
 class Database:
     """Класс для работы с SQLite базой данных"""
     
-    def __init__(self, db_path: str = "parkhomenko_bot.db"):
+    def __init__(self, db_path: str = None):
+        # Если путь не передан, пытаемся получить из .env или используем дефолт
+        if db_path is None:
+            db_path = os.getenv("DATABASE_PATH", "parkhomenko_bot.db")
         self.db_path = db_path
         self.conn: Optional[aiosqlite.Connection] = None
     
     async def connect(self):
         """Подключение к базе данных"""
-        os.makedirs(os.path.dirname(self.db_path), exist_ok=True)
+        dir_path = os.path.dirname(self.db_path) or "."
+        os.makedirs(dir_path, exist_ok=True)
         self.conn = await aiosqlite.connect(self.db_path)
         self.conn.row_factory = aiosqlite.Row
         await self._create_tables()

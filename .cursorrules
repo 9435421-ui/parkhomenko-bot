@@ -24,7 +24,7 @@
 ## Техническая структура
 - База знаний: JSON-файлы в /data/ и markdown в /docs/
 - Бот: Python (aiogram 3.x, Telethon для парсинга)
-- БД: SQLite (database/terion.db) с aiosqlite
+- БД: SQLite (parkhomenko_bot.db) с aiosqlite
 - Главный файл: main.py (запуск через PM2)
 - Конфигурация: config.py, переменные окружения в .env
 - Сервисы: ScoutParser (поиск лидов), LeadHunter (генерация ответов), AutoPoster (публикация контента)
