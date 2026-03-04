@@ -55,6 +55,9 @@ ADMIN_GROUP_ID = int(os.getenv("ADMIN_GROUP_ID", "0"))
 # === JULIA USER ID ===
 JULIA_USER_ID = int(os.getenv("JULIA_USER_ID", "0"))
 
+# === ADMIN ID ===
+ADMIN_ID = int(os.getenv("ADMIN_ID", "0"))
+
 # Channel display information
 CHANNEL_NAME = os.getenv("TARGET_CHANNEL_USERNAME", "@terion_channel")
 _channel_username = CHANNEL_NAME.lstrip("@") if CHANNEL_NAME.startswith("@") else CHANNEL_NAME

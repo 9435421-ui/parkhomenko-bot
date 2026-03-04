@@ -38,6 +38,35 @@ def load_env():
         return False
     return True
 
+def check_required_env_vars():
+    """Проверка наличия всех необходимых переменных окружения"""
+    required_vars = [
+        'BOT_TOKEN', 'YANDEX_API_KEY', 'FOLDER_ID',
+        'ADMIN_GROUP_ID', 'JULIA_USER_ID', 'ADMIN_ID'
+    ]
+    missing_vars = []
+    
+    for var in required_vars:
+        if not os.getenv(var):
+            missing_vars.append(var)
+    
+    if missing_vars:
+        logger.error(f"❌ Отсутствуют обязательные переменные окружения: {', '.join(missing_vars)}")
+        print("\n" + "="*60)
+        print("🚨 ОШИБКА: НЕ ХВАТАЕТ ПЕРЕМЕННЫХ ОКРУЖЕНИЯ")
+        print("="*60)
+        print("Отсутствуют переменные:")
+        for var in missing_vars:
+            print(f"  • {var}")
+        print("\nРешение:")
+        print("1. Добавьте недостающие переменные в .env файл")
+        print("2. Или установите их в системе")
+        print("3. Перезапустите бота")
+        print("="*60 + "\n")
+        return False
+    
+    return True
+
 def check_and_fix_database():
     """Проверка и восстановление базы данных"""
     db_path = Path("parkhomenko_bot.db")
@@ -120,7 +149,7 @@ def main():
         sys.exit(1)
     
     # Проверяем переменные окружения
-    if not check_env_variables():
+    if not check_required_env_vars():
         logger.error("Проверьте настройку окружения")
         sys.exit(1)
     
