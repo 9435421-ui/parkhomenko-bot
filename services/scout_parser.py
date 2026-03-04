@@ -18,7 +18,7 @@ from datetime import datetime, timedelta
 from typing import List, Dict, Optional
 from dataclasses import dataclass
 import aiohttp
-from config import VK_API_TOKEN, VK_GROUP_ID
+from config import VK_TOKEN, VK_GROUP_ID
 
 logger = logging.getLogger(__name__)
 
@@ -394,8 +394,8 @@ class ScoutParser:
         Использует фильтрацию по платформе и приоритеты из БД.
         """
         posts = []
-        if not VK_API_TOKEN or "vk1.a" not in VK_API_TOKEN:
-            logger.warning("⚠️ VK_API_TOKEN не настроен или невалиден")
+        if not VK_TOKEN or "vk1.a" not in VK_TOKEN:
+            logger.warning("⚠️ VK_TOKEN не настроен или невалиден")
             return []
 
         # Загружаем цели из БД с фильтрацией по платформе (Data-Driven Scout)
@@ -435,7 +435,7 @@ class ScoutParser:
                 if is_priority:
                     logger.info(f"⭐ Приоритетный ЖК VK: {source_name}")
 
-                url = f"https://api.vk.com/method/wall.get?owner_id={owner_id}&count={count}&access_token={VK_API_TOKEN}&v=5.131"
+                url = f"https://api.vk.com/method/wall.get?owner_id={owner_id}&count={count}&access_token={VK_TOKEN}&v=5.131"
                 try:
                     async with session.get(url) as resp:
                         data = await resp.json()
@@ -511,7 +511,7 @@ class ScoutParser:
     async def parse_vk_comments(self, owner_id: str, post_id: str, source_name: str, link: str, db=None) -> List[ScoutPost]:
         """Парсинг комментариев к посту ВК"""
         posts = []
-        url = f"https://api.vk.com/method/wall.getComments?owner_id={owner_id}&post_id={post_id}&count=100&need_likes=1&access_token={VK_API_TOKEN}&v=5.131"
+        url = f"https://api.vk.com/method/wall.getComments?owner_id={owner_id}&post_id={post_id}&count=100&need_likes=1&access_token={VK_TOKEN}&v=5.131"
         try:
             async with aiohttp.ClientSession() as session:
                 async with session.get(url) as resp:
@@ -556,7 +556,7 @@ class ScoutParser:
         posts = []
         # Сначала получаем список тем
         group_id_abs = group_id.lstrip("-")
-        url_topics = f"https://api.vk.com/method/board.getTopics?group_id={group_id_abs}&count=10&order=1&access_token={VK_API_TOKEN}&v=5.131"
+        url_topics = f"https://api.vk.com/method/board.getTopics?group_id={group_id_abs}&count=10&order=1&access_token={VK_TOKEN}&v=5.131"
         try:
             async with aiohttp.ClientSession() as session:
                 async with session.get(url_topics) as resp:
@@ -565,7 +565,7 @@ class ScoutParser:
                         for topic in data["response"]["items"]:
                             topic_id = topic["id"]
                             # Получаем сообщения в теме
-                            url_msgs = f"https://api.vk.com/method/board.getComments?group_id={group_id_abs}&topic_id={topic_id}&count=50&sort=desc&access_token={VK_API_TOKEN}&v=5.131"
+                            url_msgs = f"https://api.vk.com/method/board.getComments?group_id={group_id_abs}&topic_id={topic_id}&count=50&sort=desc&access_token={VK_TOKEN}&v=5.131"
                             async with session.get(url_msgs) as resp_msgs:
                                 data_msgs = await resp_msgs.json()
                                 if "response" in data_msgs and "items" in data_msgs["response"]:
@@ -613,15 +613,15 @@ class ScoutParser:
             List[ScoutPost]: Найденные лиды
         """
         posts = []
-        if not VK_API_TOKEN or "vk1.a" not in VK_API_TOKEN:
-            logger.warning("⚠️ VK_API_TOKEN не настроен или невалиден")
+        if not VK_TOKEN or "vk1.a" not in VK_TOKEN:
+            logger.warning("⚠️ VK_TOKEN не настроен или невалиден")
             return []
         
         # Проверка формата токена (должен начинаться с буквы или цифры)
-        if VK_API_TOKEN and len(VK_API_TOKEN) > 0:
-            first_char = VK_API_TOKEN[0]
+        if VK_TOKEN and len(VK_TOKEN) > 0:
+            first_char = VK_TOKEN[0]
             if not (first_char.isalnum()):
-                logger.error("❌ Ошибка формата VK_API_TOKEN в .env")
+                logger.error("❌ Ошибка формата VK_TOKEN в .env")
                 return []
         
         # Ключевые слова для поиска
@@ -658,7 +658,7 @@ class ScoutParser:
                     f"&extended=1"
                     f"&start_time={start_time}"
                     f"&fields=members_count,activity,description"
-                    f"&access_token={VK_API_TOKEN}"
+                    f"&access_token={VK_TOKEN}"
                     f"&v=5.131"
                 )
                 
