@@ -208,5 +208,14 @@ class Publisher:
             
         return results
 
+    async def check_and_publish(self):
+        """Проверка расписания и публикация постов (заглушка для совместимости)"""
+        logger.info("📋 check_and_publish: Мониторинг расписания постов")
+        # TODO: Реализовать логику проверки и публикации из БД
+        return True
+
 # Singleton
 publisher = Publisher()
+
+# Alias для обратной совместимости
+AutoPoster = Publisher

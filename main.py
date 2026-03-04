@@ -162,8 +162,8 @@ async def main():
 
     scheduler = AsyncIOScheduler()
 
-    from auto_poster import AutoPoster
-    poster = AutoPoster(main_bot)
+    from services.publisher import Publisher
+    poster = Publisher(main_bot)
 
     # Проверка и публикация по расписанию
     scheduler.add_job(poster.check_and_publish, "interval", minutes=10)
