@@ -1,53 +1,53 @@
+"""
+Конфигурация ботов, каналов и топиков.
+"""
 import os
 from dotenv import load_dotenv
 
 load_dotenv()
 
-# Bot tokens
-BOT_TOKEN = os.getenv("BOT_TOKEN")
-CONTENT_BOT_TOKEN = os.getenv("CONTENT_BOT_TOKEN")
+# === TELEGRAM BOT TOKENS ===
+BOT_TOKEN = os.getenv("BOT_TOKEN")  # ТЕРИОН (Антон)
+CONTENT_BOT_TOKEN = os.getenv("CONTENT_BOT_TOKEN")  # ДОМ ГРАНД
 
-# VK API
-VK_API_TOKEN = os.getenv("VK_USER_TOKEN") or os.getenv("VK_TOKEN")
-VK_GROUP_ID = os.getenv("VK_GROUP_ID")
-
-# Telegram Client API (for Telethon - discovery and parsing)
-api_id_str = os.getenv("API_ID")
-API_ID = int(api_id_str) if api_id_str else None
+# === TELETHON CREDENTIALS (for Chat Parsing) ===
+API_ID = os.getenv("API_ID")
 API_HASH = os.getenv("API_HASH")
+PHONE = os.getenv("PHONE")
 
-# Chat IDs
+# === VK ===
+VK_TOKEN = os.getenv("VK_TOKEN")
+VK_GROUP_ID = int(os.getenv("VK_GROUP_ID", "235569022"))
+
+# === CHANNELS (ПУБЛИКАЦИЯ) ===
+CHANNEL_ID_TERION = int(os.getenv("CHANNEL_ID_TERION", "-1003612599428"))
+CHANNEL_ID_DOM_GRAD = int(os.getenv("CHANNEL_ID_DOM_GRAD", "-1002628548032"))
+NOTIFICATIONS_CHANNEL_ID = int(os.getenv("NOTIFICATIONS_CHANNEL_ID", "-1003471218598"))
+
+# === CHANNEL NAMES ===
+CHANNEL_NAMES = {
+    "terion": "TERION",
+    "dom_grand": "ДОМ ГРАНД"
+}
+
+# === WORKING GROUP (ОБСУЖДЕНИЕ) ===
 LEADS_GROUP_CHAT_ID = int(os.getenv("LEADS_GROUP_CHAT_ID", "-1003370698977"))
-ADMIN_GROUP_ID = int(os.getenv("ADMIN_GROUP_ID", "0"))
-THREAD_ID_HOT_LEADS = int(os.getenv("THREAD_ID_HOT_LEADS", "0"))
 
-# AI services
-YANDEX_API_KEY = os.getenv("YANDEX_API_KEY")
-FOLDER_ID = os.getenv("FOLDER_ID")
-OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY")
+# === КОНТЕНТ-ПЛАН: ВРЕМЯ И ЛИМИТЫ (для будущего использования) ===
+# Время публикации по умолчанию (при сохранении поста без явной даты)
+PUBLISH_TIME_DEFAULT = os.getenv("PUBLISH_TIME_DEFAULT", "12:00")  # МСК, "ЧЧ:ММ"
+# Максимум постов в день в один канал (0 = без лимита)
+POSTS_PER_DAY_LIMIT = int(os.getenv("POSTS_PER_DAY_LIMIT", "0"))
 
-# Database
-DATABASE_PATH = os.getenv("DATABASE_PATH", "database/terion.db")
+# === QUIZ LINK И ХЭШТЕГИ ДЛЯ ПОСТОВ ===
+VK_QUIZ_LINK = os.getenv("VK_QUIZ_LINK", "https://t.me/TERION_KvizBot?start=quiz")
+# Обязательные хэштеги в каждом посте (можно переопределить в .env)
+CONTENT_HASHTAGS = os.getenv("CONTENT_HASHTAGS", "#TERION #перепланировка #недвижимость #москва")
 
-# Admin settings
-ADMIN_ID = int(os.getenv("ADMIN_ID", "0"))
-JULIA_USER_ID = int(os.getenv("JULIA_USER_ID", "0"))
-JULIA_CONTACT = os.getenv("JULIA_CONTACT", "@terion_expert")
-
-# Thread IDs
-THREAD_ID_LOGS = int(os.getenv("THREAD_ID_LOGS", "88"))
-THREAD_ID_DRAFTS = int(os.getenv("THREAD_ID_DRAFTS", "85"))
-THREAD_ID_SEASONAL = int(os.getenv("THREAD_ID_SEASONAL", "87"))
-THREAD_ID_TRENDS_SEASON = int(os.getenv("THREAD_ID_TRENDS_SEASON", "0"))
-THREAD_ID_CONTENT_PLAN = int(os.getenv("THREAD_ID_CONTENT_PLAN", "0"))
-
-# VK quiz
-VK_QUIZ_LINK = os.getenv("VK_QUIZ_LINK", "https://vk.com/app123456")
-CONTENT_HASHTAGS = os.getenv("CONTENT_HASHTAGS", "#перепланировка #москва")
-
-# Channel configuration
-CHANNEL_ID_TERION_STR = os.getenv("CHANNEL_ID_TERION")
-CHANNEL_ID_TERION = parse_channel_id(CHANNEL_ID_TERION_STR) if CHANNEL_ID_TERION_STR else None
+# === THREADS IN WORKING GROUP ===
+THREAD_ID_KVARTIRY = int(os.getenv("THREAD_ID_KVARTIRY", "2"))
+THREAD_ID_KOMMERCIA = int(os.getenv("THREAD_ID_KOMMERCIA", "5"))
+THREAD_ID_DOMA = int(os.getenv("THREAD_ID_DOMA", "8"))
 
 # Channel display information
 CHANNEL_NAME = os.getenv("TARGET_CHANNEL_USERNAME", "@terion_channel")
