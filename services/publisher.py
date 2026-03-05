@@ -189,7 +189,7 @@ class Publisher:
             logger.error(f"❌ Ошибка публикации в Max.ru: {e}")
             return False
 
-    async def publish_all(self, text: str, image: bytes = None, title: str = "") -> Dict[str, bool]:
+    async def publish_all(self, text: str, image: bytes = None, title: str = "", post_id: int = None) -> Dict[str, bool]:
         """Публикация во все каналы"""
         results = {}
         
@@ -200,12 +200,22 @@ class Publisher:
         
         # VK
         if self.vk_token and self.vk_group:
+            # Для VK передаем кнопки квиза по умолчанию
             results['vk'] = await self.publish_to_vk(text, image)
 
         # Max.ru
         if os.getenv("MAX_DEVICE_TOKEN"):
             results['max'] = await self.publish_to_max(text, title)
             
+        # Обновляем статус в БД если передан post_id
+        if post_id:
+            try:
+                from database.db import db
+                await db.mark_as_published(post_id)
+                await db.add_content_history(post_id, "all", "success")
+            except Exception as e:
+                logger.error(f"Ошибка обновления статуса поста {post_id}: {e}")
+                
         return results
 
     async def check_and_publish(self):
