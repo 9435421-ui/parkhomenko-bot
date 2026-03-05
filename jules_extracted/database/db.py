@@ -233,7 +233,7 @@ class Database:
             """)
             await self.conn.commit()
 
-            # Миграция: колонка contacted_at для «Продавец» (первый диалог с лидом)
+            # Миграция: колонка contacted_at для «Продавца» (первый диалог с лидом)
             try:
                 await cursor.execute("ALTER TABLE spy_leads ADD COLUMN contacted_at TIMESTAMP NULL")
                 await self.conn.commit()
