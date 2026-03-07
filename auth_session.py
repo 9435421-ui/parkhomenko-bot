@@ -8,7 +8,7 @@
 
 Требования:
     - API_ID и API_HASH должны быть заданы в .env
-    - Номер телефона для авторизации в Telegram
+    - Номер телефона вводится при запуске скрипта
 """
 import os
 import sys
@@ -24,18 +24,16 @@ load_dotenv()
 # API credentials для авторизации Telethon сессии (читаем из .env)
 api_id_str = os.getenv("API_ID")
 API_HASH = os.getenv("API_HASH")
-PHONE = os.getenv("PHONE")
 
 # Проверяем наличие обязательных переменных
-if not api_id_str or not API_HASH or not PHONE:
+if not api_id_str or not API_HASH:
     print("=" * 60)
-    print("❌ ОШИБКА: API_ID, API_HASH и PHONE не заданы в .env")
+    print("❌ ОШИБКА: API_ID и API_HASH не заданы в .env")
     print("=" * 60)
     print("\n📝 Сначала заполни .env на сервере!")
     print("\nДобавьте в файл .env следующие строки:")
     print("API_ID=your_telegram_api_id")
     print("API_HASH=your_telegram_api_hash")
-    print("PHONE=+your_phone_number")
     print("\nПолучить API можно на https://my.telegram.org/apps")
     print("=" * 60)
     sys.exit(1)
@@ -71,7 +69,7 @@ async def main():
     print(f"\n📁 Файл сессии: {SESSION_NAME}.session")
     print(f"🔑 API ID: {API_ID}")
     print(f"🔑 API Hash: {API_HASH[:10]}...")
-    print(f"� Phone: {PHONE}")
+
     print(f"�📦 Telethon версия: {telethon_version}")
     print("\n" + "-" * 60)
     
@@ -92,11 +90,13 @@ async def main():
             await client.disconnect()
             return
         
-        # Если не авторизован, используем номер телефона из .env
-        phone = PHONE
+        # Если не авторизован, запрашиваем номер телефона
+        print("\n📞 Введите номер телефона в международном формате:")
+        print("   Пример: +79991234567")
+        phone = input("Номер: ").strip()
         
         if not phone:
-            print("❌ Номер телефона не задан в .env")
+            print("❌ Номер телефона не может быть пустым")
             await client.disconnect()
             return
         
