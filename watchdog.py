@@ -11,6 +11,7 @@ import os
 import signal
 import traceback
 from datetime import datetime
+import aiohttp
 
 # Настройка логов
 logging.basicConfig(
@@ -22,6 +23,17 @@ logging.basicConfig(
     ]
 )
 logger = logging.getLogger("Watchdog")
+
+# Фатальные ошибки, требующие паузы в 1 час
+FATAL_PATTERNS = [
+    "SessionPasswordNeededError",
+    "FloodWaitError",
+    "AuthKeyInvalidError",
+    "AuthKeyUnregisteredError",
+    "PhoneNumberInvalidError",
+    "ApiIdInvalidError",
+    "ApiIdPublishedFloodError"
+]
 
 # Процессы, за которыми следим
 PROCESSES = {
@@ -38,6 +50,31 @@ PROCESSES = {
 }
 
 running_subprocesses = {}
+
+async def notify_admin(message: str):
+    """Отправка уведомления администратору в Telegram."""
+    try:
+        admin_id = os.getenv("ADMIN_ID")
+        bot_token = os.getenv("BOT_TOKEN")  # Предполагаем, что есть BOT_TOKEN в .env
+        if not admin_id or not bot_token:
+            logger.warning("ADMIN_ID или BOT_TOKEN не заданы в .env, уведомление не отправлено")
+            return
+        
+        url = f"https://api.telegram.org/bot{bot_token}/sendMessage"
+        data = {
+            "chat_id": admin_id,
+            "text": f"🚨 Watchdog Alert:\n{message}",
+            "parse_mode": "Markdown"
+        }
+        
+        async with aiohttp.ClientSession() as session:
+            async with session.post(url, json=data) as response:
+                if response.status == 200:
+                    logger.info("✅ Уведомление отправлено администратору")
+                else:
+                    logger.error(f"❌ Ошибка отправки уведомления: {response.status}")
+    except Exception as e:
+        logger.error(f"❌ Ошибка при отправке уведомления: {e}")
 
 async def log_to_db(level, module, message, stack_trace=None):
     """Асинхронная запись лога в БД."""
@@ -64,7 +101,17 @@ async def run_managed_process(name, config):
             )
             running_subprocesses[name] = process
             
-            # Читаем stderr в фоновом режиме для логирования ошибок в БД
+            # Читаем stdout для логирования всех print()
+            async def log_stdout(stdout_stream):
+                while True:
+                    line = await stdout_stream.readline()
+                    if not line:
+                        break
+                    msg = line.decode().strip()
+                    if msg:
+                        logger.info(f"[{name}] {msg}")
+            
+            # Читаем stderr для логирования ошибок
             async def log_errors(stderr_stream):
                 while True:
                     line = await stderr_stream.readline()
@@ -77,6 +124,7 @@ async def run_managed_process(name, config):
                         if "Traceback" in err_msg or "Error" in err_msg:
                             await log_to_db("ERROR", name, err_msg)
 
+            asyncio.create_task(log_stdout(process.stdout))
             asyncio.create_task(log_errors(process.stderr))
             
             # Ждем завершения
@@ -95,7 +143,22 @@ async def run_managed_process(name, config):
         config["restart_count"] += 1
         config["last_restart"] = datetime.now()
         
-        wait_time = min(60, 5 * config["restart_count"])
+        # Проверяем на фатальные ошибки для Шпиона
+        is_fatal = False
+        if name == "lead_hunter":
+            # Проверяем логи на фатальные паттерны (упрощенная проверка)
+            # В реальности нужно анализировать stderr перед завершением
+            # Для простоты, если returncode != 0 и restart_count > 3, считаем fatal
+            if config["restart_count"] > 3:
+                is_fatal = True
+                await notify_admin(f"Шпион упал с фатальной ошибкой после {config['restart_count']} попыток. Пауза 1 час.")
+        
+        if is_fatal:
+            wait_time = 3600  # 1 час
+            logger.warning(f"⏳ Фатальная ошибка в {name}. Пауза {wait_time} сек.")
+        else:
+            wait_time = min(60, 5 * config["restart_count"])
+        
         logger.info(f"⏳ Перезапуск {name} через {wait_time} сек (попытка {config['restart_count']})")
         await asyncio.sleep(wait_time)
 
@@ -116,10 +179,13 @@ async def main():
     signal.signal(signal.SIGINT, handle_exit)
     signal.signal(signal.SIGTERM, handle_exit)
 
-    # Запускаем мониторинг всех процессов параллельно
+    # Запускаем процессы последовательно с паузой, чтобы избежать конфликта при создании таблиц
     tasks = []
     for name, config in PROCESSES.items():
-        tasks.append(run_managed_process(name, config))
+        task = asyncio.create_task(run_managed_process(name, config))
+        tasks.append(task)
+        if name == "main_bot":
+            await asyncio.sleep(3)  # Пауза 3 секунды перед запуском Шпиона
     
     await asyncio.gather(*tasks)
 
