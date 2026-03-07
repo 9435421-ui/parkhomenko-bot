@@ -310,7 +310,7 @@ class ScoutParser:
                     iter_params["min_id"] = last_post_id
                 
                 max_id = last_post_id
-                for msg in client.iter_messages(link, **iter_params):
+                async for msg in client.iter_messages(link, **iter_params):
                     if msg.id > max_id:
                         max_id = msg.id
                     
@@ -825,32 +825,23 @@ class ScoutParser:
             return source_name or ""
         return ", ".join(parts)
 
-    def get_last_scan_report(self):
+    def get_last_scan_report(self) -> str:
         """
-        Возвращает данные для формирования отчета в Телеграм.
-        Использует информацию из БД о количестве активных ресурсов.
+        Возвращает отформатированный отчет в виде строки для Telegram.
         """
-        # Если есть отчет последнего скана, используем его
         if self.last_scan_report:
-            tg_count = len([r for r in self.last_scan_report if r.get("type") == "telegram"])
-            vk_count = len([r for r in self.last_scan_report if r.get("type") == "vk"])
-            found_leads = sum(r.get("posts", 0) for r in self.last_scan_report)
-            return {
-                "tg_channels_count": tg_count,
-                "vk_groups_count": vk_count,
-                "found_leads": found_leads,
-                "status": "Активен",
-                "last_scan_at": self.last_scan_at.isoformat() if self.last_scan_at else None
-            }
-        
-        # Базовая структура если отчета еще нет
-        return {
-            "tg_channels_count": 0,
-            "vk_groups_count": 0,
-            "found_leads": 0,
-            "status": "Активен",
-            "last_scan_at": None
-        }
+            tg_ok = [r for r in self.last_scan_report if r.get("type") == "telegram"]
+            vk_ok = [r for r in self.last_scan_report if r.get("type") == "vk"]
+            found = sum(r.get("posts", 0) for r in self.last_scan_report)
+            scan_time = self.last_scan_at.strftime('%d.%m.%Y %H:%M') if self.last_scan_at else "—"
+            return (
+                f"🕵️ <b>Отчёт шпиона</b>\n\n"
+                f"📱 Telegram каналов: {len(tg_ok)}\n"
+                f"📘 VK групп: {len(vk_ok)}\n"
+                f"🎯 Найдено лидов: {found}\n"
+                f"🕐 Время скана: {scan_time}"
+            )
+        return "Отчёта ещё нет — шпион ещё не запускался"
 
 # КРИТИЧЕСКАЯ СТРОКА: Создаем объект, который ищет run_hunter.py
 scout_parser = ScoutParser()
