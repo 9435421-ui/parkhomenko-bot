@@ -1,13 +1,17 @@
 """
 Минимальный скрипт авторизации Telethon
-Создает файл anton_discovery.session для работы Discovery модуля
+Создает файл anton_parser.session для работы Discovery модуля
 """
+import os
+from dotenv import load_dotenv
 from telethon import TelegramClient
 
+load_dotenv()
+
 # API credentials
-API_ID = 39163454
-API_HASH = '182611453d5822018d0772847a3f58a6'
-SESSION_NAME = 'anton_discovery'
+API_ID = int(os.getenv("API_ID"))
+API_HASH = os.getenv("API_HASH")
+SESSION_NAME = 'anton_parser'
 
 async def main():
     print("🚀 Запуск авторизации Telethon...")

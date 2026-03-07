@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 Скрипт авторизации Telethon сессии для модуля Discovery.
-Создает файл сессии 'anton_discovery.session', который используется для поиска новых чатов/групп.
+Создает файл сессии 'anton_parser.session', который используется для поиска новых чатов/групп.
 
 Использование:
     python auth_session.py
@@ -16,7 +16,7 @@ import time
 import asyncio
 from dotenv import load_dotenv
 from telethon import TelegramClient
-from telethon.errors import SessionPasswordNeededError
+from telethon.errors import SessionPasswordNeededError, FloodWaitError
 
 # Загружаем переменные окружения из .env
 load_dotenv()
@@ -24,17 +24,19 @@ load_dotenv()
 # API credentials для авторизации Telethon сессии (читаем из .env)
 api_id_str = os.getenv("API_ID")
 API_HASH = os.getenv("API_HASH")
+PHONE = os.getenv("PHONE")
 
 # Проверяем наличие обязательных переменных
-if not api_id_str or not API_HASH:
+if not api_id_str or not API_HASH or not PHONE:
     print("=" * 60)
-    print("❌ ОШИБКА: API_ID и API_HASH не заданы в .env")
+    print("❌ ОШИБКА: API_ID, API_HASH и PHONE не заданы в .env")
     print("=" * 60)
     print("\n📝 Сначала заполни .env на сервере!")
     print("\nДобавьте в файл .env следующие строки:")
     print("API_ID=your_telegram_api_id")
     print("API_HASH=your_telegram_api_hash")
-    print("\nПолучить можно на https://my.telegram.org/apps")
+    print("PHONE=+your_phone_number")
+    print("\nПолучить API можно на https://my.telegram.org/apps")
     print("=" * 60)
     sys.exit(1)
 
@@ -51,7 +53,7 @@ except ValueError:
     sys.exit(1)
 
 # Имя файла сессии (должно совпадать с тем, что используется в Discovery)
-SESSION_NAME = 'anton_discovery'
+SESSION_NAME = 'anton_parser'
 
 
 async def main():
@@ -69,7 +71,8 @@ async def main():
     print(f"\n📁 Файл сессии: {SESSION_NAME}.session")
     print(f"🔑 API ID: {API_ID}")
     print(f"🔑 API Hash: {API_HASH[:10]}...")
-    print(f"📦 Telethon версия: {telethon_version}")
+    print(f"� Phone: {PHONE}")
+    print(f"�📦 Telethon версия: {telethon_version}")
     print("\n" + "-" * 60)
     
     # Создаем клиент Telethon
@@ -89,13 +92,11 @@ async def main():
             await client.disconnect()
             return
         
-        # Если не авторизован, запрашиваем номер телефона
-        print("\n📞 Введите номер телефона в международном формате:")
-        print("   Пример: +79991234567")
-        phone = input("Номер: ").strip()
+        # Если не авторизован, используем номер телефона из .env
+        phone = PHONE
         
         if not phone:
-            print("❌ Номер телефона не может быть пустым")
+            print("❌ Номер телефона не задан в .env")
             await client.disconnect()
             return
         
@@ -103,7 +104,12 @@ async def main():
         print(f"\n📨 Отправка кода подтверждения на {phone}...")
         # Небольшая пауза перед отправкой кода
         await asyncio.sleep(2)
-        await client.send_code_request(phone)
+        try:
+            await client.send_code_request(phone)
+        except FloodWaitError as e:
+            print(f"⏳ Flood wait: Telegram заблокировал на {e.seconds} секунд")
+            await asyncio.sleep(e.seconds)
+            await client.send_code_request(phone)
         
         # Запрашиваем код подтверждения
         print("\n🔐 Введите код подтверждения из Telegram:")
