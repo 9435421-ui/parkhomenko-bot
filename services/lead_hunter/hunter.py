@@ -1122,6 +1122,7 @@ class LeadHunter:
 
                         # ── Генерируем проект ответа через Yandex GPT (с fallback на Router AI) ─────────
                         sales_draft = ""
+                        res = None  # инициализация до try/except
                         try:
                             # Получаем данные о приоритете и платформе из target ресурса
                             is_priority_zhk = False
@@ -1399,7 +1400,7 @@ class LeadHunter:
                 if cards_sent:
                     logger.info("📋 В рабочую группу отправлено карточек лидов: %s", cards_sent)
                 # Дублирование в рабочую группу: краткий отчёт о сохранённых лидах
-                if hot_leads:
+                if recent_leads:
                     from config import BOT_TOKEN, LEADS_GROUP_CHAT_ID, THREAD_ID_LOGS
                     if BOT_TOKEN and LEADS_GROUP_CHAT_ID:
                         try:

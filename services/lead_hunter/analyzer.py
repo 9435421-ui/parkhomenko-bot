@@ -199,9 +199,9 @@ class LeadAnalyzer:
         if len(text) < 10:
             return {"priority_score": 0, "pain_stage": "ST-1", "is_lead": False}
         
-        # ── ФИЛЬТР ПО ДЛИНЕ: Статьи (> 500 символов) — это не лид ────────────────
-        if len(text) > 500:
-            logger.debug(f"🚫 Фильтр длины: сообщение слишком длинное ({len(text)} символов) — пропущено (это статья, не лид)")
+        # ── ФИЛЬТР ПО ДЛИНЕ: Статьи (> 1500 символов) — это не лид ────────────────
+        if len(text) > 1500:
+            logger.debug(f"🚫 Фильтр длины: {len(text)} символов — пропущено")
             return {"priority_score": 0, "pain_stage": "ST-1", "is_lead": False, "length_filtered": True}
         
         # ── ФИЛЬТР СПАМА И РЕКЛАМЫ: Отсеиваем рекламу других бригад ─────────────

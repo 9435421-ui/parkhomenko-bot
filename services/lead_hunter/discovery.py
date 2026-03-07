@@ -134,6 +134,16 @@ class Discovery:
                     if hasattr(results, 'chats') and results.chats:
                         for chat_entity in results.chats:
                             try:
+                                # ── НОВЫЙ ФИЛЬТР: только живые чаты, не каналы ──
+                                is_broadcast_channel = (
+                                    hasattr(chat_entity, 'broadcast') 
+                                    and chat_entity.broadcast 
+                                    and not getattr(chat_entity, 'megagroup', False)
+                                )
+                                if is_broadcast_channel:
+                                    logger.debug(f"⏭️ Пропускаем канал (не чат): {getattr(chat_entity, 'title', '')}")
+                                    continue
+                                
                                 # Пропускаем личные чаты (нам нужны только группы/каналы)
                                 if not (hasattr(chat_entity, 'broadcast') or hasattr(chat_entity, 'megagroup')):
                                     # Если это не канал и не мегагруппа, проверяем наличие id

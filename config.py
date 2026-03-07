@@ -6,6 +6,24 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
+def parse_channel_id(channel_id_str: str | None) -> int | str | None:
+    """
+    Эталонная функция для парсинга ID канала из строки.
+    """
+    if not channel_id_str:
+        return None
+
+    if channel_id_str.startswith("@"):
+        return channel_id_str
+    else:
+        try:
+            return int(channel_id_str)
+        except ValueError:
+            raise ValueError(
+                f"Channel ID должен быть числовым ID (например, -1001234567890) "
+                f"или username канала (например, @channel_name), получено: {channel_id_str}"
+            )
+
 # === TELEGRAM BOT TOKENS ===
 BOT_TOKEN = os.getenv("BOT_TOKEN")  # ТЕРИОН (Антон)
 CONTENT_BOT_TOKEN = os.getenv("CONTENT_BOT_TOKEN")  # ДОМ ГРАНД
@@ -154,21 +172,3 @@ CONTENT_CHANNEL_ID = parse_channel_id(CONTENT_CHANNEL_ID_STR) if CONTENT_CHANNEL
 
 NOTIFICATIONS_CHANNEL_ID_STR = os.getenv("NOTIFICATIONS_CHANNEL_ID")
 NOTIFICATIONS_CHANNEL_ID = parse_channel_id(NOTIFICATIONS_CHANNEL_ID_STR) if NOTIFICATIONS_CHANNEL_ID_STR else None
-
-def parse_channel_id(channel_id_str: str | None) -> int | str | None:
-    """
-    Эталонная функция для парсинга ID канала из строки.
-    """
-    if not channel_id_str:
-        return None
-
-    if channel_id_str.startswith("@"):
-        return channel_id_str
-    else:
-        try:
-            return int(channel_id_str)
-        except ValueError:
-            raise ValueError(
-                f"Channel ID должен быть числовым ID (например, -1001234567890) "
-                f"или username канала (например, @channel_name), получено: {channel_id_str}"
-            )
