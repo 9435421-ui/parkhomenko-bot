@@ -40,12 +40,14 @@ PROCESSES = {
     "main_bot": {
         "command": [sys.executable, "run_anton.py"],
         "restart_count": 0,
-        "last_restart": None
+        "last_restart": None,
+        "fatal_error": False
     },
     "lead_hunter": {
         "command": [sys.executable, "run_hunter.py"],
         "restart_count": 0,
-        "last_restart": None
+        "last_restart": None,
+        "fatal_error": False
     }
 }
 
@@ -111,7 +113,7 @@ async def run_managed_process(name, config):
                     if msg:
                         logger.info(f"[{name}] {msg}")
             
-            # Читаем stderr для логирования ошибок
+            # Читаем stderr для логирования ошибок и обнаружения фатальных
             async def log_errors(stderr_stream):
                 while True:
                     line = await stderr_stream.readline()
@@ -123,6 +125,14 @@ async def run_managed_process(name, config):
                         # Если это критическая ошибка (traceback), пишем в БД
                         if "Traceback" in err_msg or "Error" in err_msg:
                             await log_to_db("ERROR", name, err_msg)
+                        
+                        # Проверяем на фатальные ошибки сессии (сразу при обнаружении)
+                        for pattern in FATAL_PATTERNS:
+                            if pattern in err_msg:
+                                config["fatal_error"] = True
+                                logger.critical(f"🚨 Обнаружена фатальная ошибка: {pattern}")
+                                await notify_admin(f"🚨 Критическая ошибка в {name}: {pattern}. Пауза 1 час.")
+                                break
 
             asyncio.create_task(log_stdout(process.stdout))
             asyncio.create_task(log_errors(process.stderr))
@@ -143,18 +153,9 @@ async def run_managed_process(name, config):
         config["restart_count"] += 1
         config["last_restart"] = datetime.now()
         
-        # Проверяем на фатальные ошибки для Шпиона
-        is_fatal = False
-        if name == "lead_hunter":
-            # Проверяем логи на фатальные паттерны (упрощенная проверка)
-            # В реальности нужно анализировать stderr перед завершением
-            # Для простоты, если returncode != 0 и restart_count > 3, считаем fatal
-            if config["restart_count"] > 3:
-                is_fatal = True
-                await notify_admin(f"Шпион упал с фатальной ошибкой после {config['restart_count']} попыток. Пауза 1 час.")
-        
-        if is_fatal:
-            wait_time = 3600  # 1 час
+        # Проверяем на фатальные ошибки (сразу без накопления попыток)
+        if config.get("fatal_error"):
+            wait_time = 3600  # 1 час при фатальной ошибке
             logger.warning(f"⏳ Фатальная ошибка в {name}. Пауза {wait_time} сек.")
         else:
             wait_time = min(60, 5 * config["restart_count"])
