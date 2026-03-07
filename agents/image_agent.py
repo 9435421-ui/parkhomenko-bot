@@ -20,11 +20,8 @@ class ImageAgent:
             api_key: API ключ Yandex Cloud (если None, берется из .env)
             folder_id: ID каталога Yandex Cloud (если None, берется из .env)
         """
-        self.api_key = api_key or os.getenv("YANDEX_API_KEY")
-        self.folder_id = folder_id or os.getenv("FOLDER_ID")
-        
-        if not self.api_key or not self.folder_id:
-            logger.warning("YANDEX_API_KEY or FOLDER_ID not set. Image generation will be disabled.")
+        from services.image_generator import image_generator
+        self.generator = image_generator
     
     def build_image_prompt(self, post_type: str, text: str) -> str:
         """
@@ -61,31 +58,10 @@ class ImageAgent:
             
         Returns:
             URL сгенерированного изображения или None в случае ошибки
-            
-        Note:
-            В текущей версии YandexGPT не поддерживает генерацию изображений напрямую.
-            Метод возвращает None, но структура готова для интеграции с внешним API
-            (например, OpenAI DALL-E, Stable Diffusion API и т.д.)
         """
-        if not self.api_key or not self.folder_id:
-            logger.warning("Image generation skipped: API credentials not configured")
-            return None
-        
         try:
-            # TODO: Интеграция с сервисом генерации изображений
-            # Варианты:
-            # 1. OpenAI DALL-E API
-            # 2. Stable Diffusion API
-            # 3. YandexGPT Vision (если будет доступен)
-            # 4. Другой внешний сервис
-            
-            logger.info(f"Image generation requested for prompt: {prompt[:50]}...")
-            
-            # Временная заглушка: возвращаем None
-            # В будущем здесь будет реальная генерация через API
-            logger.warning("Image generation not yet implemented. Returning None.")
-            return None
-            
+            # Используем готовый генератор изображений
+            return self.generator.generate_image(prompt)
         except Exception as e:
             logger.error(f"Error generating image: {e}")
             return None
@@ -98,19 +74,11 @@ class ImageAgent:
             prompt: Текстовое описание изображения
             
         Returns:
-            URL сгенерированного изображения или None в случае ошибки
+            base64-encoded изображение или None
         """
-        if not self.api_key or not self.folder_id:
-            logger.warning("Image generation skipped: API credentials not configured")
-            return None
-        
         try:
-            logger.info(f"Async image generation requested for prompt: {prompt[:50]}...")
-            
-            # Временная заглушка: возвращаем None
-            logger.warning("Image generation not yet implemented. Returning None.")
-            return None
-            
+            # Используем готовый генератор изображений
+            return await self.generator.generate_image_async(prompt)
         except Exception as e:
             logger.error(f"Error generating image (async): {e}")
             return None
