@@ -48,6 +48,9 @@ bot.log
 *.swo
 *~
 .DS_Store
+
+# Session files
+*.session
 Thumbs.db
 ehthumbs.db
 Desktop.ini
