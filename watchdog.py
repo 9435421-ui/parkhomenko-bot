@@ -13,6 +13,39 @@ import traceback
 from datetime import datetime
 import aiohttp
 
+def validate_env_variables():
+    """Проверка .env на наличие заглушек и обязательных переменных."""
+    critical_vars = {
+        "BOT_TOKEN": os.getenv("BOT_TOKEN", ""),
+        "CONTENT_BOT_TOKEN": os.getenv("CONTENT_BOT_TOKEN", ""),
+        "VK_TOKEN": os.getenv("VK_TOKEN", ""),
+        "LEADS_GROUP_CHAT_ID": os.getenv("LEADS_GROUP_CHAT_ID", ""),
+        "ADMIN_ID": os.getenv("ADMIN_ID", ""),
+        "API_ID": os.getenv("API_ID", ""),
+        "API_HASH": os.getenv("API_HASH", ""),
+    }
+    
+    for var_name, value in critical_vars.items():
+        if not value:
+            print(f"❌ Ошибка конфигурации: {var_name} не задан в .env")
+            sys.exit(1)
+        
+        # Проверка на заглушки
+        if any(placeholder in str(value).lower() for placeholder in ["your_", "change_me", "id_here"]):
+            print(f"❌ Ошибка конфигурации: {var_name} содержит заглушку: '{value}'. Исправьте .env")
+            sys.exit(1)
+    
+    # Проверка числовых значений
+    try:
+        val = os.getenv("LEADS_GROUP_CHAT_ID", "")
+        if val:
+            int(val)
+    except ValueError:
+        print(f"❌ Ошибка конфигурации: LEADS_GROUP_CHAT_ID должен быть числом, получено: '{val}'")
+        sys.exit(1)
+    
+    return True
+
 # Настройка логов
 logging.basicConfig(
     level=logging.INFO,
@@ -45,6 +78,12 @@ PROCESSES = {
     },
     "lead_hunter": {
         "command": [sys.executable, "run_hunter.py"],
+        "restart_count": 0,
+        "last_restart": None,
+        "fatal_error": False
+    },
+    "vk_spy": {
+        "command": [sys.executable, "vk_spy.py"],
         "restart_count": 0,
         "last_restart": None,
         "fatal_error": False
@@ -165,6 +204,11 @@ async def run_managed_process(name, config):
 
 async def main():
     logger.info("🛡️ Watchdog ТЕРИОН запущен.")
+    
+    # Проверка конфигурации перед запуском
+    if not validate_env_variables():
+        logger.error("🚨 Ошибка конфигурации: исправьте .env")
+        sys.exit(1)
     
     # Регистрация сигналов для корректного завершения
     def handle_exit(sig, frame):

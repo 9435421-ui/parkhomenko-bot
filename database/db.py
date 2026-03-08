@@ -1394,5 +1394,17 @@ class Database:
             )
             await self.conn.commit()
 
+    async def add_system_log(self, level: str, module: str, message: str, stack_trace: str = None):
+        """Добавить системный лог в базу данных (для watchdog.py)"""
+        async with self.conn.cursor() as cursor:
+            await cursor.execute(
+                """INSERT INTO content_history 
+                   (post_text, image_url, model_used, cost_rub, platform, channel, post_id)
+                   VALUES (?, ?, ?, ?, ?, ?, ?)""",
+                (f"[{level}] {module}: {message}", None, None, None, None, None, None)
+            )
+            await self.conn.commit()
+            return cursor.lastrowid
+
 
 db = Database()

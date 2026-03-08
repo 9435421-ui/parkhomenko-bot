@@ -39,9 +39,11 @@ class ScoutParser:
         if not self.client:
             self.client = TelegramClient(SESSION_NAME, API_ID, API_HASH)
             await self.client.connect()
-            if not await self.client.is_user_authorized():
-                logger.error("❌ Telethon session is not authorized!")
-                raise RuntimeError("Session not authorized")
+            try:
+                if not await self.client.is_user_authorized():
+                    logger.warning("⚠️ Telethon session is not authorized! Telegram scanning will be skipped.")
+            except Exception as e:
+                logger.warning(f"⚠️ Error checking Telegram authorization: {e}. Telegram scanning will be skipped.")
 
     async def stop(self):
         if self.client:

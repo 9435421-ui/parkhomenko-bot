@@ -68,9 +68,16 @@ class BotSpy:
         self.scheduler.shutdown()
         await self.parser.stop()
 
-if __name__ == "__main__":
+async def start_spy_bot():
+    """Главная функция запуска шпиона для импорта в watchdog."""
     spy = BotSpy()
     try:
-        asyncio.run(spy.start())
+        await spy.start()
+    except KeyboardInterrupt:
+        pass
+
+if __name__ == "__main__":
+    try:
+        asyncio.run(start_spy_bot())
     except KeyboardInterrupt:
         pass
