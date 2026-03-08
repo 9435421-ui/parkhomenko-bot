@@ -51,7 +51,7 @@ except ValueError:
     sys.exit(1)
 
 # Имя файла сессии (должно совпадать с тем, что используется в Discovery)
-SESSION_NAME = 'anton_parser'
+SESSION_NAME = 'scanbot'
 
 
 async def main():
@@ -105,11 +105,11 @@ async def main():
         # Небольшая пауза перед отправкой кода
         await asyncio.sleep(2)
         try:
-            await client.send_code_request(phone)
+            await client.send_code_request(phone, force_sms=False)
         except FloodWaitError as e:
             print(f"⏳ Flood wait: Telegram заблокировал на {e.seconds} секунд")
             await asyncio.sleep(e.seconds)
-            await client.send_code_request(phone)
+            await client.send_code_request(phone, force_sms=False)
         
         # Запрашиваем код подтверждения
         print("\n🔐 Введите код подтверждения из Telegram:")
@@ -117,6 +117,7 @@ async def main():
         print("   - Перезапустить скрипт")
         print("   - Проверить раздел 'Устройства' в настройках Telegram")
         print("   - Убедиться, что номер телефона введен правильно")
+        print("⏳ Ждем код... проверьте приложение Telegram на телефоне")
         code = input("\nКод: ").strip()
         
         if not code:
