@@ -37,6 +37,9 @@ from typing import Optional
 import aiohttp
 from dotenv import load_dotenv
 
+# Импортируем модуль автоматического поиска групп
+from services.scout_discovery import ScoutDiscovery
+
 load_dotenv()
 
 def validate_env_variables():
@@ -618,8 +621,14 @@ async def main() -> None:
     seen = load_seen()
     logger.info("💾 Загружено %d просмотренных записей", len(seen))
 
+    # Инициализация модуля автоматического поиска групп
+    discovery = ScoutDiscovery()
+    await discovery.start()
+    logger.info("🔍 ScoutDiscovery инициализирован")
+
     cb_offset = 0   # offset для getUpdates (callback-кнопки)
     cycle = 0
+    last_discovery_ts = time.time()
 
     async with aiohttp.ClientSession() as session:
         await send_startup_message(session)
@@ -628,6 +637,26 @@ async def main() -> None:
             cycle += 1
             start_ts = time.time()
             logger.info("─── Цикл #%d ──────────────────────────────────", cycle)
+
+            # Автоматический поиск новых групп раз в сутки
+            now = time.time()
+            if now - last_discovery_ts >= 24 * 3600:  # 24 часа
+                logger.info("🔍 Запускаю автоматический поиск новых групп...")
+                try:
+                    new_groups = await discovery.discover_new_groups()
+                    if new_groups:
+                        new_ids = [str(g["id"]) for g in new_groups]
+                        logger.info("🎯 Найдено %d новых групп: %s", len(new_ids), new_ids)
+                        # Добавляем новые группы в список для сканирования
+                        for gid in new_ids:
+                            if gid not in VK_GROUPS:
+                                VK_GROUPS.append(gid)
+                        logger.info("✅ Группы добавлены в SCOUT_VK_GROUPS")
+                    else:
+                        logger.info("🔍 Новых групп не найдено")
+                except Exception as e:
+                    logger.error("❌ Ошибка discovery: %s", e)
+                last_discovery_ts = now
 
             try:
                 total_leads = await run_scan_cycle(session, seen)
