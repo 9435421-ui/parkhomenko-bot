@@ -52,11 +52,13 @@ def validate_env_variables():
     for var_name, value in critical_vars.items():
         if not value:
             print(f"❌ Ошибка конфигурации: {var_name} не задан в .env")
+            import sys
             sys.exit(1)
         
         # Проверка на заглушки
         if any(placeholder in str(value).lower() for placeholder in ["your_", "change_me", "id_here"]):
             print(f"❌ Ошибка конфигурации: {var_name} содержит заглушку: '{value}'. Исправьте .env")
+            import sys
             sys.exit(1)
     
     # Проверка числовых значений
@@ -66,6 +68,7 @@ def validate_env_variables():
             int(val)
     except ValueError:
         print(f"❌ Ошибка конфигурации: VK_SCAN_INTERVAL должен быть числом, получено: '{val}'")
+        import sys
         sys.exit(1)
     
     return True
@@ -310,9 +313,15 @@ async def fetch_comments(
 # ─── Отправка в Telegram ──────────────────────────────────────────────────────
 
 async def send_lead_card(session: aiohttp.ClientSession, lead: dict) -> bool:
-    """Отправляет карточку лида в рабочую группу Telegram."""
+    """
+    Отправляет карточку лида с inline-кнопками:
+      ✅ Взять в работу  — помечает лид, убирает кнопки
+      ❌ Не наш клиент  — архивирует лид, убирает кнопки
+      🔗 Открыть в VK   — прямая ссылка на источник
+      📋 Квиз           — ссылка на квиз-бот
+    """
     if not BOT_TOKEN or not LEADS_GROUP_CHAT_ID:
-        logger.warning("BOT_TOKEN или LEADS_GROUP_CHAT_ID не заданы — карточка не отправлена")
+        logger.warning("BOT_TOKEN или LEADS_GROUP_CHAT_ID не заданы")
         return False
 
     lead_type   = lead.get("lead_type", "warm")
@@ -322,24 +331,23 @@ async def send_lead_card(session: aiohttp.ClientSession, lead: dict) -> bool:
     author_url  = lead.get("author_url", "")
     group_id    = lead.get("group_id", "")
     post_id     = lead.get("post_id", "")
-    source_type = lead.get("source_type", "post")   # post | comment
+    source_type = lead.get("source_type", "post")
 
-    icon = "🔥" if lead_type == "hot" else "🎯"
+    icon       = "🔥" if lead_type == "hot" else "🎯"
     type_label = "ГОРЯЧИЙ ЛИД" if lead_type == "hot" else "Тёплый лид"
     src_label  = "комментарий" if source_type == "comment" else "пост"
-
-    # Ссылка на источник
-    if source_url:
-        post_link = source_url
-    elif group_id and post_id:
-        post_link = f"https://vk.com/wall-{group_id}_{post_id}"
-    else:
-        post_link = "https://vk.com"
-
-    author_line = (
-        f'<a href="{author_url}">{author_name}</a>'
-        if author_url else author_name
+    post_link  = source_url or (
+        f"https://vk.com/wall-{group_id}_{post_id}" if group_id and post_id else "https://vk.com"
     )
+    author_line = f'<a href="{author_url}">{author_name}</a>' if author_url else author_name
+
+    # Уникальный ID для callback — group_postid[_commentid]
+    lead_id = f"{group_id}_{post_id}"
+    if source_type == "comment" and "reply=" in source_url:
+        lead_id += f"_{source_url.split('reply=')[-1]}"
+
+    # Обрезаем author_name для callback_data (лимит 64 байта)
+    safe_author = re.sub(r"[:\s]", "_", author_name)[:20]
 
     msg = (
         f"{icon} <b>{type_label} — VK</b>\n"
@@ -350,18 +358,30 @@ async def send_lead_card(session: aiohttp.ClientSession, lead: dict) -> bool:
         f"💬 <b>Сообщение:</b>\n"
         f"{text[:600]}{'...' if len(text) > 600 else ''}\n"
         f"\n"
-        f"🔗 <a href='{VK_QUIZ_LINK}'>Отправить квиз</a> | {JULIA_CONTACT}"
+        f"⏳ <i>Ожидает решения...</i>"
     )
+
+    keyboard = {
+        "inline_keyboard": [
+            [
+                {"text": "✅ Взять в работу", "callback_data": f"lead_take:{lead_id}:{safe_author}"},
+                {"text": "❌ Не наш клиент",  "callback_data": f"lead_skip:{lead_id}"},
+            ],
+            [
+                {"text": f"🔗 Открыть {src_label} в VK", "url": post_link},
+                {"text": "📋 Отправить квиз",             "url": VK_QUIZ_LINK},
+            ],
+        ]
+    }
 
     payload: dict = {
         "chat_id": LEADS_GROUP_CHAT_ID,
         "text": msg,
         "parse_mode": "HTML",
         "disable_web_page_preview": True,
+        "reply_markup": keyboard,
     }
-    if THREAD_ID_HOT_LEADS and lead_type == "hot":
-        payload["message_thread_id"] = int(THREAD_ID_HOT_LEADS)
-    elif THREAD_ID_HOT_LEADS:
+    if THREAD_ID_HOT_LEADS:
         payload["message_thread_id"] = int(THREAD_ID_HOT_LEADS)
 
     try:
@@ -372,22 +392,104 @@ async def send_lead_card(session: aiohttp.ClientSession, lead: dict) -> bool:
         ) as resp:
             if resp.status == 200:
                 return True
-            else:
-                body = await resp.text()
-                logger.error("Telegram sendMessage error %s: %s", resp.status, body[:200])
+            body = await resp.text()
+            logger.error("Telegram sendMessage error %s: %s", resp.status, body[:200])
     except Exception as e:
         logger.error("Telegram send exception: %s", e)
-
     return False
+
+
+async def answer_callback(session: aiohttp.ClientSession, cb_id: str, text: str, alert: bool = False) -> None:
+    """Снимает индикатор загрузки с кнопки у пользователя."""
+    try:
+        await session.post(
+            f"https://api.telegram.org/bot{BOT_TOKEN}/answerCallbackQuery",
+            json={"callback_query_id": cb_id, "text": text, "show_alert": alert},
+            timeout=aiohttp.ClientTimeout(total=10),
+        )
+    except Exception as e:
+        logger.warning("answerCallbackQuery: %s", e)
+
+
+async def edit_card_status(session: aiohttp.ClientSession, chat_id: str, message_id: int, status_line: str) -> None:
+    """Убирает кнопки с карточки и заменяет '⏳ Ожидает решения...' на итоговый статус."""
+    # Шаг 1 — убираем кнопки
+    try:
+        async with session.post(
+            f"https://api.telegram.org/bot{BOT_TOKEN}/editMessageReplyMarkup",
+            json={"chat_id": chat_id, "message_id": message_id, "reply_markup": {"inline_keyboard": []}},
+            timeout=aiohttp.ClientTimeout(total=10),
+        ) as resp:
+            data = await resp.json()
+        # Шаг 2 — меняем статусную строку в тексте
+        original = data.get("result", {}).get("text", "")
+        if original:
+            new_text = original.replace("⏳ Ожидает решения...", status_line)
+            await session.post(
+                f"https://api.telegram.org/bot{BOT_TOKEN}/editMessageText",
+                json={
+                    "chat_id": chat_id,
+                    "message_id": message_id,
+                    "text": new_text,
+                    "parse_mode": "HTML",
+                    "disable_web_page_preview": True,
+                },
+                timeout=aiohttp.ClientTimeout(total=10),
+            )
+    except Exception as e:
+        logger.warning("edit_card_status: %s", e)
+
+
+async def process_callbacks(session: aiohttp.ClientSession, offset: int) -> int:
+    """
+    Забирает новые callback-нажатия от Telegram (long-poll getUpdates).
+    Обрабатывает кнопки «Взять в работу» и «Не наш клиент».
+    Возвращает новый offset.
+    """
+    try:
+        async with session.get(
+            f"https://api.telegram.org/bot{BOT_TOKEN}/getUpdates",
+            params={"offset": offset, "timeout": 3, "allowed_updates": '["callback_query"]'},
+            timeout=aiohttp.ClientTimeout(total=15),
+        ) as resp:
+            data = await resp.json()
+    except Exception as e:
+        logger.warning("getUpdates: %s", e)
+        return offset
+
+    for update in data.get("result", []):
+        offset = update["update_id"] + 1
+        cb = update.get("callback_query")
+        if not cb:
+            continue
+
+        cb_id     = cb["id"]
+        cb_data   = cb.get("data", "")
+        who       = cb.get("from", {}).get("first_name", "Оператор")
+        msg       = cb.get("message", {})
+        msg_id    = msg.get("message_id")
+        chat_id   = str(msg.get("chat", {}).get("id", LEADS_GROUP_CHAT_ID))
+        now_str   = datetime.now().strftime("%d.%m %H:%M")
+
+        if cb_data.startswith("lead_take:"):
+            author = cb_data.split(":", 2)[2].replace("_", " ") if cb_data.count(":") >= 2 else "клиент"
+            await answer_callback(session, cb_id, f"✅ Взяли {author} в работу!", alert=True)
+            await edit_card_status(session, chat_id, msg_id,
+                                   f"✅ <b>Взят в работу</b> · {who} · {now_str}")
+            logger.info("✅ lead_take: %s → %s", cb_data, who)
+
+        elif cb_data.startswith("lead_skip:"):
+            await answer_callback(session, cb_id, "Лид архивирован.")
+            await edit_card_status(session, chat_id, msg_id,
+                                   f"❌ <b>Не наш клиент</b> · {who} · {now_str}")
+            logger.info("❌ lead_skip: %s → %s", cb_data, who)
+
+    return offset
 
 
 # ─── Основной цикл сканирования ───────────────────────────────────────────────
 
-async def scan_group(
-    session: aiohttp.ClientSession,
-    group_id: str,
-    seen: set,
-) -> int:
+async def scan_group(session: aiohttp.ClientSession, group_id: str, seen: set) -> int:
     """Сканирует одну VK-группу. Возвращает количество новых лидов."""
     found = 0
     logger.info("🔍 Сканирую группу %s...", group_id)
@@ -398,36 +500,29 @@ async def scan_group(
         return 0
 
     for post in posts:
-        post_id  = post.get("id")
-        from_id  = post.get("from_id", 0)
+        post_id   = post.get("id")
+        from_id   = post.get("from_id", 0)
         post_text = post.get("text", "")
         post_key  = f"post_{group_id}_{post_id}"
 
-        # Проверяем сам пост (только от реальных пользователей, не от группы)
         if from_id > 0 and post_key not in seen:
             lead_type = detect_lead(post_text)
             if lead_type:
                 seen.add(post_key)
                 user = await get_vk_user(session, from_id)
-                lead = {
-                    "lead_type":   lead_type,
-                    "text":        post_text,
-                    "source_url":  f"https://vk.com/wall-{group_id}_{post_id}",
-                    "author_name": user["name"],
-                    "author_url":  user["url"],
-                    "group_id":    group_id,
-                    "post_id":     post_id,
-                    "source_type": "post",
-                }
-                ok = await send_lead_card(session, lead)
+                ok = await send_lead_card(session, {
+                    "lead_type": lead_type, "text": post_text,
+                    "source_url": f"https://vk.com/wall-{group_id}_{post_id}",
+                    "author_name": user["name"], "author_url": user["url"],
+                    "group_id": group_id, "post_id": post_id, "source_type": "post",
+                })
                 if ok:
                     found += 1
                     logger.info("  ✅ Лид из поста %s (%s)", post_id, lead_type)
                 await asyncio.sleep(0.5)
 
-        # Проверяем комментарии под постом
         comments = await fetch_comments(session, group_id, post_id, count=50)
-        await asyncio.sleep(0.3)   # пауза между запросами
+        await asyncio.sleep(0.3)
 
         for comment in comments:
             c_id      = comment.get("id")
@@ -435,25 +530,18 @@ async def scan_group(
             c_text    = comment.get("text", "")
             c_key     = f"comment_{group_id}_{post_id}_{c_id}"
 
-            # Только реальные пользователи
             if c_from_id <= 0 or c_key in seen:
                 continue
-
             lead_type = detect_lead(c_text)
             if lead_type:
                 seen.add(c_key)
                 user = await get_vk_user(session, c_from_id)
-                lead = {
-                    "lead_type":   lead_type,
-                    "text":        c_text,
-                    "source_url":  f"https://vk.com/wall-{group_id}_{post_id}?reply={c_id}",
-                    "author_name": user["name"],
-                    "author_url":  user["url"],
-                    "group_id":    group_id,
-                    "post_id":     post_id,
-                    "source_type": "comment",
-                }
-                ok = await send_lead_card(session, lead)
+                ok = await send_lead_card(session, {
+                    "lead_type": lead_type, "text": c_text,
+                    "source_url": f"https://vk.com/wall-{group_id}_{post_id}?reply={c_id}",
+                    "author_name": user["name"], "author_url": user["url"],
+                    "group_id": group_id, "post_id": post_id, "source_type": "comment",
+                })
                 if ok:
                     found += 1
                     logger.info("  ✅ Лид из комментария %s (пост %s) (%s)", c_id, post_id, lead_type)
@@ -463,31 +551,21 @@ async def scan_group(
     return found
 
 
-async def run_scan_cycle(seen: set) -> int:
-    """Один полный цикл по всем группам."""
-    if not VK_GROUPS:
-        logger.error(
-            "❌ SCOUT_VK_GROUPS не задан в .env!\n"
-            "   Добавьте: SCOUT_VK_GROUPS=225569022,123456789"
-        )
-        return 0
-
+async def run_scan_cycle(session: aiohttp.ClientSession, seen: set) -> int:
+    """Один полный цикл сканирования всех групп."""
     total = 0
-    async with aiohttp.ClientSession() as session:
-        for group_id in VK_GROUPS:
-            try:
-                found = await scan_group(session, group_id, seen)
-                total += found
-            except Exception as e:
-                logger.error("Ошибка сканирования группы %s: %s", group_id, e)
-            # Пауза между группами — защита от rate limit
-            await asyncio.sleep(2)
-
+    for group_id in VK_GROUPS:
+        try:
+            found = await scan_group(session, group_id, seen)
+            total += found
+        except Exception as e:
+            logger.error("Ошибка группы %s: %s", group_id, e)
+        await asyncio.sleep(2)
     save_seen(seen)
     return total
 
 
-async def send_startup_message() -> None:
+async def send_startup_message(session: aiohttp.ClientSession) -> None:
     """Уведомляет рабочую группу о старте шпиона."""
     if not BOT_TOKEN or not LEADS_GROUP_CHAT_ID:
         return
@@ -496,40 +574,27 @@ async def send_startup_message() -> None:
         f"🕵️ <b>VK-шпион ТЕРИОН запущен</b>\n\n"
         f"📘 Группы: {groups_str}\n"
         f"⏱ Интервал сканирования: {SCAN_INTERVAL // 60} мин\n"
-        f"🔑 Ключевых слов (горячие): {len(HOT_TRIGGERS)}\n"
-        f"🔑 Технических терминов: {len(TECHNICAL_TERMS)}"
+        f"🔑 Горячих триггеров: {len(HOT_TRIGGERS)} | Техтерминов: {len(TECHNICAL_TERMS)}"
     )
-    payload = {
-        "chat_id": LEADS_GROUP_CHAT_ID,
-        "text": msg,
-        "parse_mode": "HTML",
-    }
+    payload: dict = {"chat_id": LEADS_GROUP_CHAT_ID, "text": msg, "parse_mode": "HTML"}
     if THREAD_ID_HOT_LEADS:
         payload["message_thread_id"] = int(THREAD_ID_HOT_LEADS)
     try:
-        async with aiohttp.ClientSession() as s:
-            await s.post(
-                f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage",
-                json=payload,
-                timeout=aiohttp.ClientTimeout(total=10),
-            )
+        await session.post(
+            f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage",
+            json=payload, timeout=aiohttp.ClientTimeout(total=10),
+        )
     except Exception as e:
-        logger.warning("Не удалось отправить стартовое сообщение: %s", e)
+        logger.warning("Стартовое сообщение: %s", e)
 
-
-# ─── Проверка конфигурации ────────────────────────────────────────────────────
 
 def check_config() -> bool:
     ok = True
-    if not VK_TOKEN:
-        logger.error("❌ VK_TOKEN не задан в .env")
-        ok = False
-    if not BOT_TOKEN:
-        logger.error("❌ BOT_TOKEN не задан в .env")
-        ok = False
-    if not LEADS_GROUP_CHAT_ID:
-        logger.error("❌ LEADS_GROUP_CHAT_ID не задан в .env")
-        ok = False
+    for var, val in [("VK_TOKEN", VK_TOKEN), ("BOT_TOKEN", BOT_TOKEN),
+                     ("LEADS_GROUP_CHAT_ID", LEADS_GROUP_CHAT_ID)]:
+        if not val:
+            logger.error("❌ %s не задан в .env", var)
+            ok = False
     if not VK_GROUPS:
         logger.error("❌ SCOUT_VK_GROUPS не задан в .env (пример: SCOUT_VK_GROUPS=225569022,123456789)")
         ok = False
@@ -543,45 +608,50 @@ async def main() -> None:
     logger.info("  VK-шпион ТЕРИОН — старт")
     logger.info("=" * 55)
 
-    # Проверка конфигурации перед запуском
-    if not validate_env_variables():
-        logger.error("🚨 Ошибка конфигурации: исправьте .env")
-        return
-
     if not check_config():
         logger.error("Исправьте .env и перезапустите.")
         return
 
-    logger.info("📘 Группы для парсинга: %s", VK_GROUPS)
-    logger.info("⏱  Интервал: %d сек (%d мин)", SCAN_INTERVAL, SCAN_INTERVAL // 60)
+    logger.info("📘 Группы: %s", VK_GROUPS)
+    logger.info("⏱  Интервал: %d мин", SCAN_INTERVAL // 60)
 
     seen = load_seen()
     logger.info("💾 Загружено %d просмотренных записей", len(seen))
 
-    await send_startup_message()
-
+    cb_offset = 0   # offset для getUpdates (callback-кнопки)
     cycle = 0
-    while True:
-        cycle += 1
-        start_ts = time.time()
-        logger.info("─── Цикл #%d ───────────────────────────────────", cycle)
 
-        try:
-            total_leads = await run_scan_cycle(seen)
-            elapsed = int(time.time() - start_ts)
-            logger.info(
-                "✅ Цикл #%d завершён за %d сек | Найдено лидов: %d | Seen: %d",
-                cycle, elapsed, total_leads, len(seen)
-            )
-        except Exception as e:
-            logger.error("❌ Ошибка в цикле #%d: %s", cycle, e)
+    async with aiohttp.ClientSession() as session:
+        await send_startup_message(session)
 
-        logger.info("💤 Следующий скан через %d мин...", SCAN_INTERVAL // 60)
-        await asyncio.sleep(SCAN_INTERVAL)
+        while True:
+            cycle += 1
+            start_ts = time.time()
+            logger.info("─── Цикл #%d ──────────────────────────────────", cycle)
+
+            try:
+                total_leads = await run_scan_cycle(session, seen)
+                elapsed = int(time.time() - start_ts)
+                logger.info(
+                    "✅ Цикл #%d: %d лидов за %d сек | Seen: %d",
+                    cycle, total_leads, elapsed, len(seen)
+                )
+            except Exception as e:
+                logger.error("❌ Ошибка цикла #%d: %s", cycle, e)
+
+            # Обрабатываем нажатия кнопок между сканами
+            logger.info("💤 Ожидание %d мин (слушаю кнопки)...", SCAN_INTERVAL // 60)
+            deadline = time.time() + SCAN_INTERVAL
+            while time.time() < deadline:
+                try:
+                    cb_offset = await process_callbacks(session, cb_offset)
+                except Exception as e:
+                    logger.warning("process_callbacks: %s", e)
+                await asyncio.sleep(5)   # проверяем кнопки каждые 5 сек
 
 
 if __name__ == "__main__":
     try:
         asyncio.run(main())
     except KeyboardInterrupt:
-        logger.info("👋 VK-шпион остановлен вручную.")
+        logger.info("👋 VK-шпион остановлен.")
