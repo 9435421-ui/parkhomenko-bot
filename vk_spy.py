@@ -622,13 +622,13 @@ async def main() -> None:
     logger.info("💾 Загружено %d просмотренных записей", len(seen))
 
     # Инициализация модуля автоматического поиска групп
-    discovery = ScoutDiscovery()
-    await discovery.start()
-    logger.info("🔍 ScoutDiscovery инициализирован")
+    discovery_service = Discovery(VK_TOKEN)
+    logger.info("🔍 Discovery инициализирован")
 
     cb_offset = 0   # offset для getUpdates (callback-кнопки)
     cycle = 0
-    last_discovery_ts = time.time()
+    last_discovery_ts = 0
+    discovery_interval = 86400  # 24 часа
 
     async with aiohttp.ClientSession() as session:
         await send_startup_message(session)
