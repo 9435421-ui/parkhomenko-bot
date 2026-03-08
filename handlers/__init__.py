@@ -5,8 +5,10 @@ aiogram 3.x версия
 from aiogram import Dispatcher
 from .content import content_router
 from .creator import creator_router
+from .start import start_router
+from .admin import admin_router
 
-__all__ = ["register_all_handlers", "content_router", "creator_router"]
+__all__ = ["register_all_handlers", "content_router", "creator_router", "start_router", "admin_router"]
 
 
 def register_all_handlers(dp: Dispatcher):

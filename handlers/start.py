@@ -3,18 +3,18 @@
 aiogram 3.x версия
 """
 from aiogram import Router, F, Dispatcher
-from aiogram.types import Message, CallbackQuery, WebAppInfo
+from aiogram.types import Message, CallbackQuery, WebAppInfo, ReplyKeyboardMarkup, KeyboardButton
 from aiogram.fsm.context import FSMContext
 from aiogram.filters import CommandStart, CommandObject
 from keyboards.main_menu import get_main_menu
 from handlers.quiz import QuizOrder
 from config import JULIA_USER_ID, ADMIN_ID, MINI_APP_URL
 
-router = Router()
+start_router = Router()
 
 
-@router.message(F.text == "📝 Записаться на консультацию")
-@router.callback_query(F.data == "mode:quiz")
+@start_router.message(F.text == "📝 Записаться на консультацию")
+@start_router.callback_query(F.data == "mode:quiz")
 async def start_quiz(message_or_callback: Message | CallbackQuery, state: FSMContext):
     """Запуск квиза при клике на кнопку или текстовом сообщении"""
     if isinstance(message_or_callback, CallbackQuery):
@@ -23,14 +23,28 @@ async def start_quiz(message_or_callback: Message | CallbackQuery, state: FSMCon
     else:
         message = message_or_callback
     
-    await state.set_state(QuizOrder.city)
-    await message.answer(
-        "📝 Отлично! Давайте соберем информацию для заявки.\n\n"
-        "В каком городе находится объект?"
+    await state.clear()
+    
+    text = (
+        "Вас приветствует компания ТЕРИОН!\n"
+        "Я — Антон, ваш ИИ-помощник. Нажимая кнопку ниже, вы даете согласие на обработку персональных данных, "
+        "получение уведомлений и информационную переписку.\n"
+        "Все консультации носят информационный характер, финальное решение подтверждает эксперт ТЕРИОН."
     )
+    
+    keyboard = ReplyKeyboardMarkup(
+        keyboard=[
+            [KeyboardButton(text="📱 Отправить контакт и согласиться", request_contact=True)]
+        ],
+        resize_keyboard=True,
+        one_time_keyboard=True
+    )
+    
+    await message.answer(text, reply_markup=keyboard)
+    await state.set_state(QuizOrder.consent)
 
 
-@router.message(CommandStart())
+@start_router.message(CommandStart())
 async def cmd_start(message: Message, command: CommandObject, state: FSMContext):
     """Обработчик команды /start с поддержкой Deep Linking"""
     args = command.args
@@ -39,22 +53,8 @@ async def cmd_start(message: Message, command: CommandObject, state: FSMContext)
     # Deep Linking: t.me/bot?start=quiz
     if args == "quiz":
         await state.clear()
-        await state.set_state(QuizOrder.city)
-        return await message.answer(
-            "📝 Начинаем опрос для подготовки анализа вашей ситуации.\n\n"
-            "В каком городе находится объект?"
-        )
+        return await start_quiz(message, state)
     
-    # Deep Linking: t.me/bot?start=calc
-    if args == "calc":
-        from aiogram.utils.keyboard import InlineKeyboardBuilder
-        builder = InlineKeyboardBuilder()
-        builder.button(text="💰 Открыть калькулятор", web_app=WebAppInfo(url=MINI_APP_URL))
-        return await message.answer(
-            "💰 Инвест-калькулятор готов к работе!",
-            reply_markup=builder.as_markup()
-        )
-
     # Проверка на админа (Юлия или тех. админ)
     is_admin = user_id in [JULIA_USER_ID, ADMIN_ID]
     
@@ -65,13 +65,23 @@ async def cmd_start(message: Message, command: CommandObject, state: FSMContext)
             reply_markup=get_main_menu()
         )
     else:
+        # Обычный пользователь: только одна кнопка
+        keyboard = ReplyKeyboardMarkup(
+            keyboard=[
+                [KeyboardButton(text="📝 Записаться на консультацию")]
+            ],
+            resize_keyboard=True
+        )
+        
         await message.answer(
-            "👋 Здравствуйте! Я Антон, ИИ-помощник эксперта "
-            "Пархоменко Юлии Владимировны по согласованию перепланировок.\n\n"
-            "Задайте мне любой вопрос по вашей ситуации, и я постараюсь помочь!"
+            "Вас приветствует компания ТЕРИОН! Я — Антон, ваш ИИ-помощник. "
+            "Нажимая кнопку ниже, вы даете согласие на обработку персональных данных, "
+            "получение уведомлений и информационную переписку.\n\n"
+            "Задайте мне любой вопрос по вашей ситуации, и я постараюсь помочь!",
+            reply_markup=keyboard
         )
 
 
 def register_handlers(dp: Dispatcher):
     """Регистрация обработчиков для aiogram 3.x"""
-    dp.include_router(router)
+    dp.include_router(start_router)
