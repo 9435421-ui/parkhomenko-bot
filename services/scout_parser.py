@@ -262,7 +262,7 @@ class ScoutParser:
         from config import API_ID, API_HASH
         
         posts = []
-        client = TelegramClient('anton_parser', API_ID, API_HASH)
+        client = TelegramClient('scanbot', API_ID, API_HASH)
         await client.connect()
         
         if not await client.is_user_authorized():

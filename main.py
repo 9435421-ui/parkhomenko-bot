@@ -21,9 +21,7 @@ from aiogram.client.default import DefaultBotProperties
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
 from config import BOT_TOKEN, CONTENT_BOT_TOKEN, LEADS_GROUP_CHAT_ID
-from handlers import admin_router, start_router, quiz_router, dialog_router
-from handlers import content_router
-from handlers.creator import creator_router
+from handlers import register_all_handlers, content_router
 from database import db
 from utils import kb
 from middleware.logging import UnhandledCallbackMiddleware
@@ -201,12 +199,9 @@ async def main():
     # Единственные экземпляры Dispatcher в проекте; start_polling вызывается только ниже, по одному разу на каждый
     dp_main = Dispatcher(storage=MemoryStorage())
     dp_main.callback_query.middleware(UnhandledCallbackMiddleware())
-    # Системные команды (admin) — приоритет, первыми в списке роутеров
-    dp_main.include_router(admin_router)
-    dp_main.include_router(creator_router)
-    dp_main.include_router(quiz_router)   # раньше start: квиз по ссылке из поста обрабатывается первым
-    dp_main.include_router(start_router)
-    dp_main.include_router(dialog_router)
+    
+    # Регистрация всех обработчиков через единую функцию
+    register_all_handlers(dp_main)
 
     # Темы от креативщика в рабочую группу (топик Тренды/Сезон) раз в 6 ч
     async def post_creative_topics_to_group(bot):

@@ -10,7 +10,7 @@ import aiofiles
 class KnowledgeBase:
     """RAG-система для поиска релевантной информации в базе знаний"""
     
-    def __init__(self, docs_dir: str = "docs"):
+    def __init__(self, docs_dir: str = "knowledge_base"):
         self.docs_dir = docs_dir
         self.documents: List[Dict[str, str]] = []
         self.indexed = False

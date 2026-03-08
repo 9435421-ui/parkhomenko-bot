@@ -166,6 +166,7 @@ class YandexGPTClient:
         
         return await self.generate_response(
             user_prompt=user_prompt,
+            system_prompt=system_prompt,
             temperature=0.2,
             max_tokens=400
         )

@@ -9,7 +9,10 @@ class RouterAIClient:
     """RouterAI для текстов и анализа изображений (Gemini/Claude)"""
     def __init__(self, api_key: Optional[str] = None):
         self.api_key = api_key or os.getenv("ROUTER_API_KEY")
-        self.base_url = "https://router.ai/api/v1" # Уточнить URL при необходимости
+        self.base_url = os.getenv(
+            "ROUTER_AI_ENDPOINT", 
+            "https://routerai.ru/api/v1/chat/completions"
+        ).replace("/chat/completions", "")
         self.headers = {
             "Authorization": f"Bearer {self.api_key}",
             "Content-Type": "application/json"
