@@ -969,8 +969,15 @@ class Database:
         status: str = "pending",
         participants_count: int = None,
         geo_tag: str = None,
+        **kwargs
     ) -> int:
-        """Добавить ресурс. status: pending|active|archived. При дубликате link — обновить participants_count и notes."""
+        """
+        Добавить ресурс. status: pending|active|archived. 
+        При дубликате link — обновить participants_count и notes.
+        
+        Поддерживает дополнительные параметры через **kwargs для совместимости
+        с Discovery и другими модулями (например, resource_type из Discovery).
+        """
         link = (link or "").strip().rstrip("/")
         title = title or link
         platform = resource_type  # telegram | vk
