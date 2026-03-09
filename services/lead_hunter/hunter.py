@@ -8,10 +8,14 @@ from aiogram.types import BufferedInputFile, InlineKeyboardMarkup, InlineKeyboar
 
 from services.lead_hunter.discovery import Discovery
 from services.lead_hunter.analyzer import LeadAnalyzer
-from services.lead_hunter.outreach import Outreach
 from services.scout_parser import scout_parser
 
 logger = logging.getLogger(__name__)
+
+# Заглушка для Outreach — будет реализована позже
+class Outreach:
+    """Заглушка — будет реализована позже."""
+    pass
 
 # =============================================================================
 # DIY/РЕМОНТ — «народные» запросы на перепланировку
@@ -69,7 +73,8 @@ class LeadHunter:
     """Автономный поиск и привлечение клиентов (Lead Hunter)"""
 
     def __init__(self):
-        self.discovery = Discovery()
+        from config import VK_TOKEN
+        self.discovery = Discovery(vk_token=VK_TOKEN)
         self.analyzer = LeadAnalyzer()
         self.outreach = Outreach()
         self.parser = scout_parser  # общий экземпляр: отчёт последнего скана доступен и для /spy_report
@@ -1701,6 +1706,71 @@ class LeadHunter:
         except Exception as e:
             logger.error(f"❌ Ошибка отправки горячих лидов: {e}")
             return False
+
+    async def process_leads(self, leads: list) -> None:
+        """Обрабатывает лиды из VK-шпиона: сохраняет в БД и отправляет карточки."""
+        if not leads:
+            return
+        for lead in leads:
+            try:
+                main_db = await self._ensure_db_connected()
+                # Сохраняем лид в БД
+                await main_db.execute(
+                    """INSERT OR IGNORE INTO leads
+                       (source_id, text, author_id, author_name, url, platform, status, published_at)
+                       VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+                    (
+                        lead.get("source", "vk"),
+                        lead.get("text", ""),
+                        str(lead.get("from_id") or lead.get("user_id", "")),
+                        lead.get("author_name", ""),
+                        lead.get("source_url", ""),
+                        "vk",
+                        "new",
+                        lead.get("date", ""),
+                    )
+                )
+                # Формируем и отправляем карточку
+                lead_data = {
+                    "content": lead.get("text", ""),
+                    "text": lead.get("text", ""),
+                    "priority_score": 8 if lead.get("lead_type") == "hot" else 5,
+                    "pain_stage": "ST-3" if lead.get("lead_type") == "hot" else "ST-2",
+                    "url": lead.get("source_url", ""),
+                    "source_name": lead.get("source", "VK"),
+                    "author_name": lead.get("author_name", ""),
+                }
+                card_text = self._format_lead_card(
+                    lead_data,
+                    profile_url=lead.get("author_url", ""),
+                    card_header=lead.get("source", "VK"),
+                )
+                bot = _bot_for_send()
+                _close_bot = False
+                if bot is None:
+                    from config import BOT_TOKEN, LEADS_GROUP_CHAT_ID, THREAD_ID_HOT_LEADS
+                    if BOT_TOKEN:
+                        bot = Bot(token=BOT_TOKEN, default=DefaultBotProperties(parse_mode="HTML"))
+                        _close_bot = True
+                    else:
+                        logger.warning("⚠️ BOT_TOKEN не задан — карточка лида не отправлена")
+                        return
+                try:
+                    from config import LEADS_GROUP_CHAT_ID, THREAD_ID_HOT_LEADS
+                    await bot.send_message(
+                        LEADS_GROUP_CHAT_ID,
+                        card_text,
+                        message_thread_id=THREAD_ID_HOT_LEADS,
+                        parse_mode="HTML",
+                    )
+                finally:
+                    if _close_bot and bot:
+                        try:
+                            await bot.session.close()
+                        except Exception:
+                            pass
+            except Exception as e:
+                logger.error(f"Ошибка обработки лида: {e}")
     
     async def send_daily_report(self) -> bool:
         """Отправка итогового отчёта за день в рабочую группу.
