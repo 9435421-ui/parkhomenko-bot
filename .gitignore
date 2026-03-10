@@ -75,3 +75,4 @@ anton_session.session
 # Backups
 *.bak
 *.backup
+.env
