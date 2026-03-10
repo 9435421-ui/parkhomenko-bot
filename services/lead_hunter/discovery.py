@@ -1,7 +1,7 @@
 import logging
 import aiohttp
 import os
-from typing import List
+from typing import List, Dict
 
 logger = logging.getLogger(__name__)
 
@@ -71,6 +71,40 @@ class Discovery:
         
         # Убираем дубликаты
         return list(set(new_group_ids))
+
+    async def scout_vk_resources(self) -> List[Dict]:
+        """
+        Ищет новые VK группы и возвращает их в формате словарей для Hunter.
+        """
+        group_ids = await self.find_new_sources()
+        resources = []
+        async with aiohttp.ClientSession() as session:
+            for group_id in group_ids[:10]:  # Ограничиваем до 10 для теста
+                try:
+                    # Получаем информацию о группе
+                    url = "https://api.vk.com/method/groups.getById"
+                    params = {
+                        "group_ids": group_id,
+                        "access_token": self.vk_token,
+                        "v": self.api_version
+                    }
+                    async with session.get(url, params=params) as resp:
+                        data = await resp.json()
+                        if "response" in data and data["response"]:
+                            group = data["response"][0]
+                            link = f"https://vk.com/{group.get('screen_name', f'public{group_id}')}"
+                            title = group.get("name", f"VK Group {group_id}")
+                            resources.append({
+                                "link": link,
+                                "title": title,
+                                "type": "vk",
+                                "participants_count": group.get("members_count", 0),
+                                "geo_tag": "Москва"  # Поскольку ищем по city_id=1
+                            })
+                except Exception as e:
+                    logger.error(f"Error getting info for VK group {group_id}: {e}")
+        
+        return resources
 
     async def discover_new_resources(self) -> List[str]:
         """
