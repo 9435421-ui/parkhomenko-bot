@@ -930,8 +930,9 @@ class LeadHunter:
         # ── Проверка подключения к БД ────────────────────────────────────────────
         main_db = await self._ensure_db_connected()
         
-        tg_posts = await self.parser.parse_telegram(db=main_db)
-        vk_posts = await self.parser.parse_vk(db=main_db)  # Передаём БД для загрузки групп из target_resources
+        # tg_posts = await self.parser.parse_telegram(db=main_db)  # Закомментировано: метод не реализован в ScoutParser
+        tg_posts = []  # Пустой список вместо Telegram постов
+        vk_posts = await self.parser.scan_vk_groups()  # Используем правильный метод без db
         all_posts = tg_posts + vk_posts
 
         # Дополнительная проверка на DIY-фразы (фрагмент из hunter_standalone)
