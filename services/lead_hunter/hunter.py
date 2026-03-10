@@ -946,8 +946,15 @@ class LeadHunter:
         # Если лидов не найдено, пробуем найти новые источники через Discovery
         if not all_posts:
             logger.info("🔎 Лидов не найдено. Запуск Discovery для поиска новых источников...")
-            # Поиск новых Telegram каналов
-            new_sources = await self.discovery.find_new_sources()
+            # Поиск новых Telegram каналов (или любых строковых источников)
+            raw_sources = await self.discovery.find_new_sources()
+            # Преобразуем возвращённый список строк в словари, чтобы цикл ниже работал с единым форматом
+            new_sources: list[dict] = []
+            for item in raw_sources:
+                if isinstance(item, str):
+                    new_sources.append({"link": item, "title": item, "type": "telegram"})
+                else:
+                    new_sources.append(item)
             # Поиск новых VK групп
             try:
                 vk_sources = await self.discovery.scout_vk_resources()
@@ -958,7 +965,8 @@ class LeadHunter:
             activated_count = 0
             skipped_count = 0
             for source in new_sources:
-                link = source["link"]
+                # source может быть строкой на предыдущем этапе, но мы уже преобразовали его выше
+                link = source.get("link") if isinstance(source, dict) else source
                 title = source.get("title") or link
                 
                 # Проверяем подключение перед каждым запросом (на случай разрыва)
