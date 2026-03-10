@@ -72,6 +72,7 @@ THREAD_ID_DRAFTS = int(os.getenv("THREAD_ID_DRAFTS", "85"))       # Чернов
 THREAD_ID_TRENDS_SEASON = int(os.getenv("THREAD_ID_TRENDS_SEASON", "87"))  # Тренды/Сезонное
 THREAD_ID_LOGS = int(os.getenv("THREAD_ID_LOGS", "88"))           # Логи системы
 THREAD_ID_HOT_LEADS = int(os.getenv("THREAD_ID_HOT_LEADS", "811"))  # топик «Горячие лиды» в рабочей группе
+THREAD_ID_QUIZ_LEADS = int(os.getenv("THREAD_ID_QUIZ_LEADS", "0"))  # топик для заявок из квиза (если не задан, используем THREAD_ID_HOT_LEADS)
 
 # === AI (разделение по назначению) ===
 # Яндекс: персональные данные, хранение, законодательство РФ, акты. Опционально Яндекс АРТ для картинок.

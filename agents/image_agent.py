@@ -15,69 +15,49 @@ class ImageAgent:
     def __init__(self, api_key: Optional[str] = None, folder_id: Optional[str] = None):
         """
         Инициализация ImageAgent
-        
-        Args:
-            api_key: API ключ Yandex Cloud (если None, берется из .env)
-            folder_id: ID каталога Yandex Cloud (если None, берется из .env)
         """
         from services.image_generator import image_generator
         self.generator = image_generator
     
     def build_image_prompt(self, post_type: str, text: str) -> str:
         """
-        Формирует текстовое описание (промпт) для генерации картинки
-        на основе типа поста и его содержания.
-        
-        Args:
-            post_type: Тип поста ('news', 'fact', 'case', 'offer', 'seasonal')
-            text: Текст поста для извлечения ключевых слов
-            
-        Returns:
-            Текстовый промпт для генерации изображения
+        Формирует детальный промпт на основе готового текста поста.
+        Картинка (планировки, ЖК Москвы) должна строго соответствовать смыслу.
         """
-        base_style = "Photorealistic, professional architectural photography, high quality, 4k. "
+        base_style = "Photorealistic, professional architectural photography, high quality, 8k, highly detailed. "
         
+        # Анализируем текст для извлечения контекста (ЖК, тип помещения)
+        context = ""
+        if "ЖК" in text:
+            # Пытаемся выцепить название ЖК (упрощенно)
+            words = text.split()
+            for i, word in enumerate(words):
+                if word == "ЖК" and i + 1 < len(words):
+                    context = f"in Moscow residential complex {words[i+1]}, "
+                    break
+
         prompts = {
-            'news': f"Modern office building with blueprints, legal documents, urban style. {text[:50]}",
-            'fact': f"Educational concept, light bulb, building plan, magnifying glass over documents. {text[:50]}",
-            'seasonal': f"House exterior during appropriate season, cozy lighting, real estate concept. {text[:50]}",
-            'case': f"Before and after floor plan transformation, modern interior design, renovation process. {text[:50]}",
-            'offer': f"Friendly architect consulting client, signing contract, keys to new property. {text[:50]}"
+            'news': f"Modern Moscow architecture, {context}legal documents on a desk, blueprints, professional lighting.",
+            'fact': f"Detailed floor plan analysis, magnifying glass over architectural drawing, {context}precise lines.",
+            'seasonal': f"Moscow street view with modern residential buildings, {context}seasonal atmosphere, cinematic lighting.",
+            'case': f"Interior of a modern Moscow apartment after renovation, {context}spacious living room, architectural transformation.",
+            'offer': f"Professional architect meeting in a modern office, Moscow city view from window, {context}trust and expertise."
         }
         
-        # Получаем промпт по типу или дефолтный
-        prompt = prompts.get(post_type, f"Real estate redevelopment concept. {text[:50]}")
-        return base_style + prompt
-    
-    def generate_image(self, prompt: str) -> Optional[str]:
-        """
-        Генерирует изображение по текстовому промпту
+        # Если в тексте есть специфические слова, добавляем их в промпт
+        extra = ""
+        if "кухня" in text.lower(): extra += "modern kitchen interior, "
+        if "газ" in text.lower(): extra += "gas equipment safety, "
+        if "санузел" in text.lower(): extra += "bathroom design, "
         
-        Args:
-            prompt: Текстовое описание изображения
-            
-        Returns:
-            URL сгенерированного изображения или None в случае ошибки
-        """
-        try:
-            # Используем готовый генератор изображений
-            return self.generator.generate_image(prompt)
-        except Exception as e:
-            logger.error(f"Error generating image: {e}")
-            return None
+        prompt = prompts.get(post_type, f"Moscow real estate, {context}architectural detail, {extra}professional photography.")
+        return base_style + prompt + f" Context: {text[:100]}"
     
     async def generate_image_async(self, prompt: str) -> Optional[str]:
         """
         Асинхронная версия генерации изображения
-        
-        Args:
-            prompt: Текстовое описание изображения
-            
-        Returns:
-            base64-encoded изображение или None
         """
         try:
-            # Используем готовый генератор изображений
             return await self.generator.generate_image_async(prompt)
         except Exception as e:
             logger.error(f"Error generating image (async): {e}")

@@ -19,6 +19,7 @@ class BotSpy:
         self.chat_id = LEADS_GROUP_CHAT_ID
 
     async def send_telegram_msg(self, text: str):
+        """Отправка сообщения через Bot API (не требует авторизации Telethon)"""
         url = f"https://api.telegram.org/bot{self.bot_token}/sendMessage"
         payload = {
             "chat_id": self.chat_id,
@@ -30,16 +31,22 @@ class BotSpy:
                 async with session.post(url, json=payload) as resp:
                     if resp.status != 200:
                         logger.error(f"Error sending message: {await resp.text()}")
+                    else:
+                        logger.info("✅ Message sent successfully via Bot API")
             except Exception as e:
                 logger.error(f"Exception sending message: {e}")
 
     async def hunt_job(self):
         logger.info("🚀 Starting hunt job...")
         try:
-            leads = await self.parser.scan_geo_chats()
+            # Сканируем только ВК (Telegram сканирование пропускаем из-за отсутствия авторизации)
+            leads = await self.parser.scan_vk_groups()
             if leads:
-                report = self.parser.get_last_scan_report()
-                await self.send_telegram_msg(report)
+                # Отправляем результаты в LeadHunter для анализа и отправки карточек
+                # Импортируем здесь, чтобы избежать циклических зависимостей
+                from services.lead_hunter.hunter import LeadHunter
+                hunter = LeadHunter()
+                await hunter.process_leads(leads)
                 logger.info(f"✅ Hunt complete, found {len(leads)} leads")
             else:
                 logger.info("✅ Hunt complete, no new leads")
@@ -48,7 +55,8 @@ class BotSpy:
 
     async def start(self):
         logger.info("🎯 Starting Bot Spy Demon...")
-        await self.parser.start()
+        # Не запускаем Telegram-клиент, так как он не авторизован
+        # await self.parser.start()
         
         # Запуск охоты каждые 30 минут, только один экземпляр одновременно
         self.scheduler.add_job(self.hunt_job, 'interval', minutes=30, max_instances=1)
@@ -66,7 +74,7 @@ class BotSpy:
     async def stop(self):
         logger.info("🛑 Stopping Bot Spy...")
         self.scheduler.shutdown()
-        await self.parser.stop()
+        # await self.parser.stop()
 
 async def start_spy_bot():
     """Главная функция запуска шпиона для импорта в watchdog."""

@@ -1,46 +1,89 @@
-from aiogram import Router, F, Dispatcher, Bot
-from aiogram.types import Message, CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, ReplyKeyboardMarkup, KeyboardButton, ReplyKeyboardRemove
-from aiogram.fsm.state import StatesGroup, State
-from aiogram.fsm.context import FSMContext
-from config import LEADS_GROUP_CHAT_ID, THREAD_ID_HOT_LEADS, THREAD_ID_QUIZ_LEADS
-from database.db import db
+"""
+handlers/quiz.py — квиз-воронка бота АНТОН (ТЕРИОН)
+
+Структура:
+  /start → mode:quiz → consent (контакт + ПД) → 7 вопросов → план → финал
+
+Исправления (март 2026):
+1. Безопасное сохранение телефона через execute() без прямого db.conn
+2. Обработка случая когда клиент не отправил контакт (пишет текст на шаге consent)
+3. Проверка рабочего времени по МСК — разные финальные сообщения
+4. Корректная обработка plan_info для текста, фото и документов
+5. Заявка идёт в THREAD_ID_QUIZ_LEADS (отдельно от горячих лидов шпиона)
+6. Карточка заявки в рабочей группе с inline-кнопками: Взять / Перезвонить / Не наш
+7. Telegram username клиента добавлен в карточку
+"""
+
 import logging
 from datetime import datetime, timezone, timedelta
+
+from aiogram import Router, F, Bot
+from aiogram.fsm.context import FSMContext
+from aiogram.fsm.state import State, StatesGroup
+from aiogram.types import (
+    CallbackQuery,
+    InlineKeyboardButton,
+    InlineKeyboardMarkup,
+    KeyboardButton,
+    Message,
+    ReplyKeyboardMarkup,
+    ReplyKeyboardRemove,
+)
+
+from config import LEADS_GROUP_CHAT_ID, THREAD_ID_HOT_LEADS
+from database.db import db
 
 logger = logging.getLogger(__name__)
 quiz_router = Router()
 
-# Рабочее время по МСК (UTC+3)
+# ─── Конфигурация рабочего времени (МСК = UTC+3) ─────────────────────────────
+
 MSK = timezone(timedelta(hours=3))
-WORK_HOUR_START = 9
-WORK_HOUR_END = 20
-WORK_DAYS = (0, 1, 2, 3, 4)  # Пн–Пт
+WORK_HOUR_START = 9   # 09:00 МСК
+WORK_HOUR_END   = 20  # 20:00 МСК
+WORK_DAYS       = (0, 1, 2, 3, 4)  # Пн–Пт (0=Пн, 6=Вс)
+
+# Топик для заявок из квиза — отдельный от топика горячих лидов шпиона.
+# Если в .env не задан THREAD_ID_QUIZ_LEADS, используем THREAD_ID_HOT_LEADS как fallback.
+import os
+THREAD_ID_QUIZ = int(os.getenv("THREAD_ID_QUIZ_LEADS") or THREAD_ID_HOT_LEADS or 0) or None
+
 
 def _is_work_time() -> bool:
+    """Проверяет, рабочее ли сейчас время (МСК, Пн–Пт 9:00–20:00)."""
     now = datetime.now(MSK)
     return now.weekday() in WORK_DAYS and WORK_HOUR_START <= now.hour < WORK_HOUR_END
 
+
 def _next_work_time_str() -> str:
+    """Возвращает строку с ближайшим рабочим временем для сообщения клиенту."""
     now = datetime.now(MSK)
     if now.weekday() in WORK_DAYS and now.hour < WORK_HOUR_START:
         return f"сегодня с {WORK_HOUR_START}:00 МСК"
     if now.weekday() == 4 and now.hour >= WORK_HOUR_END:
         return f"в понедельник с {WORK_HOUR_START}:00 МСК"
     if now.weekday() in (5, 6):
+        days_left = 7 - now.weekday()
         return f"в понедельник с {WORK_HOUR_START}:00 МСК"
     return f"завтра с {WORK_HOUR_START}:00 МСК"
 
+
+# ─── FSM состояния ────────────────────────────────────────────────────────────
+
 class QuizOrder(StatesGroup):
-    consent = State()
-    city = State()
-    object_type = State()
-    house_material = State()
-    floor_info = State()
-    area = State()
-    gas_info = State()
-    remodeling_status = State()
-    description = State()
-    plan = State()
+    consent          = State()  # ожидаем контакт + согласие на ПД
+    city             = State()  # 1. Город
+    object_type      = State()  # 2. Тип объекта
+    house_material   = State()  # 3. Тип дома
+    floor_info       = State()  # 4. Этаж / этажность
+    area             = State()  # 5. Площадь
+    gas_info         = State()  # 6. Плита
+    remodeling_status = State() # 7. Статус перепланировки
+    description      = State()  # 8. Описание изменений
+    plan             = State()  # Загрузка плана (фото/документ/«нет плана»)
+
+
+# ─── Старт квиза ──────────────────────────────────────────────────────────────
 
 @quiz_router.callback_query(F.data == "mode:quiz")
 async def start_quiz_callback(callback: CallbackQuery, state: FSMContext):
@@ -67,6 +110,25 @@ async def start_quiz_callback(callback: CallbackQuery, state: FSMContext):
     await callback.message.answer(text, reply_markup=keyboard, parse_mode="HTML")
     await state.set_state(QuizOrder.consent)
     await callback.answer()
+
+
+@quiz_router.message(QuizOrder.consent, ~F.contact)
+async def consent_wrong_input(message: Message):
+    """Клиент написал текст вместо того чтобы нажать кнопку контакта."""
+    keyboard = ReplyKeyboardMarkup(
+        keyboard=[[KeyboardButton(text="📱 Поделиться номером и согласиться", request_contact=True)]],
+        resize_keyboard=True,
+        one_time_keyboard=True,
+    )
+    await message.answer(
+        "Пожалуйста, нажмите кнопку <b>«Поделиться номером»</b> ниже — "
+        "это необходимо для того чтобы эксперт мог с вами связаться.",
+        reply_markup=keyboard,
+        parse_mode="HTML",
+    )
+
+
+# ─── Получение контакта ───────────────────────────────────────────────────────
 
 @quiz_router.message(QuizOrder.consent, F.contact)
 async def process_consent(message: Message, state: FSMContext):
@@ -107,20 +169,8 @@ async def process_consent(message: Message, state: FSMContext):
     await message.answer("1️⃣ В каком городе находится объект?")
     await state.set_state(QuizOrder.city)
 
-@quiz_router.message(QuizOrder.consent, ~F.contact)
-async def consent_wrong_input(message: Message):
-    """Клиент написал текст вместо того чтобы нажать кнопку контакта."""
-    keyboard = ReplyKeyboardMarkup(
-        keyboard=[[KeyboardButton(text="📱 Поделиться номером и согласиться", request_contact=True)]],
-        resize_keyboard=True,
-        one_time_keyboard=True,
-    )
-    await message.answer(
-        "Пожалуйста, нажмите кнопку <b>«Поделиться номером»</b> ниже — "
-        "это необходимо для того чтобы эксперт мог с вами связаться.",
-        reply_markup=keyboard,
-        parse_mode="HTML",
-    )
+
+# ─── Вопрос 1: Город ─────────────────────────────────────────────────────────
 
 @quiz_router.message(QuizOrder.city)
 async def process_city(message: Message, state: FSMContext):
@@ -136,6 +186,9 @@ async def process_city(message: Message, state: FSMContext):
     await message.answer("2️⃣ Выберите тип объекта:", reply_markup=keyboard)
     await state.set_state(QuizOrder.object_type)
 
+
+# ─── Вопрос 2: Тип объекта ───────────────────────────────────────────────────
+
 @quiz_router.message(QuizOrder.object_type)
 async def process_object_type(message: Message, state: FSMContext):
     await state.update_data(object_type=message.text)
@@ -150,6 +203,9 @@ async def process_object_type(message: Message, state: FSMContext):
     await message.answer("3️⃣ Тип дома:", reply_markup=keyboard)
     await state.set_state(QuizOrder.house_material)
 
+
+# ─── Вопрос 3: Тип дома ──────────────────────────────────────────────────────
+
 @quiz_router.message(QuizOrder.house_material)
 async def process_house_material(message: Message, state: FSMContext):
     await state.update_data(house_material=message.text)
@@ -162,6 +218,9 @@ async def process_house_material(message: Message, state: FSMContext):
     )
     await state.set_state(QuizOrder.floor_info)
 
+
+# ─── Вопрос 4: Этаж ──────────────────────────────────────────────────────────
+
 @quiz_router.message(QuizOrder.floor_info)
 async def process_floor(message: Message, state: FSMContext):
     await state.update_data(floor_info=message.text)
@@ -172,6 +231,9 @@ async def process_floor(message: Message, state: FSMContext):
         parse_mode="HTML",
     )
     await state.set_state(QuizOrder.area)
+
+
+# ─── Вопрос 5: Площадь ───────────────────────────────────────────────────────
 
 @quiz_router.message(QuizOrder.area)
 async def process_area(message: Message, state: FSMContext):
@@ -187,6 +249,9 @@ async def process_area(message: Message, state: FSMContext):
     await message.answer("6️⃣ Какая плита установлена на кухне?", reply_markup=keyboard)
     await state.set_state(QuizOrder.gas_info)
 
+
+# ─── Вопрос 6: Плита ─────────────────────────────────────────────────────────
+
 @quiz_router.message(QuizOrder.gas_info)
 async def process_gas(message: Message, state: FSMContext):
     await state.update_data(gas_info=message.text)
@@ -201,6 +266,9 @@ async def process_gas(message: Message, state: FSMContext):
     await message.answer("7️⃣ Статус перепланировки:", reply_markup=keyboard)
     await state.set_state(QuizOrder.remodeling_status)
 
+
+# ─── Вопрос 7: Статус перепланировки ─────────────────────────────────────────
+
 @quiz_router.message(QuizOrder.remodeling_status)
 async def process_status(message: Message, state: FSMContext):
     await state.update_data(remodeling_status=message.text)
@@ -212,6 +280,9 @@ async def process_status(message: Message, state: FSMContext):
         parse_mode="HTML",
     )
     await state.set_state(QuizOrder.description)
+
+
+# ─── Описание изменений ───────────────────────────────────────────────────────
 
 @quiz_router.message(QuizOrder.description)
 async def process_description(message: Message, state: FSMContext):
@@ -226,6 +297,9 @@ async def process_description(message: Message, state: FSMContext):
         parse_mode="HTML",
     )
     await state.set_state(QuizOrder.plan)
+
+
+# ─── Загрузка плана + финал ───────────────────────────────────────────────────
 
 @quiz_router.message(QuizOrder.plan)
 async def process_plan(message: Message, state: FSMContext, bot: Bot):
@@ -294,12 +368,11 @@ async def process_plan(message: Message, state: FSMContext, bot: Bot):
 
     # Отправляем карточку в рабочую группу
     try:
-        thread_id = THREAD_ID_QUIZ_LEADS or THREAD_ID_HOT_LEADS
         await bot.send_message(
             chat_id            = LEADS_GROUP_CHAT_ID,
             text               = report,
             parse_mode         = "HTML",
-            message_thread_id  = thread_id,
+            message_thread_id  = THREAD_ID_QUIZ,
             reply_markup       = keyboard,
         )
         # Пересылаем план если был
@@ -308,12 +381,12 @@ async def process_plan(message: Message, state: FSMContext, bot: Bot):
             if is_photo:
                 await bot.send_photo(
                     LEADS_GROUP_CHAT_ID, file_id,
-                    caption=caption, message_thread_id=thread_id,
+                    caption=caption, message_thread_id=THREAD_ID_QUIZ,
                 )
             else:
                 await bot.send_document(
                     LEADS_GROUP_CHAT_ID, file_id,
-                    caption=caption, message_thread_id=thread_id,
+                    caption=caption, message_thread_id=THREAD_ID_QUIZ,
                 )
     except Exception as e:
         logger.error("Ошибка отправки заявки в группу: %s", e)
@@ -361,6 +434,9 @@ async def process_plan(message: Message, state: FSMContext, bot: Bot):
 
     await message.answer(final_text, reply_markup=ReplyKeyboardRemove(), parse_mode="HTML")
 
+
+# ─── Обработчики кнопок в рабочей группе ─────────────────────────────────────
+
 @quiz_router.callback_query(F.data.startswith("quiz_take:"))
 async def quiz_take(callback: CallbackQuery):
     parts     = callback.data.split(":", 2)
@@ -402,7 +478,3 @@ async def quiz_skip(callback: CallbackQuery):
         parse_mode="HTML",
     )
     await callback.answer("Лид архивирован.")
-
-
-def register_handlers(dp: Dispatcher):
-    dp.include_router(quiz_router)

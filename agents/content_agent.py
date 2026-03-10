@@ -1,15 +1,17 @@
 import requests
 import os
 import logging
-from datetime import datetime
-from typing import Optional
+from datetime import datetime, timedelta
+from typing import Optional, List, Dict
 
 logger = logging.getLogger(__name__)
 
 class ContentAgent:
     def __init__(self):
         from utils.yandex_gpt import yandex_gpt
+        from database.db import db
         self.gpt = yandex_gpt
+        self.db = db
         self.brief_content = self._load_brief()
 
     def _load_brief(self):
@@ -24,33 +26,74 @@ class ContentAgent:
                     logger.error(f"Error loading brief from {path}: {e}")
         return "База знаний не найдена. Используйте общие знания по перепланировкам в Москве."
 
-    async def generate_post(self, topic: str) -> str:
-        """Генерирует текст поста через YandexGPT"""
+    async def _is_duplicate(self, topic: str, title: str) -> bool:
+        """Проверка на дубликаты за последние 48 часов"""
+        async with self.db.conn.cursor() as cursor:
+            # Проверяем по заголовку и теме в content_plan
+            await cursor.execute(
+                """SELECT COUNT(*) FROM content_plan 
+                   WHERE (title = ? OR theme = ?) 
+                   AND created_at >= datetime('now', '-48 hours')""",
+                (title, topic)
+            )
+            row = await cursor.fetchone()
+            return row[0] > 0 if row else False
+
+    async def generate_post(self, topic: str, force_angle: Optional[str] = None) -> Dict:
+        """Генерирует текст поста через YandexGPT с проверкой на дубликаты"""
+        
+        # Базовая проверка (в реальности title может генерироваться отдельно, 
+        # здесь мы используем topic как theme)
+        if await self._is_duplicate(topic, topic) and not force_angle:
+            logger.info(f"Тема '{topic}' уже предлагалась недавно. Меняем угол обзора.")
+            force_angle = "кейс или практический пример вместо общих советов"
+
+        angle_instruction = f"\nУгол обзора: {force_angle}" if force_angle else ""
+
         system_prompt = f"""
 Ты — экспертный контент-менеджер компании TERION (ИП Пархоменко). 
 Твоя задача: написать пост для Telegram-канала о перепланировках в Москве.
 
-Тема: {topic}
+Тема: {topic}{angle_instruction}
 
-Стиль: Профессиональный, но доступный. Экспертный, вызывающий доверие.
+Стиль: Профессиональный, но доступный. Экспертный, вызывающий доверие. 
+Тон: ТЕРИОН — надежность, законность, экспертность.
+
 База знаний:
 {self.brief_content[:2000]}
 
 Требования:
 1. Текст должен быть структурированным (используй абзацы).
 2. Используй эмодзи умеренно.
-3. В конце обязательно добавь призыв к действию (CTA).
+3. В конце обязательно добавь призыв к действию (CTA): «📝 Записаться на консультацию».
 4. Не используй сложные юридические термины без объяснения.
+5. Проверь текст на грамматику и соответствие тону ТЕРИОН.
 """.strip()
 
         try:
-            result = await self.gpt.generate_response(
-                user_prompt=f"Напиши экспертный пост на тему: {topic}",
+            result_text = await self.gpt.generate_response(
+                user_prompt=f"Напиши экспертный пост на тему: {topic}. Обязательно начни с цепляющего заголовка.",
                 system_prompt=system_prompt,
                 temperature=0.6,
                 max_tokens=1500
             )
-            return result
+            
+            # Извлекаем заголовок (первая строка)
+            lines = result_text.strip().split('\n')
+            title = lines[0].replace('#', '').strip()
+            body = '\n'.join(lines[1:]).strip()
+            
+            return {
+                "title": title,
+                "body": body,
+                "topic": topic,
+                "status": "draft" # Посты приходят на одобрение
+            }
         except Exception as e:
             logger.error(f"Error generating post: {e}")
-            return f"Ошибка при генерации поста на тему '{topic}'. Пожалуйста, попробуйте позже."
+            return {
+                "title": "Ошибка генерации",
+                "body": f"Ошибка при генерации поста на тему '{topic}'.",
+                "topic": topic,
+                "status": "error"
+            }
