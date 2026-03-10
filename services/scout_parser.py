@@ -261,3 +261,7 @@ class ScoutParser:
 
     def _count_links(self, text: str) -> int:
         return len(re.findall(r"https?://|vk\.com/|t\.me/", text))
+
+
+# Создаем экземпляр для совместимости
+scout_parser = ScoutParser()
