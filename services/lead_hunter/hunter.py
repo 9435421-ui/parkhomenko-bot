@@ -935,6 +935,33 @@ class LeadHunter:
         vk_posts = await self.parser.scan_vk_groups()  # Используем правильный метод без db
         all_posts = tg_posts + vk_posts
 
+        # Запуск Discovery для поиска новых VK групп
+        try:
+            from services.scout_discovery import ScoutDiscovery
+            discovery = ScoutDiscovery()
+            await discovery.start()
+            new_groups = await discovery.discover_new_groups()
+            if new_groups:
+                # Добавляем новые группы в БД
+                for g in new_groups:
+                    group_id = str(g.get("id", ""))
+                    link = f"vk.com/club{group_id}"
+                    title = g.get("name", f"VK группа {group_id}")
+                    try:
+                        await main_db.add_target_resource(
+                            resource_type='vk',
+                            link=link,
+                            title=title,
+                            platform='vk',
+                            status='active'
+                        )
+                    except Exception as e:
+                        logger.warning(f"Не удалось добавить группу {group_id}: {e}")
+                logger.info(f"✅ Discovery: добавлено {len(new_groups)} новых VK групп в БД")
+            await discovery.stop()
+        except Exception as e:
+            logger.warning(f"Scout Discovery error: {e}")
+
         # Дополнительная проверка на DIY-фразы (фрагмент из hunter_standalone)
         for post in all_posts:
             t_lower = (post.text or "").lower()
@@ -1875,3 +1902,44 @@ class LeadHunter:
         except Exception as e:
             logger.error(f"❌ Ошибка отправки итогового отчёта: {e}")
             return False
+    
+    async def run_discovery(self):
+        """Запуск Discovery для поиска новых VK групп (раз в сутки)"""
+        logger.info("🔎 LeadHunter Discovery: начало поиска новых VK групп...")
+        
+        try:
+            main_db = await self._ensure_db_connected()
+            
+            from services.scout_discovery import ScoutDiscovery
+            discovery = ScoutDiscovery()
+            await discovery.start()
+            
+            new_groups = await discovery.discover_new_groups()
+            if new_groups:
+                added_count = 0
+                # Добавляем новые группы в БД
+                for g in new_groups:
+                    group_id = str(g.get("id", ""))
+                    link = f"vk.com/club{group_id}"
+                    title = g.get("name", f"VK группа {group_id}")
+                    
+                    try:
+                        await main_db.add_target_resource(
+                            resource_type='vk',
+                            link=link,
+                            title=title,
+                            platform='vk',
+                            status='active'
+                        )
+                        added_count += 1
+                    except Exception as e:
+                        logger.warning(f"Не удалось добавить группу {group_id}: {e}")
+                
+                if added_count > 0:
+                    logger.info(f"✅ Discovery: добавлено {added_count} новых VK групп в БД")
+            else:
+                logger.info("ℹ️ Discovery: новых VK групп не найдено")
+            
+            await discovery.stop()
+        except Exception as e:
+            logger.warning(f"Scout Discovery error: {e}")

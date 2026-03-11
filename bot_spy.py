@@ -55,8 +55,8 @@ class BotSpy:
 
     async def start(self):
         logger.info("🎯 Starting Bot Spy Demon...")
-        # Не запускаем Telegram-клиент, так как он не авторизован
-        # await self.parser.start()
+        # Инициализируем parser (подключаем БД)
+        await self.parser.start()
         
         # Запуск охоты каждые 30 минут, только один экземпляр одновременно
         self.scheduler.add_job(self.hunt_job, 'interval', minutes=30, max_instances=1)
@@ -74,7 +74,7 @@ class BotSpy:
     async def stop(self):
         logger.info("🛑 Stopping Bot Spy...")
         self.scheduler.shutdown()
-        # await self.parser.stop()
+        await self.parser.stop()
 
 async def start_spy_bot():
     """Главная функция запуска шпиона для импорта в watchdog."""

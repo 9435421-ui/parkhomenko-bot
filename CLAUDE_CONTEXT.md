@@ -13,16 +13,16 @@ GitHub: https://github.com/9435421-ui/parkhomenko-bot
 ## Ключевые файлы
 | Файл | Назначение | Статус |
 |------|-----------|--------|
-| `main.py` | Точка входа, два бота + scheduler | ✅ рабочий |
-| `bot_spy.py` | Демон шпиона (Telethon + APScheduler, БЕЗ aiogram) | ✅ исправлен |
+| `main.py` | Точка входа, два бота + scheduler | ✅ с Discovery задачей |
+| `bot_spy.py` | Демон шпиона (Telethon + APScheduler, БЕЗ aiogram) | ✅ с start/stop БД |
 | `vk_spy.py` | Автономный VK-шпион (aiohttp, без Telethon) | ✅ готов к запуску |
-| `services/scout_parser.py` | Парсер TG+VK, async for исправлен | ✅ исправлен |
+| `services/scout_parser.py` | Парсер TG+VK, VK API реализован | ✅ полный функционал |
 | `session_manager.py` | Единый менеджер Telethon-сессии | ✅ исправлен |
 | `config.py` | Все переменные окружения | ⚠️ дубль NOTIFICATIONS_CHANNEL_ID |
 | `database/db.py` | SQLite + WAL mode | ✅ исправлен |
 | `watchdog.py` | Самовосстановление процессов | ✅ исправлен |
 | `handlers/` | start, quiz, dialog, admin, content, invest, vk_publisher | ✅ квиз готов |
-| `services/lead_hunter/` | hunter.py, analyzer.py, discovery.py | ✅ исправлен |
+| `services/lead_hunter/` | hunter.py с Discovery + scheduler, analyzer.py, discovery.py | ✅ интегрирован |
 | `utils/yandex_gpt.py` | YandexGPT интеграция | ✅ исправлен |
 | `agents/content_agent.py` | Контент-агент (async) | ✅ исправлен |
 
@@ -72,7 +72,7 @@ python session_manager.py
 python session_manager.py --reset  # если сессия сломана
 ```
 
-## Исправленные баги (март 2026, обновлено 10 марта)
+## Исправленные баги (март 2026, обновлено 12 марта)
 1. ✅ Утечки секретов (fix_session.py, test_spy.py, scanbot.session)
 2. ✅ Импорты роутеров в main.py / handlers/__init__.py
 3. ✅ set_content_bot в bot_config.py
@@ -87,6 +87,14 @@ python session_manager.py --reset  # если сессия сломана
 12. ✅ image_agent.py — заглушки заменены на реальные вызовы
 13. ✅ WAL mode + busy_timeout в database/db.py
 14. ✅ quiz.py — новая квиз-воронка с 8 шагами, обработка планов, финальные сообщения по времени суток
+15. ✅ scout_parser.py — чтение VK групп из БД (WHERE platform='vk' AND is_active=1)
+16. ✅ scout_parser.py — экстрактор ID группы из link (club225569022 → 225569022)
+17. ✅ scout_parser.py — реальная реализация _get_vk_posts() с VK API
+18. ✅ scout_parser.py — реальная реализация _get_vk_comments() с VK API
+19. ✅ bot_spy.py — добавлены вызовы await self.parser.start/stop()
+20. ✅ hunter.py — интеграция Discovery в основной цикл hunt()
+21. ✅ LeadHunter — новый метод run_discovery() для поиска новых VK групп
+22. ✅ Планировщик — задача запуска Discovery раз в сутки (bot_anton.py, main.py)
 
 ## Открытые задачи
 - 🟡 ADMIN_ID в .env = placeholder, нужно заменить на реальный ID

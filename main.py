@@ -175,6 +175,15 @@ async def main():
 
     # Инсайт недели: воскресенье, 18:00
     scheduler.add_job(hunter.generate_weekly_insight, 'cron', day_of_week='sun', hour=18, minute=0)
+    
+    # Поиск новых VK групп раз в сутки через Discovery
+    scheduler.add_job(
+        hunter.run_discovery,
+        'interval',
+        hours=24,
+        id='vk_discovery',
+        max_instances=1
+    )
 
     # Гео-шпион 24/7: чаты ЖК (Перекрёсток, Самолёт, ПИК и т.д.) — каждые 5 мин
     async def run_geo_spy_job():

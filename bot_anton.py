@@ -167,6 +167,13 @@ async def start_anton_bot():
     hunter = LeadHunter()
     scheduler.add_job(hunter.hunt, 'interval', minutes=30)
     scheduler.add_job(creative_agent.scout_topics, 'interval', hours=6)
+    scheduler.add_job(
+        hunter.run_discovery,
+        'interval',
+        hours=24,
+        id='vk_discovery',
+        max_instances=1
+    )
 
     scheduler.start()
     logger.info("✅ Планировщик запущен")
