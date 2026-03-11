@@ -3,10 +3,11 @@
 """
 import os
 from dotenv import load_dotenv
+from typing import Union
 
 load_dotenv()
 
-def parse_channel_id(channel_id_str: str | None) -> int | str | None:
+def parse_channel_id(channel_id_str: Union[str, None]) -> Union[int, str, None]:
     """
     Эталонная функция для парсинга ID канала из строки.
     """
