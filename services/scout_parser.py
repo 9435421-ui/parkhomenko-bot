@@ -109,16 +109,15 @@ class ScoutParser:
         self.VK_GROUPS = []  # Теперь будет заполняться из БД
 
     async def start(self):
-        if not self.client:
-            self.client = TelegramClient(SESSION_NAME, API_ID, API_HASH)
-            await self.client.connect()
-            try:
-                if not await self.client.is_user_authorized():
-                    logger.warning("⚠️ Telethon session is not authorized! Telegram scanning will be skipped.")
-            except Exception as e:
-                logger.warning(f"⚠️ Error checking Telegram authorization: {e}. Telegram scanning will be skipped.")
+        from config import API_ID, API_HASH
+        if API_ID and API_HASH:
+            if not self.client:
+                self.client = TelegramClient(SESSION_NAME, API_ID, API_HASH)
+                await self.client.connect()
+        else:
+            logger.warning("⚠️ TG_API_ID/API_HASH не заданы — Telegram-парсинг отключён")
+            self.client = None
         
-        # Подключаем БД
         if not self.db.conn:
             await self.db.connect()
 
