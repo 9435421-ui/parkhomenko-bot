@@ -72,7 +72,7 @@ python session_manager.py
 python session_manager.py --reset  # если сессия сломана
 ```
 
-## Исправленные баги (март 2026, обновлено 12 марта)
+## Исправленные баги (март 2026, обновлено 14 марта)
 1. ✅ Утечки секретов (fix_session.py, test_spy.py, scanbot.session)
 2. ✅ Импорты роутеров в main.py / handlers/__init__.py
 3. ✅ set_content_bot в bot_config.py
@@ -95,6 +95,9 @@ python session_manager.py --reset  # если сессия сломана
 20. ✅ hunter.py — интеграция Discovery в основной цикл hunt()
 21. ✅ LeadHunter — новый метод run_discovery() для поиска новых VK групп
 22. ✅ Планировщик — задача запуска Discovery раз в сутки (bot_anton.py, main.py)
+23. ✅ Метод parse_vk → scan_vk_groups в hunter.py
+24. ✅ База данных в scan_vk_groups — использование await db.get_connection()
+25. ✅ Символ стрелки → в handlers/start.py заменён на текстовую стрелку ->
 
 ## Открытые задачи
 - 🟡 ADMIN_ID в .env = placeholder, нужно заменить на реальный ID
