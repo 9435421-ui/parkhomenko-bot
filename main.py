@@ -21,23 +21,13 @@ from aiogram.client.default import DefaultBotProperties
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
 from config import BOT_TOKEN, CONTENT_BOT_TOKEN, LEADS_GROUP_CHAT_ID
-<<<<<<< HEAD
 from handlers import register_all_handlers, content_router
-=======
-from handlers import admin_router, start_router, quiz_router, dialog_router
-from handlers import content_router
-from handlers.creator import creator_router
->>>>>>> 7088a20d30a8942893a1c5c26400c6546150a377
 from database import db
 from utils import kb
 from middleware.logging import UnhandledCallbackMiddleware
 from services.scout_parser import ScoutParser
 from agents.creative_agent import creative_agent
-<<<<<<< HEAD
 from services.lead_hunter.hunter import LeadHunter
-=======
-from services.lead_hunter import LeadHunter
->>>>>>> 7088a20d30a8942893a1c5c26400c6546150a377
 from services.competitor_spy import competitor_spy
 from services.publisher import publisher
 from services.image_generator import image_generator
@@ -45,7 +35,6 @@ from services.image_generator import image_generator
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
-<<<<<<< HEAD
 class DbLogHandler(logging.Handler):
     """Кастомный обработчик логов для записи в БД."""
     def emit(self, record):
@@ -60,8 +49,6 @@ class DbLogHandler(logging.Handler):
 # Добавляем обработчик в корневой логгер
 logging.getLogger().addHandler(DbLogHandler())
 
-=======
->>>>>>> 7088a20d30a8942893a1c5c26400c6546150a377
 # Аудит: видим PID, чтобы убедиться, что процесс не запускается дважды
 print(f"DEBUG: Started process with PID {os.getpid()}")
 
@@ -113,14 +100,9 @@ async def main():
     # 2. Один раз создаём экземпляры ботов (далее используем их везде, включая проверку связей)
     main_bot = Bot(token=BOT_TOKEN or "", default=DefaultBotProperties(parse_mode="HTML"))
     content_bot = Bot(token=CONTENT_BOT_TOKEN or "", default=DefaultBotProperties(parse_mode="HTML"))
-<<<<<<< HEAD
     from utils.bot_config import set_main_bot, set_content_bot
     set_main_bot(main_bot)
     set_content_bot(content_bot)
-=======
-    from utils.bot_config import set_main_bot
-    set_main_bot(main_bot)
->>>>>>> 7088a20d30a8942893a1c5c26400c6546150a377
     publisher.bot = main_bot
 
     # 3. Проверка связей (те же экземпляры main_bot, content_bot — сессии не закрываем)
@@ -178,44 +160,17 @@ async def main():
 
     scheduler = AsyncIOScheduler()
 
-<<<<<<< HEAD
     from services.publisher import Publisher
     poster = Publisher(main_bot)
 
     # Проверка и публикация по расписанию
     scheduler.add_job(poster.check_and_publish, "interval", minutes=10)
     scheduler.add_job(poster.check_and_publish, "cron", hour=12, minute=0)  # явно в 12:00
-=======
-    async def check_and_publish_scheduled_posts():
-        """Публикация постов из контент-плана (status=approved, publish_date <= сейчас)."""
-        try:
-            posts = await db.get_posts_to_publish()
-            if not posts:
-                return
-            for post in posts:
-                try:
-                    title = (post.get("title") or "").strip()
-                    body = (post.get("body") or "").strip()
-                    text = f"📌 <b>{title}</b>\n\n{body}\n\n#перепланировка #согласование #терион" if title else body + "\n\n#перепланировка #согласование #терион"
-                    image_bytes = None  # TODO: загрузка по image_url при наличии
-                    await publisher.publish_all(text, image_bytes)
-                    await db.mark_as_published(post["id"])
-                    logger.info("✅ Опубликован пост #%s из контент-плана", post["id"])
-                except Exception as e:
-                    logger.error("Ошибка публикации поста #%s: %s", post.get("id"), e)
-        except Exception as e:
-            logger.error("Ошибка check_and_publish_scheduled_posts: %s", e)
-
-    # Проверка и публикация по расписанию: каждый час (посты с publish_date в прошлом и status=approved)
-    scheduler.add_job(check_and_publish_scheduled_posts, "interval", hours=1)
-    scheduler.add_job(check_and_publish_scheduled_posts, "cron", hour=12, minute=0)  # явно в 12:00
->>>>>>> 7088a20d30a8942893a1c5c26400c6546150a377
 
     # Lead Hunter & Creative Agent Integration
     hunter = LeadHunter()
     
     # Поиск клиентов каждые 30 минут (каналы TG + VK)
-<<<<<<< HEAD
     scheduler.add_job(hunter.hunt, 'interval', minutes=30)
 
     # Инсайт недели: воскресенье, 18:00
@@ -230,12 +185,6 @@ async def main():
         max_instances=1
     )
 
-=======
-    # Использует обновленный ScoutParser с фильтрами анти-спама и режимом модерации
-    # Все найденные лиды отправляются в админ-канал (топик THREAD_ID_HOT_LEADS) для модерации
-    scheduler.add_job(hunter.hunt, 'interval', minutes=30)
-
->>>>>>> 7088a20d30a8942893a1c5c26400c6546150a377
     # Гео-шпион 24/7: чаты ЖК (Перекрёсток, Самолёт, ПИК и т.д.) — каждые 5 мин
     async def run_geo_spy_job():
         if not competitor_spy.geo_monitoring_enabled:
@@ -251,52 +200,6 @@ async def main():
     # Поиск идей для контента раз в 6 часов (темы ещё отправляются в группу после создания content_bot)
     scheduler.add_job(creative_agent.scout_topics, 'interval', hours=6)
     
-<<<<<<< HEAD
-=======
-    # Автоматические напоминания для продажных диалогов (дожим)
-    from services.sales_reminders import send_sales_reminders
-    scheduler.add_job(send_sales_reminders, 'interval', hours=6)
-    
-    # ── ПЛАНИРОВЩИК СВОДОК ЛИДОВ ────────────────────────────────────────────────────
-    # Отправка сводок обычных лидов (priority < 3) трижды в день: 9:00, 14:00, 19:00 МСК
-    # Фильтр "Живой человек": только лиды от пользователей (не от каналов) попадают в сводки
-    async def send_regular_leads_summary_job():
-        """Задача для отправки сводки обычных лидов по расписанию.
-        
-        Фильтр "Живой человек" применяется в БД: get_regular_leads_for_summary()
-        исключает лиды от каналов (sender_type == 'channel' или author_id отсутствует).
-        """
-        try:
-            await hunter.send_regular_leads_summary()
-        except Exception as e:
-            logger.error(f"Ошибка отправки сводки обычных лидов: {e}")
-    
-    # Добавляем задачи на отправку сводок в 9:00, 14:00, 19:00 МСК
-    # Используем UTC: МСК = UTC+3, поэтому 9:00 МСК = 06:00 UTC, 14:00 МСК = 11:00 UTC, 19:00 МСК = 16:00 UTC
-    try:
-        from pytz import timezone
-        moscow_tz = timezone('Europe/Moscow')
-        scheduler.add_job(send_regular_leads_summary_job, 'cron', hour=9, minute=0, timezone=moscow_tz)
-        scheduler.add_job(send_regular_leads_summary_job, 'cron', hour=14, minute=0, timezone=moscow_tz)
-        scheduler.add_job(send_regular_leads_summary_job, 'cron', hour=19, minute=0, timezone=moscow_tz)
-    except ImportError:
-        # Если pytz не установлен, используем UTC с учетом смещения
-        logger.warning("⚠️ pytz не установлен, используем UTC с учетом МСК (UTC+3)")
-        scheduler.add_job(send_regular_leads_summary_job, 'cron', hour=6, minute=0)  # 9:00 МСК
-        scheduler.add_job(send_regular_leads_summary_job, 'cron', hour=11, minute=0)  # 14:00 МСК
-        scheduler.add_job(send_regular_leads_summary_job, 'cron', hour=16, minute=0)  # 19:00 МСК
-    
-    # Проверка горячих лидов для немедленной отправки (каждые 15 минут)
-    async def check_and_send_hot_leads_job():
-        """Задача для проверки и отправки горячих лидов в топик 'Горячие лиды'."""
-        try:
-            await hunter.send_hot_leads_immediate()
-        except Exception as e:
-            logger.error(f"Ошибка отправки горячих лидов: {e}")
-    
-    scheduler.add_job(check_and_send_hot_leads_job, 'interval', minutes=15)
-    
->>>>>>> 7088a20d30a8942893a1c5c26400c6546150a377
     scheduler.start()
     # Задачи планировщика получают main_bot/content_bot аргументом, своих Bot() не создают
     from services.birthday_greetings import send_birthday_greetings
@@ -305,18 +208,9 @@ async def main():
     # Единственные экземпляры Dispatcher в проекте; start_polling вызывается только ниже, по одному разу на каждый
     dp_main = Dispatcher(storage=MemoryStorage())
     dp_main.callback_query.middleware(UnhandledCallbackMiddleware())
-<<<<<<< HEAD
     
     # Регистрация всех обработчиков через единую функцию
     register_all_handlers(dp_main)
-=======
-    # Системные команды (admin) — приоритет, первыми в списке роутеров
-    dp_main.include_router(admin_router)
-    dp_main.include_router(creator_router)
-    dp_main.include_router(quiz_router)   # раньше start: квиз по ссылке из поста обрабатывается первым
-    dp_main.include_router(start_router)
-    dp_main.include_router(dialog_router)
->>>>>>> 7088a20d30a8942893a1c5c26400c6546150a377
 
     # Темы от креативщика в рабочую группу (топик Тренды/Сезон) раз в 6 ч
     async def post_creative_topics_to_group(bot):

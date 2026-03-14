@@ -1,9 +1,6 @@
 import os
 import logging
-<<<<<<< HEAD
 import json
-=======
->>>>>>> 7088a20d30a8942893a1c5c26400c6546150a377
 from typing import Dict, Optional
 import aiohttp
 from aiogram import Bot
@@ -41,17 +38,10 @@ class Publisher:
             logger.error(f"❌ Ошибка публикации в TG: {e}")
             return False
     
-<<<<<<< HEAD
     # Подпись эксперта для VK
     VK_SIGNATURE = "\n\n---\nАнтон, ИИ-ассистент компании TERION\n#TERION #перепланировка"
     
     async def publish_to_vk(self, text: str, image: bytes = None, add_signature: bool = True, keyboard: str = None) -> bool:
-=======
-    # Подпись эксперта для VK (обновлена для соответствия формату)
-    VK_SIGNATURE = "\n\n---\n🏡 Эксперт: Юлия Пархоменко\nКомпания: TERION"
-    
-    async def publish_to_vk(self, text: str, image: bytes = None, add_signature: bool = True) -> bool:
->>>>>>> 7088a20d30a8942893a1c5c26400c6546150a377
         """Публикация в VK группу через API"""
         if not self.vk_token or not self.vk_group:
             logger.warning("⚠️ VK_TOKEN или VK_GROUP_ID не настроены")
@@ -70,11 +60,8 @@ class Publisher:
                 'message': text,
                 'v': '5.199'
             }
-<<<<<<< HEAD
             if keyboard:
                 params['keyboard'] = keyboard
-=======
->>>>>>> 7088a20d30a8942893a1c5c26400c6546150a377
             
             # Если есть изображение, нужно сначала загрузить его в ВК
             attachments = ""
@@ -145,7 +132,6 @@ class Publisher:
             logger.error(f"❌ Ошибка загрузки фото в VK: {e}")
             return None
     
-<<<<<<< HEAD
     def format_max_post(self, text: str, title: str = "", lead_id: int = None) -> str:
         """Форматирование поста для MAX в стиле TERION."""
         header = f"# {title or 'Инсайт TERION'}\n\n"
@@ -175,24 +161,12 @@ class Publisher:
         # Форматируем текст если это не сырые данные
         final_body = text if is_raw else self.format_max_post(text, title)
         
-=======
-    async def publish_to_max(self, text: str, title: str = "") -> bool:
-        """Публикация в Max.ru"""
-        device_token = os.getenv("MAX_DEVICE_TOKEN", "").strip()
-        subsite_id = os.getenv("MAX_SUBSITE_ID", "").strip()
-
-        if not device_token or not subsite_id:
-            logger.warning("⚠️ MAX_DEVICE_TOKEN или MAX_SUBSITE_ID не настроены")
-            return False
-
->>>>>>> 7088a20d30a8942893a1c5c26400c6546150a377
         url = f"https://api.max.ru/v1.9/subsite/{subsite_id}/content"
         headers = {
             "X-Device-Token": device_token,
             "Content-Type": "application/json",
             "Authorization": f"Bearer {device_token}",
         }
-<<<<<<< HEAD
         
         payload = {
             "title": (title or "Инсайт TERION")[:200],
@@ -204,72 +178,34 @@ class Publisher:
             connector = aiohttp.TCPConnector(verify_ssl=False)
             async with aiohttp.ClientSession(connector=connector) as session:
                 async with session.post(url, headers=headers, json=payload, timeout=aiohttp.ClientTimeout(total=60)) as resp:
-=======
-
-        import re
-        body_plain = re.sub(r"<[^>]+>", "", text)
-        body_plain = re.sub(r"&nbsp;", " ", body_plain).strip()
-
-        payload = {
-            "title": (title or "Новости TERION")[:200],
-            "body": body_plain[:5000],
-            "type": "post",
-        }
-
-        try:
-            connector = aiohttp.TCPConnector(ssl=False)
-            async with aiohttp.ClientSession(connector=connector) as session:
-                async with session.post(
-                    url, headers=headers, json=payload,
-                    timeout=aiohttp.ClientTimeout(total=60)
-                ) as resp:
->>>>>>> 7088a20d30a8942893a1c5c26400c6546150a377
                     if resp.status == 200:
                         logger.info("✅ Опубликовано в Max.ru")
                         return True
                     else:
                         error_text = await resp.text()
-<<<<<<< HEAD
                         logger.error(f"❌ Max.ru error {resp.status}: {error_text}")
-=======
-                        logger.error(f"❌ Max.ru error {resp.status}: {error_text[:200]}")
->>>>>>> 7088a20d30a8942893a1c5c26400c6546150a377
                         return False
         except Exception as e:
             logger.error(f"❌ Ошибка публикации в Max.ru: {e}")
             return False
 
-<<<<<<< HEAD
     async def publish_all(self, text: str, image: bytes = None, title: str = "", post_id: int = None) -> Dict[str, bool]:
         """Публикация во все каналы"""
         results = {}
         
-=======
-    async def publish_all(self, text: str, image: bytes = None, title: str = "") -> Dict[str, bool]:
-        """Публикация во все настроенные каналы: Telegram, VK, Max.ru"""
-        results = {}
-
->>>>>>> 7088a20d30a8942893a1c5c26400c6546150a377
         # Telegram
         for name, channel_id in self.tg_channels.items():
             if channel_id:
                 results[f'tg_{name}'] = await self.publish_to_telegram(channel_id, text, image)
-<<<<<<< HEAD
         
         # VK
         if self.vk_token and self.vk_group:
             # Для VK передаем кнопки квиза по умолчанию
-=======
-
-        # VK
-        if self.vk_token and self.vk_group:
->>>>>>> 7088a20d30a8942893a1c5c26400c6546150a377
             results['vk'] = await self.publish_to_vk(text, image)
 
         # Max.ru
         if os.getenv("MAX_DEVICE_TOKEN"):
             results['max'] = await self.publish_to_max(text, title)
-<<<<<<< HEAD
             
         # Обновляем статус в БД если передан post_id
         if post_id:
@@ -293,10 +229,3 @@ publisher = Publisher()
 
 # Alias для обратной совместимости
 AutoPoster = Publisher
-=======
-
-        return results
-
-# Singleton
-publisher = Publisher()
->>>>>>> 7088a20d30a8942893a1c5c26400c6546150a377

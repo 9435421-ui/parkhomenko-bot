@@ -1,12 +1,4 @@
-<<<<<<< HEAD:content_bot_mvp/agents/content_agent.py
  ебе еще import requests
-=======
-"""
-Content Agent — асинхронный модуль генерации контента для Telegram-каналов.
-Использует aiohttp для асинхронных запросов к Router AI (GPT).
-"""
-import aiohttp
->>>>>>> 7088a20d30a8942893a1c5c26400c6546150a377:content_agent.py
 import os
 import logging
 import random
@@ -60,7 +52,6 @@ class ContentAgent:
             "Поздравляем с днем рождения! Пусть этот день будет ярким и незабываемым, наполненным любовью близких и приятными моментами. Желаем крепкого здоровья, семейного тепла и достижения всех поставленных целей.",
         ]
 
-<<<<<<< HEAD:content_bot_mvp/agents/content_agent.py
     def generate_welcome_post(self, person_name: str | None = None):
         """
         Генерирует приветственное сообщение-визитку для потенциального клиента.
@@ -150,14 +141,6 @@ return {
         }
 
     def build_image_prompt(self, post: dict) -> str | None:
-=======
-    async def _call_yandex_gpt(self, user_prompt: str) -> str:
-        """Асинхронный вызов LLM API через aiohttp.
-
-        Если настроен ROUTER_AI_KEY и endpoint указывает на routerai.ru —
-        используем OpenAI-совместимый формат (gpt-4o-mini).
-        Иначе — Yandex GPT (yandexgpt/latest).
->>>>>>> 7088a20d30a8942893a1c5c26400c6546150a377:content_agent.py
         """
         system_prompt = """Ты — ведущий контент-стратег и эксперт по продажам компании TERION.
 Твоя специализация: легализация перепланировок в Москве и МО.
@@ -294,7 +277,6 @@ return {
 {CTA_TEXT}{vk_hashtags}""",
             'поздравление': f"""Напиши короткое искреннее поздравление с днём рождения.
 
-<<<<<<< HEAD:content_bot_mvp/agents/content_agent.py
 👉 [CTA с призывом к действию]
 """,
             'живой': f"""
@@ -335,9 +317,6 @@ return {
 Напиши короткое искреннее поздравление с днём рождения.
 
 Кого поздравляем: {theme_note or 'друг'}
-=======
-{max_instructions}
->>>>>>> 7088a20d30a8942893a1c5c26400c6546150a377:content_agent.py
 
 Требования:
 - 60-100 слов

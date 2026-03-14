@@ -1,0 +1,1 @@
+import asyncio; from services.publisher import main as pub; from services.lead_hunter.hunter import LeadHunter; print('🚀 Запуск поста...'); asyncio.run(pub()); print('🏹 Запуск охоты...'); h=LeadHunter(); h.business_hours_only=False; asyncio.run(h.hunt())

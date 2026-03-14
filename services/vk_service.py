@@ -41,13 +41,8 @@ class VKService:
     async def _make_request(self, method: str, params: dict) -> Optional[dict]:
         """Р’С‹Р·РѕРІ VK API"""
         if not self.vk_token:
-<<<<<<< HEAD
             print("⚠️ VK_TOKEN не установлен")
             return False
-=======
-            logger.error("VK_TOKEN РЅРµ СѓСЃС‚Р°РЅРѕРІР»РµРЅ")
-            return None
->>>>>>> 7088a20d30a8942893a1c5c26400c6546150a377
         
         url = f"{self.base_url}{method}"
         params["v"] = self.api_version

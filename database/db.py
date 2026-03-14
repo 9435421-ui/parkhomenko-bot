@@ -22,24 +22,16 @@ class Database:
     
     async def connect(self):
         """Подключение к базе данных с режимом WAL для избежания ошибки 'database is locked'"""
-<<<<<<< HEAD
         dir_name = os.path.dirname(self.db_path)
         if dir_name:
             os.makedirs(dir_name, exist_ok=True)
-=======
-        os.makedirs(os.path.dirname(self.db_path), exist_ok=True)
->>>>>>> 7088a20d30a8942893a1c5c26400c6546150a377
         # ── WAL режим для избежания "database is locked" при параллельных запросах ─────
         # timeout=30 заставит ждать освобождения базы до 30 секунд вместо немедленной ошибки
         self.conn = await aiosqlite.connect(self.db_path, timeout=30.0)
         self.conn.row_factory = aiosqlite.Row
         # Включаем WAL режим для поддержки параллельных чтений
         async with self.conn.cursor() as cursor:
-<<<<<<< HEAD
             await cursor.execute("PRAGMA journal_mode=WAL")  # Включаем WAL режим
-=======
-            # await cursor.execute("PRAGMA journal_mode=WAL")  # Удаляем или комментируем эту строку
->>>>>>> 7088a20d30a8942893a1c5c26400c6546150a377
             await cursor.execute("PRAGMA busy_timeout=5000")  # Ожидание 5 секунд вместо блокировки
             await cursor.execute("PRAGMA synchronous=NORMAL")  # Баланс между производительностью и надежностью
             await self.conn.commit()
@@ -241,11 +233,7 @@ class Database:
             """)
             await self.conn.commit()
 
-<<<<<<< HEAD
             # Миграция: колонка contacted_at для «Продавец» (первый диалог с лидом)
-=======
-            # Миграция: колонка contacted_at для «Продавца» (первый диалог с лидом)
->>>>>>> 7088a20d30a8942893a1c5c26400c6546150a377
             try:
                 await cursor.execute("ALTER TABLE spy_leads ADD COLUMN contacted_at TIMESTAMP NULL")
                 await self.conn.commit()
@@ -981,7 +969,6 @@ class Database:
         status: str = "pending",
         participants_count: int = None,
         geo_tag: str = None,
-<<<<<<< HEAD
         **kwargs
     ) -> int:
         """
@@ -991,10 +978,6 @@ class Database:
         Поддерживает дополнительные параметры через **kwargs для совместимости
         с Discovery и другими модулями (например, resource_type из Discovery).
         """
-=======
-    ) -> int:
-        """Добавить ресурс. status: pending|active|archived. При дубликате link — обновить participants_count и notes."""
->>>>>>> 7088a20d30a8942893a1c5c26400c6546150a377
         link = (link or "").strip().rstrip("/")
         title = title or link
         platform = resource_type  # telegram | vk
@@ -1418,7 +1401,6 @@ class Database:
             )
             await self.conn.commit()
 
-<<<<<<< HEAD
     async def add_system_log(self, level: str, module: str, message: str, stack_trace: str = None):
         """Добавить системный лог в базу данных (для watchdog.py)"""
         async with self.conn.cursor() as cursor:
@@ -1433,7 +1415,3 @@ class Database:
 
 
 db = Database()
-=======
-
-db = Database()
->>>>>>> 7088a20d30a8942893a1c5c26400c6546150a377

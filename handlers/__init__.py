@@ -1,5 +1,4 @@
 """
-<<<<<<< HEAD
 Обработчики команд и сообщений
 aiogram 3.x версия
 """
@@ -29,16 +28,3 @@ def register_all_handlers(dp: Dispatcher):
     register_admin(dp)
     register_content(dp)
     register_creator(dp)
-=======
-Обработчики команд и сообщений (aiogram).
-"""
-from .start import router as start_router
-from .quiz import router as quiz_router
-from .dialog import router as dialog_router
-from .content import content_router
-from .admin import router as admin_router
-from .vk_publisher import VKPublisher
-from .max_uploader import MaxUploader
-
-__all__ = ['start_router', 'quiz_router', 'dialog_router', 'content_router', 'admin_router', 'VKPublisher', 'MaxUploader']
->>>>>>> 7088a20d30a8942893a1c5c26400c6546150a377
