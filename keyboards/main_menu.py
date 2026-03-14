@@ -30,3 +30,12 @@ def get_main_menu() -> InlineKeyboardMarkup:
 def _is_admin_user(user_id: int) -> bool:
     """Проверка админа (дублирует config.is_admin для совместимости)."""
     return is_admin(user_id)
+
+
+def get_contact_keyboard():
+    from aiogram.types import ReplyKeyboardMarkup, KeyboardButton
+    return ReplyKeyboardMarkup(
+        keyboard=[[KeyboardButton(text="📞 Отправить контакт", request_contact=True)]],
+        resize_keyboard=True,
+        one_time_keyboard=True
+    )
