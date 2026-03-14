@@ -406,3 +406,7 @@ async def quiz_skip(callback: CallbackQuery):
 
 def register_handlers(dp: Dispatcher):
     dp.include_router(quiz_router)
+
+
+# Алиас для совместимости
+QuizStates = QuizOrder
