@@ -515,3 +515,7 @@ async def urgent_edit_handler(callback: CallbackQuery, state: FSMContext):
 
 # Алиас для совместимости
 start_router = router
+
+
+def register_handlers(dp):
+    dp.include_router(router)
