@@ -39,3 +39,27 @@ def get_contact_keyboard():
         resize_keyboard=True,
         one_time_keyboard=True
     )
+
+
+def get_admin_menu():
+    from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="📊 Статистика", callback_data="admin_stats")],
+        [InlineKeyboardButton(text="📋 Лиды", callback_data="admin_leads")],
+        [InlineKeyboardButton(text="⚙️ Настройки", callback_data="admin_settings")],
+    ])
+
+
+def get_urgent_btn():
+    from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="🔥 Срочная консультация", callback_data="urgent_consult")],
+    ])
+
+
+def get_consent_keyboard():
+    from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="✅ Согласен", callback_data="consent_yes")],
+        [InlineKeyboardButton(text="❌ Не согласен", callback_data="consent_no")],
+    ])
