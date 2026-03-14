@@ -164,9 +164,9 @@ class ScoutParser:
         if not self.db.conn:
             await self.db.connect()
         
-        # Читаем активные VK группы из БД
         try:
             vk_groups = await self.db.get_active_targets_for_scout(platform='vk')
+            logger.info(f"📊 Загружено VK групп из БД: {len(vk_groups)}")
         except Exception as e:
             logger.error(f"📍 Error reading VK groups from DB: {e}")
             vk_groups = []

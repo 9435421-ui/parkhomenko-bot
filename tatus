@@ -1,0 +1,5 @@
+[33mb594b52[m[33m ([m[1;36mHEAD[m[33m -> [m[1;32mmaster[m[33m, [m[1;31morigin/master[m[33m)[m Fix syntax error in config.py - replace union type syntax with typing.Union for Python compatibility
+[33m103e5da[m Fix syntax errors in run_anton.py - remove unclosed triple quotes
+[33m0fb5b46[m feat: Scout Discovery integration + VK API implementation (12 марта 2026)
+[33m391ddd2[m Fix Discovery result handling: convert string sources to dicts before processing
+[33mdb7feb9[m Add scout_vk_resources method to Discovery class for VK group discovery in Hunter
