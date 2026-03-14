@@ -1,8 +1,16 @@
 # Telegram Bot Framework
 aiogram>=3.0.0
 
+<<<<<<< HEAD
 # Telegram Client (Telethon for parsing)
 telethon==1.33.1
+=======
+# Telethon for parsing chats
+telethon==1.35.0
+
+# Environment variables
+python-dotenv==1.0.0
+>>>>>>> 7088a20d30a8942893a1c5c26400c6546150a377
 
 # Database
 aiosqlite==0.19.0
@@ -13,5 +21,22 @@ python-dotenv==1.0.0
 # OpenAI/OpenRouter API
 openai==1.12.0
 
+<<<<<<< HEAD
 # VK API client
 aiohttp==3.9.1
+=======
+# Data processing
+pydantic==2.5.3
+
+# Image processing
+Pillow==10.3.0
+
+# Date/time
+python-dateutil==2.8.2
+
+# Scheduler
+APScheduler==3.10.4
+
+# VK API
+vk_api==21.3.0
+>>>>>>> 7088a20d30a8942893a1c5c26400c6546150a377

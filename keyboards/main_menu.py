@@ -1,10 +1,13 @@
 """
-Клавиатуры для главного меню и навигации
+Главное меню — кнопки для пользователей и админов.
 """
-from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton, ReplyKeyboardMarkup, KeyboardButton, WebAppInfo
-from os import getenv
+from aiogram.types import ReplyKeyboardMarkup, KeyboardButton, InlineKeyboardMarkup, InlineKeyboardButton
+from aiogram import Bot
+from config import ADMIN_ID, is_admin
+import os
 
 
+<<<<<<< HEAD
 def get_main_menu() -> InlineKeyboardMarkup:
     """Главное меню бота (только для админа)"""
     return InlineKeyboardMarkup(
@@ -23,94 +26,100 @@ def get_main_menu() -> InlineKeyboardMarkup:
             )]
         ]
     )
-
-
-def get_consent_keyboard() -> ReplyKeyboardMarkup:
-    """Клавиатура согласия на обработку данных"""
+=======
+def get_contact_keyboard():
+    """Кнопка отправки контакта"""
     return ReplyKeyboardMarkup(
-        keyboard=[
-            [KeyboardButton(text="✅ Я согласен и хочу продолжить")],
-            [KeyboardButton(text="❌ Отказаться")]
-        ],
+        keyboard=[[KeyboardButton(text="📱 Отправить контакт и согласиться", request_contact=True)]],
         resize_keyboard=True,
         one_time_keyboard=True
     )
 
 
-def get_contact_keyboard() -> ReplyKeyboardMarkup:
-    """Клавиатура запроса контакта"""
-    return ReplyKeyboardMarkup(
+def get_main_menu(user_id: int | None = None) -> ReplyKeyboardMarkup:
+    """Очищенное меню для ТЕРИОН — только самое важное"""
+    # Оставляем пустую или минимальную клавиатуру, 
+    # так как вход в квиз и консультации будет через прямые ссылки
+    return ReplyKeyboardMarkup(keyboard=[], resize_keyboard=True)
+
+
+def get_admin_menu() -> ReplyKeyboardMarkup:
+    """Меню админа — консультации, продажи, логика"""
+    markup = ReplyKeyboardMarkup(
         keyboard=[
-            [KeyboardButton(text="📱 Поделиться контактом", request_contact=True)]
+            [KeyboardButton(text="🕵️‍♂️ Темы от Шпиона")],
+            [KeyboardButton(text="💰 Инвест-калькулятор")],
+            [KeyboardButton(text="📝 Записаться на консультацию")],
         ],
-        resize_keyboard=True,
-        one_time_keyboard=True
+        resize_keyboard=True
     )
+    return markup
 
 
-def get_name_confirmation_keyboard(name: str) -> InlineKeyboardMarkup:
-    """Клавиатура подтверждения имени"""
-    return InlineKeyboardMarkup(
-        inline_keyboard=[
-            [InlineKeyboardButton(
-                text=f"✅ Да, {name}",
-                callback_data=f"confirm_name:{name}"
-            )],
-            [InlineKeyboardButton(
-                text="✏️ Нет, указать другое",
-                callback_data="change_name"
-            )]
+def get_content_menu() -> InlineKeyboardMarkup:
+    """Меню создания контента (Текст, Фото, ИИ-Визуал). Публикация: TERION / ДОМ ГРАНД / MAX — в превью поста."""
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="📝 Текст", callback_data="content_text")],
+        [InlineKeyboardButton(text="🖼 Фото", callback_data="content_photo")],
+        [InlineKeyboardButton(text="🎨 ИИ-Визуал", callback_data="content_visual")],
+        [InlineKeyboardButton(text="⬅️ Назад", callback_data="back_to_menu")]
+    ])
+
+
+def get_back_btn() -> InlineKeyboardMarkup:
+    """Кнопка назад"""
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton("◀️ Назад", callback_data="content_back")]
+    ])
+
+
+def get_approve_post_btn(post_id: int) -> InlineKeyboardMarkup:
+    """Кнопки аппрува поста. Публикация (TERION / ДОМ ГРАНД / MAX / VK) — под черновиком в рабочей группе или в контент-боте."""
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [
+            InlineKeyboardButton("✅ Одобрить", callback_data=f"approve_{post_id}"),
+            InlineKeyboardButton("❌ Отклонить", callback_data=f"reject_{post_id}")
+        ],
+        [InlineKeyboardButton("✏️ Редактировать", callback_data=f"edit_{post_id}")]
+    ])
+
+
+def get_urgent_btn() -> InlineKeyboardMarkup:
+    """Кнопки срочной публикации"""
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [
+            InlineKeyboardButton("🚀 Опубликовать сейчас", callback_data="urgent_publish"),
+            InlineKeyboardButton("📝 Доработать", callback_data="urgent_edit")
         ]
+    ])
+
+
+async def send_main_menu(bot: Bot, chat_id: int, user_id: int | None = None):
+    """Отправка главного меню"""
+    text = (
+        "🏢 <b>Вас приветствует компания ТЕРИОН!</b>\n\n"
+        "Я — Антон, ИИ-помощник по перепланировкам.\n\n"
+        "📞 <b>Все консультации носят информационный характер.</b>\n"
+        "Финальное решение подтверждает эксперт ТЕРИОН.\n\n"
+        "Выберите действие:"
     )
+    
+    if user_id and is_admin(user_id):
+        markup = get_admin_menu()
+        text = (
+            "🎯 <b>Главное меню</b>\n\n"
+            "🕵️‍♂️ <b>Темы от Шпиона</b> — идеи из чатов, сохранить в контент-план\n"
+            "💰 <b>Инвест-калькулятор</b> — оценка прироста стоимости после перепланировки\n"
+            "📝 <b>Записаться на консультацию</b> — запустить квиз\n\n"
+            "<i>Публикации — в контент-боте</i>"
+        )
+    else:
+        markup = get_main_menu(user_id)
+    
+    await bot.send_message(chat_id, text, reply_markup=markup, parse_mode="HTML")
+>>>>>>> 7088a20d30a8942893a1c5c26400c6546150a377
 
 
-def get_object_type_keyboard() -> InlineKeyboardMarkup:
-    """Клавиатура выбора типа объекта"""
-    return InlineKeyboardMarkup(
-        inline_keyboard=[
-            [InlineKeyboardButton(text="🏠 Квартира", callback_data="obj:kvartira")],
-            [InlineKeyboardButton(text="🏢 Коммерция", callback_data="obj:kommercia")],
-            [InlineKeyboardButton(text="🏡 Дом", callback_data="obj:dom")]
-        ]
-    )
-
-
-def get_remodeling_status_keyboard() -> InlineKeyboardMarkup:
-    """Клавиатура статуса перепланировки"""
-    return InlineKeyboardMarkup(
-        inline_keyboard=[
-            [InlineKeyboardButton(text="✅ Выполнена", callback_data="remodel:done")],
-            [InlineKeyboardButton(text="📋 Планируется", callback_data="remodel:planned")]
-        ]
-    )
-
-
-def get_bti_documents_keyboard() -> InlineKeyboardMarkup:
-    """Клавиатура наличия документов БТИ"""
-    return InlineKeyboardMarkup(
-        inline_keyboard=[
-            [InlineKeyboardButton(text="✅ Есть все документы", callback_data="bti:all")],
-            [InlineKeyboardButton(text="📄 Есть частично", callback_data="bti:partial")],
-            [InlineKeyboardButton(text="❌ Нет документов", callback_data="bti:none")]
-        ]
-    )
-
-
-def get_back_to_menu_keyboard() -> InlineKeyboardMarkup:
-    """Кнопка возврата в главное меню"""
-    return InlineKeyboardMarkup(
-        inline_keyboard=[
-            [InlineKeyboardButton(text="◀️ Вернуться в меню", callback_data="back_to_menu")]
-        ]
-    )
-
-
-def get_continue_or_menu_keyboard() -> InlineKeyboardMarkup:
-    """Продолжить диалог или вернуться в меню"""
-    return InlineKeyboardMarkup(
-        inline_keyboard=[
-            [InlineKeyboardButton(text="💬 Продолжить вопросы", callback_data="mode:dialog")],
-            [InlineKeyboardButton(text="📝 Оставить заявку", callback_data="mode:quiz")],
-            [InlineKeyboardButton(text="◀️ В главное меню", callback_data="back_to_menu")]
-        ]
-    )
+def _is_admin_user(user_id: int) -> bool:
+    """Проверка админа (дублирует config.is_admin для совместимости)."""
+    return is_admin(user_id)

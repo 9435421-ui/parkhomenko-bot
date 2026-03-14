@@ -1,47 +1,53 @@
-# Python
+# === СЕКРЕТЫ (никогда не коммитить) ===
+.env
+.env.*
+!.env.example
+*.key
+*.pem
+secrets/
+config_local.py
+
+# === PYTHON ===
 __pycache__/
 *.py[cod]
 *$py.class
 *.so
-.Python
-env/
+.Python/
 venv/
+env/
 ENV/
-build/
-develop-eggs/
-dist/
-downloads/
-eggs/
-.eggs/
-lib/
-lib64/
-parts/
-sdist/
-var/
-wheels/
-*.egg-info/
-.installed.cfg
-*.egg
+.venv/
+pip-log.txt
 
-# Environment variables
-.env
-.env.local
-.env.*.local
-
-# Database
+# === БАЗЫ ДАННЫХ ===
 *.db
 *.sqlite
 *.sqlite3
+<<<<<<< HEAD
 database/*.db
 data/*.db
+=======
+*.db-journal
+>>>>>>> 7088a20d30a8942893a1c5c26400c6546150a377
 
-# Logs
+# === Lock процесса (Неубивайка) ===
+bot.lock
+
+# === ЛОГИ ===
 *.log
 logs/
+<<<<<<< HEAD
 bot.log
 *.log.*
+=======
+nohup.out
+>>>>>>> 7088a20d30a8942893a1c5c26400c6546150a377
 
-# IDE
+# === SESSION / CURSOR ===
+*.session
+.cursor/
+
+# === IDE ===
 .vscode/
 .idea/
 *.swp
@@ -49,6 +55,7 @@ bot.log
 *~
 .DS_Store
 
+<<<<<<< HEAD
 # Session files
 *.session
 Thumbs.db
@@ -56,11 +63,15 @@ ehthumbs.db
 Desktop.ini
 
 # Uploads
+=======
+# === ЗАГРУЗКИ ПОЛЬЗОВАТЕЛЕЙ ===
+>>>>>>> 7088a20d30a8942893a1c5c26400c6546150a377
 uploads/
 uploads_plans/
 temp/
 tmp/
 
+<<<<<<< HEAD
 # hunter_standalone (не игнорировать)
 hunter_standalone/
 # Telegram
@@ -76,3 +87,19 @@ anton_session.session
 *.bak
 *.backup
 .env
+=======
+# === БЭКАПЫ ===
+*.bak
+*.backup
+backups/
+
+# === DOCKER ===
+.docker/
+docker-compose.override.yml
+
+# === ВРЕМЕННЫЕ ФАЙЛЫ ===
+kipping...
+"Жюль/"
+*.bat
+.git_repo_info.md
+>>>>>>> 7088a20d30a8942893a1c5c26400c6546150a377

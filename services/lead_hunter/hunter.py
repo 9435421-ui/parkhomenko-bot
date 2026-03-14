@@ -6,6 +6,7 @@ from aiogram import Bot
 from aiogram.client.default import DefaultBotProperties
 from aiogram.types import BufferedInputFile, InlineKeyboardMarkup, InlineKeyboardButton
 
+<<<<<<< HEAD
 from services.lead_hunter.discovery import Discovery
 from services.lead_hunter.analyzer import LeadAnalyzer
 from services.scout_parser import scout_parser
@@ -28,6 +29,16 @@ LEAD_PHRASES = [
     "хотим объединить",
 ]
 
+=======
+from .discovery import Discovery
+from .analyzer import LeadAnalyzer
+from .outreach import Outreach
+from services.scout_parser import scout_parser
+from hunter_standalone import HunterDatabase, LeadHunter as StandaloneLeadHunter
+
+logger = logging.getLogger(__name__)
+
+>>>>>>> 7088a20d30a8942893a1c5c26400c6546150a377
 # =============================================================================
 # СТОП-СЛОВА (Pre-filter): Жесткая фильтрация до отправки в AI
 # =============================================================================
@@ -73,8 +84,12 @@ class LeadHunter:
     """Автономный поиск и привлечение клиентов (Lead Hunter)"""
 
     def __init__(self):
+<<<<<<< HEAD
         from config import VK_TOKEN
         self.discovery = Discovery(vk_token=VK_TOKEN)
+=======
+        self.discovery = Discovery()
+>>>>>>> 7088a20d30a8942893a1c5c26400c6546150a377
         self.analyzer = LeadAnalyzer()
         self.outreach = Outreach()
         self.parser = scout_parser  # общий экземпляр: отчёт последнего скана доступен и для /spy_report
@@ -930,6 +945,7 @@ class LeadHunter:
         # ── Проверка подключения к БД ────────────────────────────────────────────
         main_db = await self._ensure_db_connected()
         
+<<<<<<< HEAD
         # tg_posts = await self.parser.parse_telegram(db=main_db)  # Закомментировано: метод не реализован в ScoutParser
         tg_posts = []  # Пустой список вместо Telegram постов
         vk_posts = await self.parser.scan_vk_groups()  # Используем правильный метод без db
@@ -982,6 +998,17 @@ class LeadHunter:
                     new_sources.append({"link": item, "title": item, "type": "telegram"})
                 else:
                     new_sources.append(item)
+=======
+        tg_posts = await self.parser.parse_telegram(db=main_db)
+        vk_posts = await self.parser.parse_vk(db=main_db)  # Передаём БД для загрузки групп из target_resources
+        all_posts = tg_posts + vk_posts
+
+        # Если лидов не найдено, пробуем найти новые источники через Discovery
+        if not all_posts:
+            logger.info("🔎 Лидов не найдено. Запуск Discovery для поиска новых источников...")
+            # Поиск новых Telegram каналов
+            new_sources = await self.discovery.find_new_sources()
+>>>>>>> 7088a20d30a8942893a1c5c26400c6546150a377
             # Поиск новых VK групп
             try:
                 vk_sources = await self.discovery.scout_vk_resources()
@@ -992,8 +1019,12 @@ class LeadHunter:
             activated_count = 0
             skipped_count = 0
             for source in new_sources:
+<<<<<<< HEAD
                 # source может быть строкой на предыдущем этапе, но мы уже преобразовали его выше
                 link = source.get("link") if isinstance(source, dict) else source
+=======
+                link = source["link"]
+>>>>>>> 7088a20d30a8942893a1c5c26400c6546150a377
                 title = source.get("title") or link
                 
                 # Проверяем подключение перед каждым запросом (на случай разрыва)
@@ -1068,6 +1099,10 @@ class LeadHunter:
             len(tg_ok), len(vk_ok), len(all_posts)
         )
 
+<<<<<<< HEAD
+=======
+        from hunter_standalone.database import HunterDatabase as LocalHunterDatabase
+>>>>>>> 7088a20d30a8942893a1c5c26400c6546150a377
         # Анти-дубль: в рамках одного запуска не обрабатываем один и тот же post_id дважды
         _seen_post_keys: set[str] = set()
         _business_hours = self._is_business_hours_msk()
@@ -1092,12 +1127,15 @@ class LeadHunter:
             
             score = analysis_data.get("priority_score", 0) / 10.0 # Приводим к 0.0 - 1.0 для совместимости
             pain_stage = analysis_data.get("pain_stage", "ST-1")
+<<<<<<< HEAD
             
             # Boost по DIY-фразам
             if getattr(post, "_diy_boost", False):
                 pain_stage = "ST-3"
                 analysis_data["priority_score"] = max(analysis_data.get("priority_score", 0), 7)
                 analysis_data["pain_stage"] = "ST-3"
+=======
+>>>>>>> 7088a20d30a8942893a1c5c26400c6546150a377
 
             # Глубокий анализ намерения через Yandex GPT агент (новая логика)
             try:
@@ -1108,6 +1146,7 @@ class LeadHunter:
 
             # Если модель пометила как лид — сохраняем в локальную HunterDatabase, чтобы избежать дублей
             if analysis.get("is_lead"):
+<<<<<<< HEAD
                 saved = False
                 try:
                     lead_data = {
@@ -1131,6 +1170,31 @@ class LeadHunter:
                     logger.debug("Ошибка сохранения в spy_leads: %s", e)
                     saved = False
                     
+=======
+                try:
+                    db_path = os.path.abspath(POTENTIAL_LEADS_DB)
+                    hd = LocalHunterDatabase(db_path)
+                    await hd.connect()
+                    lead_data = {
+                        "url": getattr(post, "url", "") or f"{getattr(post, 'source_type', '')}/{getattr(post, 'source_id', '')}/{getattr(post, 'post_id', '')}",
+                        "content": (getattr(post, "text", "") or "")[:2000],
+                        "intent": analysis.get("intent", "") or "",
+                        "hotness": analysis.get("hotness", 3),
+                        "geo": analysis.get("geo", "Не указано"),
+                        "context_summary": analysis.get("context_summary", "") or "",
+                        "pain_stage": pain_stage,
+                        "priority_score": analysis_data.get("priority_score", 0),
+                    }
+                    saved = await hd.save_lead(lead_data)
+                    try:
+                        if hd.conn:
+                            await hd.conn.close()
+                    except Exception:
+                        pass
+                except Exception as e:
+                    logger.debug("Ошибка сохранения в HunterDatabase: %s", e)
+                    saved = False
+>>>>>>> 7088a20d30a8942893a1c5c26400c6546150a377
                 # Если новый лид (сохранён) — немедленно уведомляем Юлию (Anton -> Julia)
                 if saved:
                     try:
@@ -1163,7 +1227,10 @@ class LeadHunter:
 
                         # ── Генерируем проект ответа через Yandex GPT (с fallback на Router AI) ─────────
                         sales_draft = ""
+<<<<<<< HEAD
                         res = None  # инициализация до try/except
+=======
+>>>>>>> 7088a20d30a8942893a1c5c26400c6546150a377
                         try:
                             # Получаем данные о приоритете и платформе из target ресурса
                             is_priority_zhk = False
@@ -1264,6 +1331,7 @@ class LeadHunter:
             #     await self.outreach.send_offer(post.source_type, post.source_id, message)
 
         if all_posts:
+<<<<<<< HEAD
             try:
                 # В новом LeadHunter логика standalone.hunt() объединена с основным циклом.
                 # Анализируем результаты из БД для отправки карточек.
@@ -1343,6 +1411,94 @@ class LeadHunter:
                     post_url = lead.get("url", "") or ""
                     lead_id = lead.get("id")
                     
+=======
+            messages = [
+                {"text": p.text, "url": p.url or f"{p.source_type}/{p.source_id}/{p.post_id}"}
+                for p in all_posts
+            ]
+            db_path = os.path.abspath(POTENTIAL_LEADS_DB)
+            os.makedirs(os.path.dirname(db_path), exist_ok=True)
+            try:
+                db = HunterDatabase(db_path)
+                await db.connect()
+                standalone = StandaloneLeadHunter(db)
+                hot_leads = await standalone.hunt(messages)
+                if db.conn:
+                    await db.conn.close()
+                # Максимум карточек в группу за один запуск (чтобы не флудить)
+                MAX_CARDS_PER_RUN = 30
+                cards_sent = 0
+                # Сопоставление hot_lead с постом по url для author_id/username/profile_url
+                def find_post_by_url(url: str):
+                    for p in all_posts:
+                        post_url = getattr(p, "url", "") or f"{p.source_type}/{p.source_id}/{p.post_id}"
+                        if post_url == url or url in post_url:
+                            return p
+                    return None
+
+                for lead in hot_leads:
+                    if lead.get("hotness", 0) < 3:
+                        continue
+                    if lead.get("hotness", 0) > 4:
+                        logger.info(f"🔥 Горячий лид (Жюль, hotness={lead.get('hotness')}) → пересылка админу")
+                        await self._send_hot_lead_to_admin(lead)
+                    # Сопоставляем с постом для author_id / username
+                    post = find_post_by_url(lead.get("url", ""))
+                    author_id = getattr(post, "author_id", None) if post else None
+                    author_name = getattr(post, "author_name", None) if post else None
+                    source_name = getattr(post, "source_name", "") if post else "—"
+                    source_type = getattr(post, "source_type", "telegram") if post else "telegram"
+                    post_text = getattr(post, "text", "") if post else ""
+                    # Заголовок карточки: приоритетный ЖК (Высотка) или geo_tag / title (Управление географией)
+                    card_header = source_name
+                    res = None
+                    if post:
+                        source_link = getattr(post, "source_link", None)
+                        if source_link:
+                            try:
+                                main_db = await self._ensure_db_connected()
+                                res = await main_db.get_target_resource_by_link(source_link)
+                                if res:
+                                    is_high = res.get("is_high_priority") or 0
+                                    name_part = (res.get("geo_tag") or "").strip() or res.get("title") or self.parser.extract_geo_header(post_text, source_name) or source_name
+                                    if is_high:
+                                        card_header = f"🏙 ПРИОРИТЕТНЫЙ ЖК (Высотка)\n{name_part}" if name_part else "🏙 ПРИОРИТЕТНЫЙ ЖК (Высотка)"
+                                    else:
+                                        card_header = name_part
+                                else:
+                                    card_header = self.parser.extract_geo_header(post_text, source_name)
+                            except Exception:
+                                card_header = self.parser.extract_geo_header(post_text, source_name)
+                        else:
+                            card_header = self.parser.extract_geo_header(post_text, source_name)
+                    # Лидогенерация: если нет username — вытягиваем ID для прямой ссылки tg://user?id=...
+                    profile_url = ""
+                    if author_id is not None and source_type == "vk":
+                        aid = int(author_id) if isinstance(author_id, (int, str)) and str(author_id).lstrip("-").isdigit() else 0
+                        if aid > 0:
+                            profile_url = f"https://vk.com/id{aid}"
+                    elif author_id is not None and source_type == "telegram":
+                        profile_url = f"tg://user?id={author_id}"
+                    post_url = lead.get("url", "") or ""
+                    try:
+                        main_db = await self._ensure_db_connected()
+                        lead_id = await main_db.add_spy_lead(
+                            source_type=source_type,
+                            source_name=source_name,
+                            url=post_url,
+                            text=(lead.get("content") or lead.get("intent") or "")[:2000],
+                            author_id=str(author_id) if author_id else None,
+                            username=author_name,
+                            profile_url=profile_url or None,
+                            pain_stage=lead.get("pain_stage"),
+                            priority_score=lead.get("priority_score"),
+                        )
+                    except Exception as e:
+                        logger.warning("Не удалось сохранить spy_lead: %s", e)
+                        lead_id = 0
+                    if not lead_id:
+                        lead_id = 0
+>>>>>>> 7088a20d30a8942893a1c5c26400c6546150a377
                     # Уведомление в личку админу при каждом лиде (если включено в пульте)
                     try:
                         main_db = await self._ensure_db_connected()
@@ -1355,7 +1511,11 @@ class LeadHunter:
                     anton_recommendation = ""
                     try:
                         main_db = await self._ensure_db_connected()
+<<<<<<< HEAD
                         anton_recommendation = await self._get_anton_recommendation(lead.get("text", ""), main_db)
+=======
+                        anton_recommendation = await self._get_anton_recommendation(post_text, main_db)
+>>>>>>> 7088a20d30a8942893a1c5c26400c6546150a377
                     except Exception:
                         pass
                     # ⚠️ АВТОМАТИЧЕСКАЯ ОТПРАВКА ЛС ОТКЛЮЧЕНА (Режим Модерации)
@@ -1430,8 +1590,13 @@ class LeadHunter:
                         post_url=post_url,
                         card_header=card_header,
                         post_text=post_text,
+<<<<<<< HEAD
                         source_type=source_type,
                         source_link=getattr(target_post, "source_link", "") if target_post else "",
+=======
+                        source_type=post.source_type if hasattr(post, 'source_type') else "telegram",
+                        source_link=post.source_link if hasattr(post, 'source_link') else "",
+>>>>>>> 7088a20d30a8942893a1c5c26400c6546150a377
                         geo_tag=geo_tag_value,
                         is_priority=is_priority_value,
                         anton_recommendation=anton_recommendation
@@ -1441,7 +1606,11 @@ class LeadHunter:
                 if cards_sent:
                     logger.info("📋 В рабочую группу отправлено карточек лидов: %s", cards_sent)
                 # Дублирование в рабочую группу: краткий отчёт о сохранённых лидах
+<<<<<<< HEAD
                 if recent_leads:
+=======
+                if hot_leads:
+>>>>>>> 7088a20d30a8942893a1c5c26400c6546150a377
                     from config import BOT_TOKEN, LEADS_GROUP_CHAT_ID, THREAD_ID_LOGS
                     if BOT_TOKEN and LEADS_GROUP_CHAT_ID:
                         try:
@@ -1449,12 +1618,21 @@ class LeadHunter:
                             if bot is None:
                                 bot = Bot(token=BOT_TOKEN, default=DefaultBotProperties(parse_mode="HTML"))
                             try:
+<<<<<<< HEAD
                                 summary = f"🕵️ <b>Охота: в spy_leads сохранено {len(recent_leads)} лидов</b>"
                                 if cards_sent:
                                     summary += f", в топик «Горячие лиды» отправлено карточек: {cards_sent}"
                                 summary += "\n\n"
                                 for i, lead in enumerate(recent_leads[:3], 1):
                                     content = (lead.get("text") or lead.get("intent") or "")[:80]
+=======
+                                summary = f"🕵️ <b>Охота: в potential_leads сохранено {len(hot_leads)} лидов</b>"
+                                if cards_sent:
+                                    summary += f", в топик «Горячие лиды» отправлено карточек: {cards_sent}"
+                                summary += "\n\n"
+                                for i, lead in enumerate(hot_leads[:3], 1):
+                                    content = (lead.get("content") or lead.get("intent") or "")[:80]
+>>>>>>> 7088a20d30a8942893a1c5c26400c6546150a377
                                     summary += f"{i}. {content}…\n"
                                 await bot.send_message(
                                     LEADS_GROUP_CHAT_ID,
@@ -1742,6 +1920,7 @@ class LeadHunter:
         except Exception as e:
             logger.error(f"❌ Ошибка отправки горячих лидов: {e}")
             return False
+<<<<<<< HEAD
 
     async def process_leads(self, leads: list) -> None:
         """Обрабатывает лиды из VK-шпиона: сохраняет в БД и отправляет карточки."""
@@ -1807,6 +1986,8 @@ class LeadHunter:
                             pass
             except Exception as e:
                 logger.error(f"Ошибка обработки лида: {e}")
+=======
+>>>>>>> 7088a20d30a8942893a1c5c26400c6546150a377
     
     async def send_daily_report(self) -> bool:
         """Отправка итогового отчёта за день в рабочую группу.
@@ -1902,6 +2083,7 @@ class LeadHunter:
         except Exception as e:
             logger.error(f"❌ Ошибка отправки итогового отчёта: {e}")
             return False
+<<<<<<< HEAD
     
     async def run_discovery(self):
         """Запуск Discovery для поиска новых VK групп (раз в сутки)"""
@@ -1943,3 +2125,5 @@ class LeadHunter:
             await discovery.stop()
         except Exception as e:
             logger.warning(f"Scout Discovery error: {e}")
+=======
+>>>>>>> 7088a20d30a8942893a1c5c26400c6546150a377

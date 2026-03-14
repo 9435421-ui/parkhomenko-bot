@@ -21,9 +21,15 @@ class KnowledgeBase:
             print(f"⚠️ Папка {self.docs_dir} не найдена")
             return
         
+        # Исключаем системные папки
+        exclude_dirs = {'knowledge_base', '__pycache__', '.git', 'backups', 'migrations', 'mini_app', 'uploads'}
+        
         document_count = 0
         
         for root, dirs, files in os.walk(self.docs_dir):
+            # Исключаем системные папки из обхода
+            dirs[:] = [d for d in dirs if d not in exclude_dirs]
+            
             for filename in files:
                 if filename.endswith(('.md', '.txt')):
                     filepath = os.path.join(root, filename)
@@ -193,3 +199,10 @@ class KnowledgeBase:
 
 # Singleton instance
 kb = KnowledgeBase()
+
+
+# Alias для совместимости
+async def search(query: str, limit: int = 3) -> List[Dict[str, str]]:
+    """Удобная функция-алиас для get_context"""
+    context = await kb.get_context(query, max_chunks=limit)
+    return [{'text': context, 'source': 'knowledge_base'}]

@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 """
 Middleware для обработки необработанных callback-запросов
 Логирует нажатия на кнопки, которые не были обработаны ни одним хендлером
@@ -7,10 +8,15 @@ from typing import Any, Awaitable, Callable, Dict
 
 from aiogram import BaseMiddleware
 from aiogram.types import CallbackQuery, TelegramObject
+=======
+"""Middleware для логирования событий."""
+import logging
+>>>>>>> 7088a20d30a8942893a1c5c26400c6546150a377
 
 logger = logging.getLogger(__name__)
 
 
+<<<<<<< HEAD
 class UnhandledCallbackMiddleware(BaseMiddleware):
     """
     Middleware для обработки необработанных callback-запросов.
@@ -62,4 +68,18 @@ class UnhandledCallbackMiddleware(BaseMiddleware):
                 f"user_id={event.from_user.id}, error={e}"
             )
             # Пробрасываем исключение дальше
+=======
+class UnhandledCallbackMiddleware:
+    """Логирует все callback, которые не были обработаны"""
+    
+    async def __call__(self, handler, event, data):
+        try:
+            response = await handler(event, data)
+            return response
+        except Exception as e:
+            # Логируем необработанные callback
+            if hasattr(event, 'callback_query'):
+                cb = event.callback_query
+                logger.warning(f"🔔 Unhandled callback: {cb.data} от @{cb.from_user.username}")
+>>>>>>> 7088a20d30a8942893a1c5c26400c6546150a377
             raise

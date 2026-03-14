@@ -1,0 +1,287 @@
+"""
+Viral Hooks Agent — генератор цепляющих начал для постов.
+Специализация: Согласование перепланировок и переустройства помещений.
+"""
+import os
+import random
+import logging
+from typing import List, Dict
+from utils import router_ai, yandex_gpt
+
+logger = logging.getLogger(__name__)
+
+
+# Шаблоны хуков для ниши "Согласование перепланировок"
+HOOK_TEMPLATES = {
+    "штрафы": [
+        "🚨 {проблема} — одна из главных причин штрафов Мосжилинспекции",
+        "⚠️ Почему {проблема} может стоить вам {сумма} ₽",
+        "😱 70% собственников не знают про {проблема}",
+        "🛑 {проблема} — с этим сталкивается каждый второй",
+        "❌ Никогда не делайте {проблема} — вот почему",
+        "💥 {проблема} привело к штрафу в...",
+        "⏰ Если вы уже сделали {проблема} — читайте срочно",
+        "🔴 {проблема}: что нужно знать ДО начала работ",
+    ],
+    "закон": [
+        "✅ Как мы решили {проблема} по закону за 3 дня",
+        "✨ 5 проверенных способов узаконить {проблема}",
+        "💡 Простое решение: {проблема} по ЖК РФ",
+        "🎯 Нашли идеальный способ согласовать {проблема}",
+        "🚀 Как {проблема} превратилось в одобренный проект",
+        "⭐ Главный секрет: {проблема} — это легально",
+        "💎 {проблема} решается в 3 шага — смотрите",
+    ],
+    "цифры": [
+        "📊 {цифра}% людей совершают эту ошибку при {проблема}",
+        "💰 {проблема} обошлась в {сумма} ₽ — как избежать",
+        "⏱️ {проблема} за {время} — реальный срок согласования",
+        "📈 Средняя стоимость {проблема} — {сумма} ₽",
+        "🔢 По статистике: {факт} при {проблема}",
+        "💯 {проблема}: {цифра} из {цифра} случаев — успешно",
+        "🗓️ За {время} мы согласовали {цифра} проектов",
+        "📍 {сумма}₽ — именно столько стоит {проблема}",
+        "⚡{цифра} дней — именно столько нужно на {проблема}",
+    ],
+    "кейсы": [
+        "📖 История клиента: «Я хотел {проблема}, но...»",
+        "🏠 Как один клиент узаконил {проблема} и разбогател",
+        "👤 Реальный отзыв: «Спасибо за {проблема}!»",
+        "🗣️ «Я 5 лет не мог узаконить {проблема} пока...»",
+        "📋 Разбираем реальный случай: {проблема}",
+        "🎬 До/После: {проблема} — трансформация за {время}",
+        "👥 {цифра} семей уже узаконили {проблема} — отзывы",
+        "🏆 Лучший проект месяца: {проблема}",
+        "🌟 История успеха: от {проблема} к одобренному проекту",
+    ],
+    "вопросы": [
+        "🤔 Знаете ли вы, что {проблема} — это... по ЖК РФ?",
+        "❓ Что делать, если {проблема} уже сделано?",
+        "💭 Хотите узнать, как {проблема} влияет на... квартиру?",
+        "🧐 Правда ли, что {проблема} — это переустройство?",
+        "🤨 Почему все молчат про {проблема} в Мосжилинспекции?",
+        "👀 Замечали {проблема} у соседей? Вот почему это проблема...",
+        "🔍 Что произойдет, если не узаконить {проблема}?",
+        "🎯 Угадайте: {проблема} — требует согласования или нет?",
+        "💡 Знаете ли вы, что {проблема} можно... узаконить?",
+    ],
+    "факты": [
+        "📢 Малоизвестный факт о {проблема}",
+        "🔔 Важное открытие: {проблема} меняет всё",
+        "💎 Эксклюзив: {факт} про {проблема}",
+        "🧠 Интересный факт: {факт} при {проблема}",
+        "📚 Документально подтверждено: {факт}",
+        "🏛️ По закону: {факт} про {проблема}",
+    ],
+}
+
+
+class ViralHooksAgent:
+    """Агент для генерации вирусных хуков по согласованию перепланировок"""
+    
+    def __init__(self):
+        self.router_api_key = os.getenv("ROUTER_AI_KEY") or os.getenv("YANDEX_API_KEY")
+        self.folder_id = os.getenv("FOLDER_ID")
+        self.use_router = bool(self.router_api_key)
+    
+    async def generate_hooks(
+        self,
+        topic: str,
+        count: int = 5,
+        category: str = None
+    ) -> List[Dict]:
+        """Генерирует хуки по теме согласования перепланировок"""
+        hooks = []
+        
+        # Если есть API — используем ИИ
+        if self.use_router:
+            ai_hooks = await self._generate_with_ai(topic, count, category)
+            hooks.extend(ai_hooks)
+        
+        # Добавляем шаблонные хуки
+        template_hooks = self._generate_templates(topic, count, category)
+        hooks.extend(template_hooks)
+        
+        # Перемешиваем и возвращаем уникальные
+        random.shuffle(hooks)
+        
+        # Убираем дубликаты по тексту
+        seen = set()
+        unique_hooks = []
+        for hook in hooks:
+            text = hook['text'][:50].lower()
+            if text not in seen:
+                seen.add(text)
+                unique_hooks.append(hook)
+        
+        return unique_hooks[:count]
+    
+    async def _generate_with_ai(
+        self,
+        topic: str,
+        count: int,
+        category: str = None
+    ) -> List[Dict]:
+        """Генерирует хуки через ИИ"""
+        try:
+            system_prompt = """Ты — эксперт по написанию цепляющих заголовков для социальных сетей в нише «Согласование перепланировок и переустройства помещений».
+
+Твоя задача — создавать «хукеры» (hook) — первые строки постов, которые привлекают внимание собственников, планирующих или уже сделавших перепланировку.
+
+Требования:
+- Тон: Профессиональный, спокойный, с опорой на закон (ЖК РФ, Мосжилинспекция)
+- Эмоции: Мягкое предупреждение о рисках, решение проблем
+- Формат: Проблема → Решение по закону
+- Будь конкретным: называй суммы штрафов, сроки, статьи закона
+- Максимум 15 слов на хук
+
+Тема: Согласование перепланировок в Москве и России.
+
+Формат ответа — просто пронумерованный список, без лишних слов."""
+
+            user_prompt = f"""Создай {count} цепляющих хуков на тему: {topic}
+
+Темы хуков: штрафы, закон, цифры, кейсы, вопросы, факты
+{f'Используй категорию: {category}' if category else 'Используй разные категории'}
+
+Примеры хороших хуков:
+- "🚨 Снос несущей стены — одна из главных причин штрафов Мосжилинспекции"
+- "💰 Незаконная перепланировка обошлась в 800 000 ₽ — как избежать"
+- "📖 История клиента: «Я хотел объединить кухню, но...»"
+
+Твой ответ — только хуки, по одному на строке, с эмодзи."""
+
+            # СНАЧАЛА YandexGPT (в РФ, работает!)
+            try:
+                response = await yandex_gpt.generate_response(
+                    user_prompt=user_prompt,
+                    system_prompt=system_prompt,
+                    max_tokens=1000
+                )
+                if response:
+                    return self._parse_ai_response(response, topic)
+            except Exception as e:
+                logger.warning(f"YandexGPT error: {e}")
+            
+            # Fallback на Router AI
+            if self.use_router:
+                try:
+                    response = await router_ai.generate_response(
+                        user_prompt=user_prompt,
+                        system_prompt=system_prompt,
+                        max_tokens=1000
+                    )
+                    if response:
+                        return self._parse_ai_response(response, topic)
+                except Exception as e:
+                    logger.warning(f"Router AI error: {e}")
+                
+        except Exception as e:
+            logger.error(f"AI generation error: {e}")
+        
+        return []
+    
+    def _parse_ai_response(self, response: str, topic: str) -> List[Dict]:
+        """Парсит ответ ИИ в структурированный формат"""
+        hooks = []
+        lines = response.strip().split('\n')
+        
+        for line in lines:
+            line = line.strip()
+            line = line[line.find('.')+1:].strip() if line and line[0].isdigit() else line
+            line = line[line.find(')')+1:].strip() if ')' in line[:5] else line
+            
+            if line and len(line) > 10:
+                hooks.append({
+                    'text': line,
+                    'topic': topic,
+                    'source': 'ai'
+                })
+        
+        return hooks
+    
+    def _generate_templates(
+        self,
+        topic: str,
+        count: int,
+        category: str = None
+    ) -> List[Dict]:
+        """Генерирует хуки из шаблонов"""
+        hooks = []
+        
+        # Определяем проблему из темы
+        problem = topic.lower()
+        if 'перепланировк' in problem:
+            problem = 'перепланировка'
+        elif 'ремонт' in problem:
+            problem = 'ремонт'
+        elif 'согласовани' in problem:
+            problem = 'согласование'
+        elif 'объединен' in problem:
+            problem = 'объединение помещений'
+        else:
+            problem = 'этот вопрос'
+        
+        # Выбираем категории
+        categories = [category] if category else list(HOOK_TEMPLATES.keys())
+        
+        for cat in categories:
+            if cat in HOOK_TEMPLATES:
+                templates = HOOK_TEMPLATES[cat]
+                for _ in range(min(2, count)):
+                    template = random.choice(templates)
+                    
+                    hook = template.format(
+                        проблема=problem,
+                        сумма=f"{random.randint(3, 9)}00 000",
+                        цифра=random.randint(3, 99),
+                        время=f"{random.randint(1, 14)} дней",
+                        факт='это важно знать'
+                    )
+                    
+                    hooks.append({
+                        'text': hook,
+                        'topic': topic,
+                        'source': 'template',
+                        'category': cat
+                    })
+        
+        return hooks
+    
+    def get_categories(self) -> List[str]:
+        """Возвращает список доступных категорий"""
+        return list(HOOK_TEMPLATES.keys())
+
+
+# Singleton instance
+viral_hooks_agent = ViralHooksAgent()
+
+
+async def generate_hooks_for_topic(topic: str, count: int = 5) -> List[Dict]:
+    """Удобная функция для генерации хуков"""
+    return await viral_hooks_agent.generate_hooks(topic, count)
+
+
+if __name__ == "__main__":
+    # Тест агента
+    import asyncio
+    
+    async def test():
+        print("🧪 Тест Viral Hooks Agent (Согласование перепланировок)\n")
+        
+        topics = [
+            "перепланировка квартиры",
+            "объединение кухни и гостиной",
+            "снос стен в квартире",
+            "перенос мокрой зоны",
+        ]
+        
+        for topic in topics:
+            print(f"📝 Тема: {topic}\n")
+            hooks = await generate_hooks_for_topic(topic, count=5)
+            for i, hook in enumerate(hooks, 1):
+                print(f"  {i}. {hook['text']}")
+                print(f"     📌 Категория: {hook.get('category', 'ai')}\n")
+            print("-" * 50)
+    
+    asyncio.run(test())
