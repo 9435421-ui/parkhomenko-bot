@@ -82,4 +82,12 @@ class RouterAIClient:
             return None
 
 # Singleton
+    async def generate_response(self, prompt: str, system: str = "", model: str = None) -> Optional[str]:
+        """Алиас для совместимости"""
+        messages = []
+        if system:
+            messages.append({"role": "system", "content": system})
+        messages.append({"role": "user", "content": prompt})
+        return await self.generate(messages=messages, model=model)
+
 router_ai = RouterAIClient()
