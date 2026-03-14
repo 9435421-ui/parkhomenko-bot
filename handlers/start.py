@@ -511,3 +511,7 @@ async def urgent_edit_handler(callback: CallbackQuery, state: FSMContext):
         parse_mode="HTML"
     )
     await callback.answer()
+
+
+# Алиас для совместимости
+start_router = router
