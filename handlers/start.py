@@ -53,7 +53,6 @@ async def handle_start(message: Message, state: FSMContext):
         except Exception as _e:
             logger.debug("Сохранение тёплого лида: %s", _e)
 
-=======
     await state.clear()
     
     # Ссылка из канала/поста: t.me/terion_bot?start=quiz → сразу начинаем квиз (Бриф)
@@ -512,4 +511,3 @@ async def urgent_edit_handler(callback: CallbackQuery, state: FSMContext):
         parse_mode="HTML"
     )
     await callback.answer()
->>>>>>> 7088a20d30a8942893a1c5c26400c6546150a377
