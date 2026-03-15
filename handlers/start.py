@@ -15,6 +15,9 @@ class QueueStates(StatesGroup):
 from config import ADMIN_ID, is_admin, LEADS_GROUP_CHAT_ID, THREAD_ID_DRAFTS
 from database import db
 from agents.creative_agent import creative_agent
+from services.scheduler_ref import get_scheduler
+from services.image_generator import image_generator
+from services.publisher import publisher
 
 logger = logging.getLogger(__name__)
 router = Router()
