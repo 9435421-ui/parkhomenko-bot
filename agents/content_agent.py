@@ -1,99 +1,210 @@
-import requests
 import os
 import logging
+import asyncio
 from datetime import datetime, timedelta
-from typing import Optional, List, Dict
+from typing import List, Dict
+from utils.yandex_gpt import YandexGPT
+from utils.knowledge_base import knowledge_base
 
 logger = logging.getLogger(__name__)
 
 class ContentAgent:
+    """Агент TERION для генерации экспертного контента по перепланировкам"""
+
     def __init__(self):
-        from utils.yandex_gpt import yandex_gpt
-        from database.db import db
-        self.gpt = yandex_gpt
-        self.db = db
-        self.brief_content = self._load_brief()
+        self.ai = YandexGPT()
+        # Темы для автоплана, специфичные для ТЕРИОН
+        self.expert_topics = [
+            "Законодательство: Новые правила согласования в 2026 году",
+            "Инвестиции: Как деление на студии увеличивает капитализацию",
+            "Кейс: Узаконивание сложной перепланировки в Москве",
+            "БТИ: Почему техпаспорт — это еще не всё",
+            "Безопасность: Какие стены нельзя трогать ни при каких условиях",
+            "Экономика: Сколько стоит ошибка в согласовании",
+            "Совет эксперта: Как выбрать квартиру под инвест-проект"
+        ]
 
-    def _load_brief(self):
-        """Загружает базу знаний"""
-        paths = ["BRIEF_pereplanirovki.md", "docs/09_ИИ_консультант/Промпт_ИИ_консультанта.md"]
-        for path in paths:
-            if os.path.exists(path):
-                try:
-                    with open(path, "r", encoding="utf-8") as f:
-                        return f.read()
-                except Exception as e:
-                    logger.error(f"Error loading brief from {path}: {e}")
-        return "База знаний не найдена. Используйте общие знания по перепланировкам в Москве."
+    async def generate_week_plan(self) -> List[Dict]:
+        """Генерирует план постов на 7 дней"""
+        plan = []
+        today = datetime.now()
 
-    async def _is_duplicate(self, topic: str, title: str) -> bool:
-        """Проверка на дубликаты за последние 48 часов"""
-        async with self.db.conn.cursor() as cursor:
-            # Проверяем по заголовку и теме в content_plan
-            await cursor.execute(
-                """SELECT COUNT(*) FROM content_plan 
-                   WHERE (title = ? OR theme = ?) 
-                   AND created_at >= datetime('now', '-48 hours')""",
-                (title, topic)
-            )
-            row = await cursor.fetchone()
-            return row[0] > 0 if row else False
+        for i, topic in enumerate(self.expert_topics):
+            publish_date = today + timedelta(days=i)
 
-    async def generate_post(self, topic: str, force_angle: Optional[str] = None) -> Dict:
-        """Генерирует текст поста через YandexGPT с проверкой на дубликаты"""
-        
-        # Базовая проверка (в реальности title может генерироваться отдельно, 
-        # здесь мы используем topic как theme)
-        if await self._is_duplicate(topic, topic) and not force_angle:
-            logger.info(f"Тема '{topic}' уже предлагалась недавно. Меняем угол обзора.")
-            force_angle = "кейс или практический пример вместо общих советов"
+            # Получаем контекст из нашей базы знаний для точности
+            context = await knowledge_base.get_context(topic)
 
-        angle_instruction = f"\nУгол обзора: {force_angle}" if force_angle else ""
+            prompt = f"""
+            Ты — Антон, ИИ-помощник Юлии Пархоменко в компании TERION.
+            Твоя задача: написать экспертный пост для Telegram на тему: {topic}
 
-        system_prompt = f"""
-Ты — экспертный контент-менеджер компании TERION (ИП Пархоменко). 
-Твоя задача: написать пост для Telegram-канала о перепланировках в Москве.
+            ИСПОЛЬЗУЙ ДАННЫЕ ИЗ БАЗЫ ЗНАНИЙ:
+            {context}
 
-Тема: {topic}{angle_instruction}
+            ТРЕБОВАНИЯ К ПОСТУ:
+            1. Стиль: Профессиональный, но доступный.
+            2. Обязательно упомяни, что финальное решение за экспертом Юлией Пархоменко.
+            3. В конце добавь призыв пройти наш квиз в боте.
+            4. Тон: Технологичный (мы используем ИИ для расчетов).
+            """
 
-Стиль: Профессиональный, но доступный. Экспертный, вызывающий доверие. 
-Тон: ТЕРИОН — надежность, законность, экспертность.
+            content = await self.ai.generate_response(prompt)
 
-База знаний:
-{self.brief_content[:2000]}
-
-Требования:
-1. Текст должен быть структурированным (используй абзацы).
-2. Используй эмодзи умеренно.
-3. В конце обязательно добавь призыв к действию (CTA): «📝 Записаться на консультацию».
-4. Не используй сложные юридические термины без объяснения.
-5. Проверь текст на грамматику и соответствие тону ТЕРИОН.
-""".strip()
-
-        try:
-            result_text = await self.gpt.generate_response(
-                user_prompt=f"Напиши экспертный пост на тему: {topic}. Обязательно начни с цепляющего заголовка.",
-                system_prompt=system_prompt,
-                temperature=0.6,
-                max_tokens=1500
-            )
-            
-            # Извлекаем заголовок (первая строка)
-            lines = result_text.strip().split('\n')
-            title = lines[0].replace('#', '').strip()
-            body = '\n'.join(lines[1:]).strip()
-            
-            return {
-                "title": title,
-                "body": body,
+            # Формируем структуру поста
+            post = {
+                "day": i + 1,
+                "date": publish_date.strftime("%d.%m.%Y"),
                 "topic": topic,
-                "status": "draft" # Посты приходят на одобрение
+                "text": content,
+                "image_prompt": f"Modern luxury apartment interior, architectural blueprint overlay, professional lighting, 8k, style of TERION agency, focus on {topic}"
             }
-        except Exception as e:
-            logger.error(f"Error generating post: {e}")
-            return {
-                "title": "Ошибка генерации",
-                "body": f"Ошибка при генерации поста на тему '{topic}'.",
-                "topic": topic,
-                "status": "error"
-            }
+            plan.append(post)
+
+        return plan
+
+async def create_cover_data(self, title: str):
+        """
+        Подготовка данных для наложения текста на обложку
+        (Логика для Pillow будет в image_agent)
+        """
+        return {
+            "text": title.upper(),
+            "font_color": "#FFFFFF",
+            "bg_overlay": "rgba(0, 0, 139, 0.5)", # Фирменный синий TERION
+            "logo": "terion_logo.png"
+        }
+
+    async def create_posts_from_interview(self, voice_text: str) -> Dict:
+        """
+        Создание постов из голосового сообщения Юлии
+
+        Args:
+            voice_text: Текст из голосового сообщения
+
+        Returns:
+            Dict: Словарь с вариантами постов и рекомендацией канала
+        """
+        # Анализируем содержание для определения канала
+        target_channel = self._determine_target_channel(voice_text)
+
+        # Генерируем пост для выбранного канала
+        post_text = await self._generate_post_for_channel(voice_text, target_channel)
+
+        return {
+            "text": post_text,
+            "target_channel": target_channel,
+            "voice_text": voice_text
+        }
+
+    def _determine_target_channel(self, text: str) -> str:
+        """
+        Определение канала для публикации на основе содержания
+
+        Args:
+            text: Текст для анализа
+
+        Returns:
+            str: Рекомендованный канал ("TERION" или "Дом Гранд")
+        """
+        text_lower = text.lower()
+
+        # Ключевые слова для Дом Гранд (инвестиции, студии, доход)
+        dom_grand_keywords = [
+            "студия", "инвестиция", "доход", "аренда",
+            "капитализация", "прибыль", "финансы",
+            "рынок", "цены", "недвижимость"
+        ]
+
+        # Ключевые слова для TERION (БТИ, законы, согласование)
+        terion_keywords = [
+            "бти", "техпаспорт", "согласование",
+            "закон", "норматив", "перепланировка",
+            "архитектура", "проект", "документ"
+        ]
+
+        # Проверяем наличие ключевых слов
+        dom_grand_count = sum(1 for kw in dom_grand_keywords if kw in text_lower)
+        terion_count = sum(1 for kw in terion_keywords if kw in text_lower)
+
+        # Принимаем решение на основе количества ключевых слов
+        if dom_grand_count > terion_count:
+            return "Дом Гранд"
+        elif terion_count > dom_grand_count:
+            return "TERION"
+        else:
+            # Если ключевых слов поровну или нет явных ключевых слов
+            # Приоритет отдаем TERION (основной бизнес)
+            return "TERION"
+
+    async def _generate_post_for_channel(self, text: str, channel: str) -> str:
+        """
+        Генерация поста для конкретного канала
+
+        Args:
+            text: Исходный текст
+            channel: Целевой канал
+
+        Returns:
+            str: Сгенерированный пост
+        """
+        # Получаем контекст из базы знаний
+        context = await knowledge_base.get_context(text)
+
+        # Формируем промпт в зависимости от канала
+        if channel == "Дом Гранд":
+            prompt = f"""
+            Ты — Антон, ИИ-помощник Юлии Пархоменко в компании TERION.
+            Твоя задача: написать экспертный пост для канала "Дом Гранд" на основе голосового сообщения:
+
+            ИСХОДНОЕ СООБЩЕНИЕ:
+            {text}
+
+            ИСПОЛЬЗУЙ ДАННЫЕ ИЗ БАЗЫ ЗНАНИЙ:
+            {context}
+
+            ТРЕБОВАНИЯ К ПОСТУ:
+            1. Стиль: Инвестиционный, ориентированный на доход и капитализацию.
+            2. Цветовая гамма: Золотисто-бежевая (для обложек).
+            3. Целевая аудитория: Инвесторы, собственники жилья.
+            4. Акцент: На финансовые выгоды и возможности.
+            5. В конце добавь призыв к действию для инвесторов.
+            """
+        else:  # TERION
+            prompt = f"""
+            Ты — Антон, ИИ-помощник Юлии Пархоменко в компании TERION.
+            Твоя задача: написать экспертный пост для канала "TERION" на основе голосового сообщения:
+
+            ИСХОДНОЕ СООБЩЕНИЕ:
+            {text}
+
+            ИСПОЛЬЗУЙ ДАННЫЕ ИЗ БАЗЫ ЗНАНИЙ:
+            {context}
+
+            ТРЕБОВАНИЯ К ПОСТУ:
+            1. Стиль: Профессиональный, технический.
+            2. Цветовая гамма: Фирменный синий TERION с платиной (для обложек).
+            3. Целевая аудитория: Клиенты, нуждающиеся в согласовании перепланировок.
+            4. Акцент: На юридические аспекты и технические решения.
+            5. В конце добавь призыв к действию для консультации.
+            """
+
+        # Генерируем контент
+        content = await self.ai.generate_response(prompt)
+
+        return content
+
+async def create_cover_data(self, title: str):
+        """
+        Подготовка данных для наложения текста на обложку
+        (Логика для Pillow будет в image_agent)
+        """
+        return {
+            "text": title.upper(),
+            "font_color": "#FFFFFF",
+            "bg_overlay": "rgba(0, 0, 139, 0.5)", # Фирменный синий TERION
+            "logo": "terion_logo.png"
+        }
+
+# Глобальный экземпляр
+content_agent = ContentAgent()
