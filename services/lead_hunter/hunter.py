@@ -94,7 +94,7 @@ class LeadHunter:
             try:
                 from services.scout_parser import ScoutParser
                 parser = ScoutParser()
-                messages = await parser.get_recent_messages()
+                messages = await parser.scan_vk_groups()
             except Exception as e:
                 logger.warning(f"hunt(): не удалось получить сообщения: {e}")
                 messages = []
