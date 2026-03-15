@@ -203,7 +203,6 @@ class ScoutParser:
                             text=post.get('text', ''),
                             published_at=datetime.fromtimestamp(post.get('date', 0)),
                             url=f"https://vk.com/club{group_id}?w=wall-{group_id}_{post.get('id', '')}",
-                            source_name=title
                         )
                         self.last_leads.append(scout_post)
                     
@@ -221,7 +220,6 @@ class ScoutParser:
                                 published_at=datetime.fromtimestamp(comment.get('date', 0)),
                                 url=f"https://vk.com/club{group_id}?w=wall-{group_id}_{post.get('id', '')}&reply={comment.get('id', '')}",
                                 is_comment=True,
-                                source_name=title
                             )
                             self.last_leads.append(scout_post)
             except Exception as e:
