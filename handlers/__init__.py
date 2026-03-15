@@ -18,7 +18,7 @@ def register_all_handlers(dp: Dispatcher):
     from .dialog import register_handlers as register_dialog
     from .invest import register_handlers as register_invest
     from .admin import register_handlers as register_admin
-    from .content import register_handlers as register_content
+    pass  # content uses content_router, not register_handlers
     from .creator import register_handlers as register_creator
     
     register_start(dp)
@@ -26,5 +26,5 @@ def register_all_handlers(dp: Dispatcher):
     register_dialog(dp)
     register_invest(dp)
     register_admin(dp)
-    register_content(dp)
+    # register_content: content uses content_router in main.py
     register_creator(dp)

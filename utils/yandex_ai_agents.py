@@ -46,7 +46,7 @@ async def call_spy_agent(message_text: str) -> Dict[str, Any]:
             "Верни только валидный JSON без markdown, в одну строку: "
             '{"hotness": число 1-5, "recommendation": "вердикт/действие одним предложением", "pain_level": число 1-5}'
         )
-        response = await router_ai.generate_response(prompt, model="kimi")
+        response = await router_ai.generate_response(prompt, model="openai/gpt-4.1-nano")
         if response:
             return _parse_spy_json(response)
     except Exception as e:

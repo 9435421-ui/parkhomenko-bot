@@ -418,7 +418,7 @@ class LeadHunter:
             "Выдай JSON: is_lead, intent, hotness (1-5), context_summary"
         )
         try:
-            response = await router_ai.generate_response(prompt, model="kimi")
+            response = await router_ai.generate_response(prompt, model="openai/gpt-4.1-nano")
             out = json.loads(re.search(r'\{.*\}', response, re.DOTALL).group(0))
             out.setdefault("recommendation", out.get("context_summary", ""))
             out.setdefault("pain_level", min(out.get("hotness", 3), 5))

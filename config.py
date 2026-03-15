@@ -145,3 +145,10 @@ SCOUT_VK_MESSAGES_PER_HOUR = 3  # Макс
 # Глобальный лимит сообщений для сканирования (Telegram/VK)
 SCAN_LIMIT = int(os.getenv("SCAN_LIMIT", "100"))  # Максимум сообщений для сканирования за один цикл
 MAX_MESSAGES = SCAN_LIMIT  # Алиас для обратной совместимости
+THREAD_ID_QUIZ_LEADS = int(os.getenv("THREAD_ID_QUIZ_LEADS", "0"))
+
+# Дополнительные переменные (добавлены автоматически)
+ADMIN_GROUP_ID = int(os.getenv("ADMIN_GROUP_ID", "0"))
+JULIA_USER_ID = int(os.getenv("JULIA_USER_ID", "8438024806"))
+THREAD_ID_HOT_LEADS = int(os.getenv("THREAD_ID_HOT_LEADS", "811"))
+THREAD_ID_NEWS = int(os.getenv("THREAD_ID_NEWS", "780"))

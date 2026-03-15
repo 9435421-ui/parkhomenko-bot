@@ -8,7 +8,7 @@ logger = logging.getLogger(__name__)
 class RouterAIClient:
     """RouterAI для текстов и анализа изображений (Gemini/Claude)"""
     def __init__(self, api_key: Optional[str] = None):
-        self.api_key = api_key or os.getenv("ROUTER_API_KEY")
+        self.api_key = api_key or os.getenv("ROUTER_AI_KEY")
         self.base_url = os.getenv(
             "ROUTER_AI_ENDPOINT", 
             "https://routerai.ru/api/v1/chat/completions"
@@ -27,7 +27,7 @@ class RouterAIClient:
     ) -> Optional[str]:
         """Генерация текста."""
         if not self.api_key:
-            logger.warning("ROUTER_API_KEY не настроен")
+            logger.warning("ROUTER_AI_KEY не настроен")
             return None
             
         url = f"{self.base_url}/chat/completions"
@@ -88,6 +88,6 @@ class RouterAIClient:
         if system:
             messages.append({"role": "system", "content": system})
         messages.append({"role": "user", "content": prompt})
-        return await self.generate(messages=messages, model=model)
+        return await self.generate(prompt=prompt, system_prompt=system, model=model or "gemini-1.5-flash")
 
 router_ai = RouterAIClient()
