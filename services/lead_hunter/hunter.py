@@ -104,7 +104,12 @@ class LeadHunter:
 
         results = []
         for msg in messages:
-            text = (msg.get('text') or '').strip()
+            if isinstance(msg, dict):
+                text = (msg.get('text') or '').strip()
+                msg_url = msg.get('url', '')
+            else:
+                text = (msg.text or '').strip()
+                msg_url = msg.url or ''
             text_lower = text.lower()
             has_lead_phrase = any(p in text_lower for p in self.lead_phrases)
             analysis = await self._analyze_intent(text)
@@ -116,7 +121,7 @@ class LeadHunter:
 
             if hotness >= 2 or analysis.get('is_lead') or has_lead_phrase:
                 lead_data = {
-                    'url': msg.get('url', ''),
+                    'url': msg_url,
                     'content': text,
                     'intent': analysis.get('intent', 'DIY/ремонт') if has_lead_phrase else analysis.get('intent', '—'),
                     'hotness': hotness,

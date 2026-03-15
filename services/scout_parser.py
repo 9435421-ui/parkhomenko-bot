@@ -202,7 +202,8 @@ class ScoutParser:
                             post_id=str(post.get('id', '')),
                             text=post.get('text', ''),
                             published_at=datetime.fromtimestamp(post.get('date', 0)),
-                            url=f"https://vk.com/club{group_id}?w=wall-{group_id}_{post.get('id', '')}"
+                            url=f"https://vk.com/club{group_id}?w=wall-{group_id}_{post.get('id', '')}",
+                            source_name=title
                         )
                         self.last_leads.append(scout_post)
                     
@@ -219,14 +220,15 @@ class ScoutParser:
                                 text=comment.get('text', ''),
                                 published_at=datetime.fromtimestamp(comment.get('date', 0)),
                                 url=f"https://vk.com/club{group_id}?w=wall-{group_id}_{post.get('id', '')}&reply={comment.get('id', '')}",
-                                is_comment=True
+                                is_comment=True,
+                                source_name=title
                             )
                             self.last_leads.append(scout_post)
             except Exception as e:
                 logger.error(f"Error scanning VK group {title} (ID: {group_id}): {e}")
         
         logger.info(f"✅ VK groups scan complete: {len(self.last_leads)} leads found")
-        return self.last_leads
+        return [{"text": p.text, "url": p.url, "source": p.source_name} for p in self.last_leads]
 
     def _extract_vk_group_id(self, link: str) -> Optional[str]:
         """
