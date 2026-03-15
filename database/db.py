@@ -31,7 +31,7 @@ class Database:
         self.conn.row_factory = aiosqlite.Row
         # Включаем WAL режим для поддержки параллельных чтений
         async with self.conn.cursor() as cursor:
-            await cursor.execute("PRAGMA journal_mode=WAL")  # Включаем WAL режим
+            # await cursor.execute("PRAGMA journal_mode=WAL")  # Удаляем или комментируем эту строку
             await cursor.execute("PRAGMA busy_timeout=5000")  # Ожидание 5 секунд вместо блокировки
             await cursor.execute("PRAGMA synchronous=NORMAL")  # Баланс между производительностью и надежностью
             await self.conn.commit()
@@ -233,7 +233,7 @@ class Database:
             """)
             await self.conn.commit()
 
-            # Миграция: колонка contacted_at для «Продавец» (первый диалог с лидом)
+            # Миграция: колонка contacted_at для «Продавца» (первый диалог с лидом)
             try:
                 await cursor.execute("ALTER TABLE spy_leads ADD COLUMN contacted_at TIMESTAMP NULL")
                 await self.conn.commit()
@@ -969,15 +969,8 @@ class Database:
         status: str = "pending",
         participants_count: int = None,
         geo_tag: str = None,
-        **kwargs
     ) -> int:
-        """
-        Добавить ресурс. status: pending|active|archived. 
-        При дубликате link — обновить participants_count и notes.
-        
-        Поддерживает дополнительные параметры через **kwargs для совместимости
-        с Discovery и другими модулями (например, resource_type из Discovery).
-        """
+        """Добавить ресурс. status: pending|active|archived. При дубликате link — обновить participants_count и notes."""
         link = (link or "").strip().rstrip("/")
         title = title or link
         platform = resource_type  # telegram | vk
@@ -1400,18 +1393,6 @@ class Database:
                    WHERE created_at < datetime('now', '-12 months')"""
             )
             await self.conn.commit()
-
-    async def add_system_log(self, level: str, module: str, message: str, stack_trace: str = None):
-        """Добавить системный лог в базу данных (для watchdog.py)"""
-        async with self.conn.cursor() as cursor:
-            await cursor.execute(
-                """INSERT INTO content_history 
-                   (post_text, image_url, model_used, cost_rub, platform, channel, post_id)
-                   VALUES (?, ?, ?, ?, ?, ?, ?)""",
-                (f"[{level}] {module}: {message}", None, None, None, None, None, None)
-            )
-            await self.conn.commit()
-            return cursor.lastrowid
 
 
 db = Database()
