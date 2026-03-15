@@ -33,7 +33,7 @@ import io
 
 from database import db
 from handlers.vk_publisher import VKPublisher
-from content_agent import ContentAgent
+from agents.content_agent import ContentAgent
 from config import (
     CONTENT_BOT_TOKEN,
     BOT_TOKEN,
