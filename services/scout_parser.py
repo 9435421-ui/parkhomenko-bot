@@ -7,12 +7,12 @@ from datetime import datetime, timedelta
 from typing import List, Dict, Optional
 from dataclasses import dataclass
 from telethon import TelegramClient
-from config import API_ID, API_HASH
-from database.db import Database
+from config import API_ID, API_HASH, THREAD_ID_HOT_LEADS
+from database.db import db
 
 logger = logging.getLogger(__name__)
 
-SESSION_NAME = "anton_parser"
+SESSION_NAME = "anton_scout"
 
 @dataclass
 class ScoutPost:
@@ -103,7 +103,7 @@ QUESTION_MARKERS = [
 class ScoutParser:
     def __init__(self):
         self.client = None
-        self.db = Database()
+        self.db = db
         self.last_leads = []
         self.KEYWORDS = ["перепланировка", "согласование", "узаконить", "МЖИ", "антресоль"]
         self.VK_GROUPS = []  # Теперь будет заполняться из БД
@@ -112,7 +112,7 @@ class ScoutParser:
         from config import API_ID, API_HASH
         if API_ID and API_HASH:
             if not self.client:
-                self.client = TelegramClient(SESSION_NAME, API_ID, API_HASH)
+                self.client = TelegramClient(SESSION_NAME, int(API_ID), API_HASH)
                 await self.client.connect()
         else:
             logger.warning("⚠️ TG_API_ID/API_HASH не заданы — Telegram-парсинг отключён")
@@ -125,32 +125,78 @@ class ScoutParser:
         if self.client:
             await self.client.disconnect()
             self.client = None
-        if self.db.conn:
-            await self.db.close()
+        # self.db.close() вызывается в main.py
 
     async def scan_geo_chats(self) -> List[ScoutPost]:
         """Сканирование Telegram чатов (требует авторизации Telethon)"""
-        logger.info("🔍 Scanning geo chats...")
+        logger.info("🔍 Scanning geo chats from DB...")
         self.last_leads = []
         
-        # Пример логики сканирования
-        # В реальности здесь будет список чатов из БД или конфига
-        chats = ["@msk_pereplanirovka_chat", "@zhk_heart_of_capital"] 
+        if not self.client:
+            await self.start()
         
-        for chat in chats:
+        if not self.client:
+            logger.error("❌ Telethon client not initialized")
+            return []
+
+        # Берем чаты из БД: SELECT link FROM target_resources WHERE platform='telegram' AND is_active=1
+        try:
+            query = "SELECT link, title FROM target_resources WHERE platform='telegram' AND is_active=1"
+            async with self.db.conn.cursor() as cursor:
+                await cursor.execute(query)
+                rows = await cursor.fetchall()
+                chats = [{"link": row[0], "title": row[1]} for row in rows]
+        except Exception as e:
+            logger.error(f"Error fetching chats from DB: {e}")
+            return []
+
+        from utils.bot_config import get_main_bot
+        from config import LEADS_GROUP_CHAT_ID
+        bot = get_main_bot()
+        
+        for chat_info in chats:
+            chat = chat_info['link']
+            title = chat_info['title'] or chat
             try:
-                async for message in self.client.iter_messages(chat, limit=50):
-                    if any(kw.lower() in (message.text or "").lower() for kw in self.KEYWORDS):
+                # Очистка ссылки для Telethon
+                entity = chat.split('/')[-1].replace('@', '')
+                async for message in self.client.iter_messages(entity, limit=50):
+                    text = message.text or ""
+                    lead_type = self.detect_lead(text)
+                    if lead_type:
                         post = ScoutPost(
                             source_type="telegram",
-                            source_name=chat,
+                            source_name=title,
                             source_id=str(message.peer_id),
                             post_id=str(message.id),
-                            text=message.text,
+                            text=text,
                             published_at=message.date,
-                            url=f"https://t.me/{chat.replace('@', '')}/{message.id}"
+                            url=f"https://t.me/{entity}/{message.id}"
                         )
                         self.last_leads.append(post)
+                        
+                        # Сохраняем лид через db.add_spy_lead()
+                        await self.db.add_spy_lead(
+                            source_type="telegram",
+                            source_name=title,
+                            url=post.url,
+                            text=text,
+                            pain_stage="ST-3" if lead_type == "hot" else "ST-2",
+                            priority_score=10 if lead_type == "hot" else 5,
+                        )
+                        
+                        # Горячие лиды отправляем в топик THREAD_ID_HOT_LEADS=811
+                        if lead_type == "hot" and bot:
+                            try:
+                                await bot.send_message(
+                                    chat_id=LEADS_GROUP_CHAT_ID,
+                                    text=f"🔥 <b>ГОРЯЧИЙ ЛИД (TG)</b>\n\nИсточник: {title}\nТекст: {text[:500]}\n\n🔗 {post.url}",
+                                    message_thread_id=THREAD_ID_HOT_LEADS,
+                                    parse_mode="HTML"
+                                )
+                            except Exception as send_err:
+                                logger.error(f"Error sending hot lead to TG: {send_err}")
+
             except Exception as e:
                 logger.error(f"Error scanning {chat}: {e}")
         

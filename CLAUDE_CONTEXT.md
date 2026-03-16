@@ -16,18 +16,18 @@ GitHub: https://github.com/9435421-ui/parkhomenko-bot
 | `main.py` | Точка входа, два бота + scheduler | ✅ с Discovery задачей |
 | `bot_spy.py` | Демон шпиона (Telethon + APScheduler, БЕЗ aiogram) | ✅ с start/stop БД |
 | `vk_spy.py` | Автономный VK-шпион (aiohttp, без Telethon) | ✅ готов к запуску |
-| `services/scout_parser.py` | Парсер TG+VK, VK API реализован | ✅ полный функционал |
+| `services/scout_parser.py` | Парсер TG+VK, VK API реализован | ✅ TG чаты из БД, горячие лиды в 811 |
 | `session_manager.py` | Единый менеджер Telethon-сессии | ✅ исправлен |
 | `config.py` | Все переменные окружения | ⚠️ дубль NOTIFICATIONS_CHANNEL_ID |
 | `database/db.py` | SQLite + WAL mode | ✅ исправлен |
 | `watchdog.py` | Самовосстановление процессов | ✅ исправлен |
-| `handlers/` | start, quiz, dialog, admin, content, invest, vk_publisher | ✅ квиз готов |
-| `services/lead_hunter/` | hunter.py с Discovery + scheduler, analyzer.py, discovery.py | ✅ интегрирован |
+| `handlers/` | start, quiz, dialog, admin, content, invest, vk_publisher | ✅ admin: голосовые интервью |
+| `services/lead_hunter/` | hunter.py с Discovery + scheduler, analyzer.py, discovery.py | ✅ TG Discovery добавлен |
 | `utils/yandex_gpt.py` | YandexGPT интеграция | ✅ исправлен |
 | `agents/content_agent.py` | Контент-агент (async) | ✅ исправлен |
 
 ## Имя Telethon-сессии
-`anton_parser` — единое во всём проекте.
+`anton_scout` — основная сессия для парсинга и Discovery.
 Файл: `anton_parser.session` — в .gitignore, не коммитить!
 Статус: ⚠️ авторизация не пройдена (проблемы с получением кода)
 
@@ -98,11 +98,15 @@ python session_manager.py --reset  # если сессия сломана
 23. ✅ Метод parse_vk → scan_vk_groups в hunter.py
 24. ✅ База данных в scan_vk_groups — использование await db.get_connection()
 25. ✅ Символ стрелки → в handlers/start.py заменён на текстовую стрелку ->
+26. ✅ admin.py — реализована обработка голосовых сообщений (интервью) с отправкой черновиков в группу.
+27. ✅ scout_parser.py — реализовано сканирование TG чатов из БД с сохранением лидов и отправкой горячих в топик 811.
+28. ✅ hunter.py — добавлен метод run_tg_discovery для автоматического поиска чатов в Telegram.
+29. ✅ deploy.sh — создан скрипт для деплоя файлов Жюля на сервер.
 
 ## Открытые задачи
 - 🟡 ADMIN_ID в .env = placeholder, нужно заменить на реальный ID
 - 🟡 Телеграм-сессия: код авторизации не приходит (пауза)
-- 🟠 admin.py — кнопки без обработчиков
+- 🟠 admin.py — некоторые кнопки меню всё ещё без обработчиков
 - 🟠 Миграции БД — разные пути к файлу БД
 - 🔵 Настройка контент-плана (следующий этап)
 

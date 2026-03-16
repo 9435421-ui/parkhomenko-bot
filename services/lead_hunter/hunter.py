@@ -139,8 +139,82 @@ class LeadHunter:
         return results
 
     # ──────────────────────────────────────────
-    # DISCOVERY: поиск жилых пабликов ЖК в VK
+    # DISCOVERY: поиск жилых пабликов ЖК в VK & TG
     # ──────────────────────────────────────────
+
+    async def run_tg_discovery(self) -> dict:
+        """
+        Ищет жилые паблики ЖК Москвы в Telegram, добавляет в target_resources.
+        Использует сессию 'anton_scout'.
+        """
+        from config import API_ID, API_HASH
+        from telethon import TelegramClient
+        from telethon.tl.functions.contacts import SearchRequest
+        from telethon.tl.functions.channels import GetFullChannelRequest
+        
+        stats = {"found": 0, "added": 0, "skipped": 0}
+        queries = ["перепланировка Москва", "ЖК жильцы обсуждение", "МЖИ предписание", "согласование перепланировки"]
+        
+        client = TelegramClient('anton_scout', API_ID, API_HASH)
+        await client.connect()
+        
+        if not await client.is_user_authorized():
+            logger.error("run_tg_discovery: Telethon client not authorized")
+            await client.disconnect()
+            return stats
+
+        try:
+            import aiosqlite
+            db_path = os.getenv("DB_PATH", "parkhomenko_bot.db")
+            async with aiosqlite.connect(db_path) as conn:
+                # Получаем существующие ссылки
+                async with conn.execute("SELECT link FROM target_resources WHERE platform='telegram'") as cur:
+                    rows = await cur.fetchall()
+                existing = {r[0] for r in rows}
+
+                for query in queries:
+                    result = await client(SearchRequest(q=query, limit=20))
+                    for chat in result.chats:
+                        stats["found"] += 1
+                        
+                        # Фильтры: от 200 участников, русскоязычные, не конкуренты
+                        try:
+                            full_chat = await client(GetFullChannelRequest(chat))
+                            participants = full_chat.full_chat.participants_count
+                        except:
+                            participants = 0
+
+                        link = f"https://t.me/{chat.username}" if chat.username else f"https://t.me/c/{chat.id}"
+                        
+                        if link in existing:
+                            stats["skipped"] += 1
+                            continue
+                            
+                        if participants < 200:
+                            stats["skipped"] += 1
+                            continue
+
+                        # Проверка на конкурентов
+                        title = chat.title or ""
+                        if any(kw in title.lower() for kw in COMPETITOR_KEYWORDS):
+                            stats["skipped"] += 1
+                            continue
+
+                        # Добавляем в БД
+                        await conn.execute(
+                            """INSERT INTO target_resources
+                               (type, link, title, platform, is_active, participants_count, priority)
+                               VALUES (?, ?, ?, ?, ?, ?, ?)""",
+                            ("tg_chat", link, title, "telegram", 1, participants, 50)
+                        )
+                        stats["added"] += 1
+                await conn.commit()
+        except Exception as e:
+            logger.error(f"run_tg_discovery error: {e}")
+        finally:
+            await client.disconnect()
+            
+        return stats
 
     async def run_discovery(self) -> dict:
         """

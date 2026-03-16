@@ -3,13 +3,18 @@ Admin Panel — управление ресурсами и ключевыми с
 Команда: /admin
 aiogram 3.x версия
 """
-from aiogram import Router, F
-from aiogram.types import Message, CallbackQuery
+import logging
+from aiogram import Router, F, Bot
+from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton
+from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import StatesGroup, State
-from keyboards.admin_kb import get_admin_main_menu # Предполагаем, что она там
+from config import ADMIN_ID, JULIA_USER_ID, LEADS_GROUP_CHAT_ID, THREAD_ID_DRAFTS
 from agents.content_agent import content_agent
+from services.scout_parser import ScoutParser
+from utils.voice_handler import convert_voice_to_text
 
+logger = logging.getLogger(__name__)
 router = Router()
 
 
@@ -109,6 +114,7 @@ async def admin_run_spy(callback: CallbackQuery):
 
     try:
         # Запуск Discovery
+        from services.lead_hunter.discovery import Discovery
         discovery = Discovery()
         new_resources = await discovery.discover_new_resources()
         await callback.message.answer(f"✅ Discovery завершен. Найдено новых ресурсов: {len(new_resources)}")
@@ -129,27 +135,49 @@ async def admin_run_spy(callback: CallbackQuery):
     await callback.answer()
 
 
-@router.message(AdminStates.waiting_for_voice, F.voice)
-async def process_interview_voice(message: Message, state: FSMContext):
-    """Обработка вашего голоса"""
-    waiting_msg = await message.answer("Wait... 🔄 Расшифровываю вашу мысль и подбираю стиль...")
+@router.message(F.voice)
+async def handle_admin_voice(message: Message, bot: Bot, state: FSMContext):
+    """Обработка голосовых сообщений только для ADMIN_ID и JULIA_USER_ID"""
+    if message.from_user.id not in [ADMIN_ID, JULIA_USER_ID]:
+        return
 
-    # 1. Получаем текст из голоса (через нашу утилиту)
-    voice_text = await convert_voice_to_text(message.voice.file_id) # Функция в utils
+    waiting_msg = await message.answer("🔄 Обрабатываю голосовое сообщение...")
 
-    # 2. Передаем текст Контент-Агенту для создания поста
-    # Антон сам определит канал на основе ключевых слов
-    post_variants = await content_agent.create_posts_from_interview(voice_text)
+    try:
+        # 1. Скачать голосовой файл и конвертировать в текст
+        voice_file = await bot.get_file(message.voice.file_id)
+        file_content = await bot.download_file(voice_file.file_path)
+        voice_text = await convert_voice_to_text(file_content.read())
+        if not voice_text:
+            await message.answer("⚠️ Не удалось распознать голос. Попробуйте ещё раз.")
+            return
 
-    await waiting_msg.delete()
-    await message.answer(
-        f"✅ <b>Мысль обработана!</b>\n\n"
-        f"<b>Исходный текст:</b>\n<i>{voice_text}</i>\n\n"
-        f"<b>Предложение Антона:</b>\n{post_variants['text']}\n\n"
-        f"📍 <b>Рекомендованный канал:</b> {post_variants['target_channel']}",
-        parse_mode="HTML"
-    )
-    await state.clear()
+        # 2. Передать текст в content_agent
+        drafts = await content_agent.create_posts_from_interview(voice_text)
+
+        # 3. Отправить черновики в LEADS_GROUP_CHAT_ID топик THREAD_ID_DRAFTS=85
+        if drafts:
+            drafts_text = "\n\n".join([
+                f"<b>{d.get('title','')}</b>\n{d.get('body','')[:500]}\n\n🏷 Канал: {d.get('channel','')}"
+                for d in drafts
+            ])
+            text = f"📝 <b>Черновики постов из интервью:</b>\n\n{drafts_text}"
+            await bot.send_message(
+                chat_id=LEADS_GROUP_CHAT_ID,
+                text=text,
+                message_thread_id=THREAD_ID_DRAFTS,
+                parse_mode="HTML"
+            )
+            await message.answer("✅ Черновики отправлены в группу (топик Черновики).")
+        else:
+            await message.answer("⚠️ Не удалось создать черновики.")
+
+    except Exception as e:
+        logger.error(f"Ошибка при обработке голосового сообщения админа: {e}")
+        await message.answer(f"❌ Ошибка: {e}")
+    finally:
+        await waiting_msg.delete()
+        await state.clear()
 
 
 def register_handlers(dp: Dispatcher):
