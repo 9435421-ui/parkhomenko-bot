@@ -13,16 +13,14 @@ GitHub: https://github.com/9435421-ui/parkhomenko-bot
 ## Ключевые файлы
 | Файл | Назначение | Статус |
 |------|-----------|--------|
-| `main.py` | Точка входа, два бота + scheduler | ✅ с Discovery задачей |
-| `bot_spy.py` | Демон шпиона (Telethon + APScheduler, БЕЗ aiogram) | ✅ с start/stop БД |
-| `vk_spy.py` | Автономный VK-шпион (aiohttp, без Telethon) | ✅ готов к запуску |
+| `bot_anton.py` | Основной бот-консультант (aiogram 3.x) | ✅ активный |
+| `bot_spy.py` | Демон шпиона (Telethon + ScoutParser) | ✅ активный |
 | `services/scout_parser.py` | Парсер TG+VK, VK API реализован | ✅ TG чаты из БД, горячие лиды в 811 |
 | `session_manager.py` | Единый менеджер Telethon-сессии | ✅ исправлен |
 | `config.py` | Все переменные окружения | ⚠️ дубль NOTIFICATIONS_CHANNEL_ID |
-| `database/db.py` | SQLite + WAL mode | ✅ исправлен |
-| `watchdog.py` | Самовосстановление процессов | ✅ исправлен |
+| `database/database.py` | SQLite + WAL mode | ✅ исправлен |
 | `handlers/` | start, quiz, dialog, admin, content, invest, vk_publisher, sales_agent | ✅ admin: голосовые интервью |
-| `services/lead_hunter/` | hunter.py с Discovery + scheduler, analyzer.py, discovery.py | ✅ TG Discovery добавлен |
+| `services/lead_hunter/` | hunter.py с Discovery + scheduler, analyzer.py, discovery.py, outreach.py | ✅ TG Discovery добавлен |
 | `utils/yandex_gpt.py` | YandexGPT интеграция | ✅ исправлен |
 | `agents/` | content_agent, creative_agent, image_agent, viral_hooks_agent, content_repurpose_agent | ✅ расширенная система агентов |
 
@@ -32,7 +30,7 @@ GitHub: https://github.com/9435421-ui/parkhomenko-bot
 Статус: ⚠️ авторизация не пройдена (проблемы с получением кода)
 
 ## Текущий фокус
-VK-шпион (`vk_spy.py`) работает автономно — без Telethon-сессии.
+VK-шпион (`bot_spy.py`) работает автономно — без Telethon-сессии.
 Карточки лидов приходят в Telegram с кнопками:
 - ✅ Взять в работу
 - ❌ Не наш клиент
@@ -58,14 +56,14 @@ VK_QUIZ_LINK=https://t.me/Parkhovenko_i_kompaniya_bot?start=quiz
 
 ## Команды запуска на сервере
 ```bash
-# VK-шпион (приоритет сейчас)
-screen -S vk_spy
+# Основной бот (заменил main.py)
+screen -S bot_anton
 cd /root/PARKHOMENKO_BOT
-python vk_spy.py
+python bot_anton.py
 
-# Основной бот
-screen -S main_bot
-python main.py
+# Шпион (заменил bot_spy.py)
+screen -S bot_spy
+python bot_spy.py
 
 # Авторизация Telethon (когда понадобится)
 python session_manager.py
@@ -90,8 +88,10 @@ python session_manager.py --reset  # если сессия сломана
 - `publisher.py` — публикация контента
 - `sales_reminders.py` — напоминания продаж
 - `vk_service.py` — VK интеграции
+- `vk_token_manager.py` — менеджер VK токенов
 - `voice_transcribe.py` — транскрибация голосовых
 - `yandex_rag.py` — Yandex RAG система
+- `birthday_greetings.py` — поздравления с днем рождения
 
 ### Обработчики (handlers/)
 - `sales_agent.py` — агент продаж
@@ -99,6 +99,13 @@ python session_manager.py --reset  # если сессия сломана
 - `max_uploader.py` — загрузка в MAX.ru
 - `creator.py` — креатор контента
 - `main_bot.py` — основной бот
+
+### LeadHunter компоненты
+- `hunter.py` — основной охотник за лидами
+- `analyzer.py` — анализатор лидов
+- `discovery.py` — поиск новых групп
+- `outreach.py` — outreach функционал
+- `database.py` — база данных лидов
 
 ## Исправленные баги (март 2026, обновлено 22 марта)
 1. ✅ Утечки секретов (fix_session.py, test_spy.py, scanbot.session)
@@ -127,10 +134,26 @@ python session_manager.py --reset  # если сессия сломана
 24. ✅ База данных в scan_vk_groups — использование await db.get_connection()
 25. ✅ Символ стрелки → в handlers/start.py заменён на текстовую стрелку ->
 26. ✅ content_bot.py — исправлен синтаксис fstring в create_plan_posts (строка ~1468)
-26. ✅ admin.py — реализована обработка голосовых сообщений (интервью) с отправкой черновиков в группу.
-27. ✅ scout_parser.py — реализовано сканирование TG чатов из БД с сохранением лидов и отправкой горячих в топик 811.
-28. ✅ hunter.py — добавлен метод run_tg_discovery для автоматического поиска чатов в Telegram.
-29. ✅ deploy.sh — создан скрипт для деплоя файлов Жюля на сервер.
+27. ✅ admin.py — реализована обработка голосовых сообщений (интервью) с отправкой черновиков в группу.
+28. ✅ scout_parser.py — реализовано сканирование TG чатов из БД с сохранением лидов и отправкой горячих в топик 811.
+29. ✅ hunter.py — добавлен метод run_tg_discovery для автоматического поиска чатов в Telegram.
+30. ✅ deploy.sh — создан скрипт для деплоя файлов Жюля на сервер.
+31. ✅ Проект очищен от 48 дублирующих и устаревших файлов (17,288 строк кода)
+
+## Очистка проекта (22 марта 2026)
+Удалено **48 файлов** (17,288 строк кода) — дубликаты, старые версии, сломанные БД:
+- ❌ `main.py` → заменен на `bot_anton.py`
+- ❌ `vk_spy.py` → функционал в `bot_spy.py`
+- ❌ `content_bot.py` → функционал в `handlers/content_bot.py`
+- ❌ `auto_poster.py` → заменен на `services/publisher.py`
+- ❌ `quiz.py` → функционал в `handlers/quiz.py`
+- ❌ `scout_parser.py` → функционал в `services/scout_parser.py`
+- ❌ `watchdog.py` → функционал интегрирован в основные боты
+- ❌ `content_bot_mvp/` — полная директория дубликата
+- ❌ `hunter_standalone/` — устаревший модуль
+- ❌ `jules_extracted/` — извлеченные файлы
+- ❌ `Жюль/` — директория дубликата
+- ❌ Сломанные файлы БД (.broken, .old, .shm)
 
 ## Открытые задачи
 - 🟡 ADMIN_ID в .env = placeholder, нужно заменить на реальный ID
