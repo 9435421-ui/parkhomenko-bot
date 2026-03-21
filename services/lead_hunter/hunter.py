@@ -134,8 +134,19 @@ class LeadHunter:
                 }
                 if not self.db.conn:
                     await self.db.connect()
-                if await self.db.save_lead(lead_data):
-                    results.append(lead_data)
+                # Сохраняем в spy_leads
+                try:
+                    await self.db.add_spy_lead(
+                        source_type='vk',
+                        source_name=msg.get('source', 'vk') if isinstance(msg, dict) else getattr(msg, 'source_name', 'vk'),
+                        url=msg_url,
+                        text=text,
+                        pain_stage=pain_stage,
+                        priority_score=lead_data['priority_score'],
+                    )
+                except Exception as e:
+                    logger.warning(f"add_spy_lead error: {e}")
+                results.append(lead_data)
         return results
 
     # ──────────────────────────────────────────

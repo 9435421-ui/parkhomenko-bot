@@ -273,7 +273,7 @@ class ScoutParser:
                 async with session.get(
                     "https://api.vk.com/method/wall.get",
                     params={
-                        "owner_id": f"-{group_id}",
+                        **( {"owner_id": f"-{group_id}"} if group_id.isdigit() else {"domain": group_id} ),
                         "count": count,
                         "filter": "all",
                         "access_token": VK_TOKEN,
@@ -300,7 +300,7 @@ class ScoutParser:
                 async with session.get(
                     "https://api.vk.com/method/wall.getComments",
                     params={
-                        "owner_id": f"-{group_id}",
+                        **( {"owner_id": f"-{group_id}"} if group_id.isdigit() else {"domain": group_id} ),
                         "post_id": post_id,
                         "count": count,
                         "sort": "desc",

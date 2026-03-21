@@ -11,8 +11,8 @@ BOT_TOKEN = os.getenv("BOT_TOKEN")  # ТЕРИОН (Антон)
 CONTENT_BOT_TOKEN = os.getenv("CONTENT_BOT_TOKEN")  # ДОМ ГРАНД
 
 # === TELETHON CREDENTIALS (for Chat Parsing) ===
-API_ID = os.getenv("API_ID")
-API_HASH = os.getenv("API_HASH")
+API_ID = os.getenv("TG_API_ID")
+API_HASH = os.getenv("TG_API_HASH")
 PHONE = os.getenv("PHONE")
 
 # === VK ===
