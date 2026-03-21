@@ -30,3 +30,13 @@ def get_main_bot():
         Экземпляр aiogram.Bot или None, если бот еще не установлен
     """
     return main_bot_instance
+
+content_bot_instance = None
+
+def set_content_bot(bot):
+    global content_bot_instance
+    content_bot_instance = bot
+    logger.info("✅ Контент-бот установлен в bot_config")
+
+def get_content_bot():
+    return content_bot_instance
