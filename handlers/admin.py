@@ -180,6 +180,8 @@ async def handle_admin_voice(message: Message, bot: Bot, state: FSMContext):
         await state.clear()
 
 
-def register_handlers(dp: Dispatcher):
+def register_handlers(dp):
     """Регистрация обработчиков админ-панели"""
     dp.include_router(router)
+
+admin_router = router

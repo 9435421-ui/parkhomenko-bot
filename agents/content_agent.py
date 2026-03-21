@@ -166,3 +166,5 @@ class ContentAgent:
         except Exception as e:
             logger.error(f"create_posts_from_interview error: {e}")
             return []
+
+content_agent = ContentAgent()
