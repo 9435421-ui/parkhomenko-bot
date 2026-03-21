@@ -3,12 +3,12 @@
 ## Суть проекта
 CRM-бот для компании по согласованию перепланировок квартир (Москва).
 Владелец: Юлия Пархоменко.
-Бот ищет лидов в VK и Telegram, ведёт квиз-воронку, публикует контент.
+Бот ищет лидов в VK и Telegram, ведёт квиз-воронку, публикует контент, анализирует конкурентов.
 
 ## Репозиторий
 GitHub: https://github.com/9435421-ui/parkhomenko-bot
 Сервер: /root/PARKHOMENKO_BOT/
-Стек: Python 3.11, Aiogram 3.x, Telethon, APScheduler, aiohttp, SQLite/aiosqlite
+Стек: Python 3.11, Aiogram 3.x, Telethon, APScheduler, aiohttp, SQLite/aiosqlite, YandexGPT, Router AI
 
 ## Ключевые файлы
 | Файл | Назначение | Статус |
@@ -21,10 +21,10 @@ GitHub: https://github.com/9435421-ui/parkhomenko-bot
 | `config.py` | Все переменные окружения | ⚠️ дубль NOTIFICATIONS_CHANNEL_ID |
 | `database/db.py` | SQLite + WAL mode | ✅ исправлен |
 | `watchdog.py` | Самовосстановление процессов | ✅ исправлен |
-| `handlers/` | start, quiz, dialog, admin, content, invest, vk_publisher | ✅ admin: голосовые интервью |
+| `handlers/` | start, quiz, dialog, admin, content, invest, vk_publisher, sales_agent | ✅ admin: голосовые интервью |
 | `services/lead_hunter/` | hunter.py с Discovery + scheduler, analyzer.py, discovery.py | ✅ TG Discovery добавлен |
 | `utils/yandex_gpt.py` | YandexGPT интеграция | ✅ исправлен |
-| `agents/content_agent.py` | Контент-агент (async) | ✅ исправлен |
+| `agents/` | content_agent, creative_agent, image_agent, viral_hooks_agent, content_repurpose_agent | ✅ расширенная система агентов |
 
 ## Имя Telethon-сессии
 `anton_scout` — основная сессия для парсинга и Discovery.
@@ -72,7 +72,35 @@ python session_manager.py
 python session_manager.py --reset  # если сессия сломана
 ```
 
-## Исправленные баги (март 2026, обновлено 14 марта)
+## Новые компоненты (март 2026)
+
+### Агенты (agents/)
+- `content_agent.py` — генерация контента
+- `creative_agent.py` — креативные решения
+- `image_agent.py` — генерация изображений
+- `viral_hooks_agent.py` — вирусные хуки для постов
+- `content_repurpose_agent.py` — repurposing контента
+
+### Сервисы (services/)
+- `competitor_spy.py` — анализ конкурентов
+- `geospy.py` — гео-аналитика
+- `geo_discovery.py` — гео-дискавери
+- `image_generator.py` — генератор изображений
+- `lead_service.py` — сервис лидов
+- `publisher.py` — публикация контента
+- `sales_reminders.py` — напоминания продаж
+- `vk_service.py` — VK интеграции
+- `voice_transcribe.py` — транскрибация голосовых
+- `yandex_rag.py` — Yandex RAG система
+
+### Обработчики (handlers/)
+- `sales_agent.py` — агент продаж
+- `vk_publisher.py` — публикация в VK
+- `max_uploader.py` — загрузка в MAX.ru
+- `creator.py` — креатор контента
+- `main_bot.py` — основной бот
+
+## Исправленные баги (март 2026, обновлено 22 марта)
 1. ✅ Утечки секретов (fix_session.py, test_spy.py, scanbot.session)
 2. ✅ Импорты роутеров в main.py / handlers/__init__.py
 3. ✅ set_content_bot в bot_config.py
@@ -98,6 +126,7 @@ python session_manager.py --reset  # если сессия сломана
 23. ✅ Метод parse_vk → scan_vk_groups в hunter.py
 24. ✅ База данных в scan_vk_groups — использование await db.get_connection()
 25. ✅ Символ стрелки → в handlers/start.py заменён на текстовую стрелку ->
+26. ✅ content_bot.py — исправлен синтаксис fstring в create_plan_posts (строка ~1468)
 26. ✅ admin.py — реализована обработка голосовых сообщений (интервью) с отправкой черновиков в группу.
 27. ✅ scout_parser.py — реализовано сканирование TG чатов из БД с сохранением лидов и отправкой горячих в топик 811.
 28. ✅ hunter.py — добавлен метод run_tg_discovery для автоматического поиска чатов в Telegram.
