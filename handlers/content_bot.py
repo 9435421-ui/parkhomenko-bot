@@ -1345,12 +1345,17 @@ async def ai_plan_handler(message: Message, state: FSMContext):
         parse_mode="HTML"
     )
 
+    # Сохраняем тему в БД чтобы не передавать в callback_data (лимит 64 байта)
+    import hashlib, json
+    plan_key = hashlib.md5(f"{topic}:{days}".encode()).hexdigest()[:8]
+    await db.set_setting(f"plan_{plan_key}", json.dumps({"topic": topic, "days": days}))
+
     await message.answer(
         f"✅ <b>Контент-план на {days} дней готов!</b>\n"
         f"Отправил в топик «Контент-план».\n\n"
-        f"<b>Сгенерировать обложки для каждого дня?</b>",
+        f"<b>Создать посты с обложками для каждого дня?</b>",
         reply_markup=InlineKeyboardBuilder()
-        .button(text="📝 Создать посты", callback_data=f"create_plan_posts:{topic}:{days}")
+        .button(text="📝 Создать посты", callback_data=f"cpp:{plan_key}")
         .button(text="❌ Нет", callback_data="back_menu")
         .as_markup(),
         parse_mode="HTML"
@@ -1358,12 +1363,18 @@ async def ai_plan_handler(message: Message, state: FSMContext):
     await state.clear()
 
 
-@content_router.callback_query(F.data.startswith("create_plan_posts:"))
+@content_router.callback_query(F.data.startswith("cpp:"))
 async def create_plan_posts(callback: CallbackQuery, state: FSMContext):
     """Создаёт черновики постов для каждого дня плана: текст + обложка -> БД -> топик 85."""
-    parts = callback.data.split(":", 2)
-    topic = parts[1]
-    days = int(parts[2])
+    import json
+    plan_key = callback.data.split(":", 1)[1]
+    plan_data = await db.get_setting(f"plan_{plan_key}")
+    if not plan_data:
+        await callback.answer("❌ План не найден, создайте заново")
+        return
+    plan_info = json.loads(plan_data)
+    topic = plan_info["topic"]
+    days = plan_info["days"]
 
     await callback.answer("Создаю посты...")
     await callback.message.edit_text(
