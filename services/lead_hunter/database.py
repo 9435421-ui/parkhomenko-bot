@@ -101,3 +101,28 @@ class HunterDatabase:
         if self.conn:
             self.conn.close()
             self.conn = None
+
+    async def add_spy_lead(
+        self,
+        source_type: str,
+        source_name: str,
+        url: str,
+        text: str = "",
+        author_id=None,
+        username=None,
+        profile_url=None,
+        pain_stage=None,
+        priority_score=None,
+    ) -> int:
+        """Сохранить лид шпиона в основную БД parkhomenko_bot.db"""
+        import aiosqlite, os
+        db_path = os.getenv("DB_PATH", "parkhomenko_bot.db")
+        async with aiosqlite.connect(db_path) as db:
+            cursor = await db.execute(
+                """INSERT INTO spy_leads 
+                   (source_type, source_name, author_id, username, profile_url, text, url, pain_stage, priority_score)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                (source_type, source_name, author_id, username, profile_url, text or "", url, pain_stage, priority_score),
+            )
+            await db.commit()
+            return cursor.lastrowid
