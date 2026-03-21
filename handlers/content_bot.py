@@ -1464,15 +1464,7 @@ async def create_plan_posts(callback: CallbackQuery, state: FSMContext):
             logger.error(f"create_plan_posts: ошибка топика день {i}: {e}")
 
     await callback.message.edit_text(
-        f"{'✅' if errors == 0 else '⚠️'} <b>Готово!</b>
-
-"
-        f"Создано черновиков: <b>{created}/{days}</b>
-"
-        f"Ошибок: <b>{errors}</b>
-
-"
-        f"Черновики с кнопками публикации — в топике Черновики",
+        ("✅" if errors == 0 else "⚠️") + f" <b>Готово!</b>\n\nСоздано черновиков: <b>{created}/{days}</b>\nОшибок: <b>{errors}</b>\n\nЧерновики с кнопками публикации — в топике Черновики",
         reply_markup=get_back_btn(),
         parse_mode="HTML",
     )
