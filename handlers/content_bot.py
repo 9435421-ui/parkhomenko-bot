@@ -223,6 +223,7 @@ class ContentStates(StatesGroup):
     ai_visual_prompt = State()  # Ввод промпта после выбора модели
     news_topic = State()
     ai_plan = State()          # Интерактивный план (дни + тема)
+    edit_draft = State()       # Редактирование черновика
     quick_text = State()
     holiday_rf = State()       # Поздравление с официальным праздником РФ
 
@@ -583,6 +584,7 @@ class ContentStates(StatesGroup):
     ai_visual_select = State()
     ai_visual_prompt = State()
     ai_plan = State()
+    edit_draft = State()
     ai_news = State()
     ai_news_choose = State()   # Выбор темы из горячих лидов или своя
     ai_fact_choose = State()   # Выбор реальной ситуации для интересного факта
@@ -1396,11 +1398,15 @@ async def create_plan_posts(callback: CallbackQuery, state: FSMContext):
 
         # 1. Генерируем текст поста
         post_prompt = (
-            f"Напиши пост для Telegram-канала TERION.\n"
+            f"Напиши готовый пост для Telegram-канала компании TERION (перепланировка квартир в Москве).\n"
             f"Тема контент-плана: {topic}\n"
-            f"День {i} из {days}.\n"
-            f"Используй разнообразный формат: экспертный совет, кейс, лайфхак, вопрос аудитории или факт.\n"
-            f"Объём: 150-200 слов. Добавь эмодзи по смыслу."
+            f"День {i} из {days}. Используй формат: экспертный совет, кейс, лайфхак, вопрос аудитории или факт — чередуй по дням.\n"
+            f"Требования:\n"
+            f"- Объём: 180-250 слов, полный законченный текст\n"
+            f"- В конце ОБЯЗАТЕЛЬНО призыв: обратиться в TERION за консультацией по перепланировке/согласованию\n"
+            f"- Тон: экспертный, дружелюбный, без воды\n"
+            f"- Эмодзи умеренно по смыслу\n"
+            f"- НЕ пиши заголовок отдельной строкой — начинай сразу с текста"
         )
         post_text = None
         try:
@@ -1439,11 +1445,12 @@ async def create_plan_posts(callback: CallbackQuery, state: FSMContext):
             except Exception as e:
                 logger.error(f"create_plan_posts: ошибка обложки день {i}: {e}")
 
-        # 3. Сохраняем черновик в БД
+        # 3. Применяем квиз и хэштеги, сохраняем черновик в БД
+        post_text_full = ensure_quiz_and_hashtags(post_text)
         try:
             post_id = await db.add_content_post(
                 title=f"День {i}: {topic}",
-                body=post_text,
+                body=post_text_full,
                 cta="",
                 channel="draft",
                 status="draft",
@@ -1462,8 +1469,9 @@ async def create_plan_posts(callback: CallbackQuery, state: FSMContext):
             kb.button(text="📤 TG", callback_data=f"pub_tg:{post_id}")
             kb.button(text="📘 VK", callback_data=f"pub_vk:{post_id}")
             kb.button(text="⏰ Запланировать", callback_data=f"schedule:{post_id}")
+            kb.button(text="✏️ Редактировать", callback_data=f"edit_draft:{post_id}")
             kb.adjust(2)
-            draft_preview = post_text[:800] + ("..." if len(post_text) > 800 else "")
+            draft_preview = post_text_full[:800] + ("..." if len(post_text_full) > 800 else "")
             await callback.bot.send_message(
                 chat_id=LEADS_GROUP_CHAT_ID,
                 message_thread_id=THREAD_ID_DRAFTS,
@@ -1480,6 +1488,59 @@ async def create_plan_posts(callback: CallbackQuery, state: FSMContext):
         parse_mode="HTML",
     )
 
+
+
+
+@content_router.callback_query(F.data.startswith("edit_draft:"))
+async def edit_draft_start(callback: CallbackQuery, state: FSMContext):
+    """Начало редактирования черновика."""
+    post_id = int(callback.data.split(":")[1])
+    post = await db.get_content_post(post_id)
+    if not post:
+        await callback.answer("❌ Пост не найден")
+        return
+    await state.update_data(edit_post_id=post_id)
+    await state.set_state(ContentStates.edit_draft)
+    await callback.message.answer(
+        f"✏️ <b>Редактирование черновика #{post_id}</b>\n\n"
+        f"Текущий текст:\n<blockquote>{post['body'][:500]}...</blockquote>\n\n"
+        f"Напишите новый текст поста (или /skip чтобы оставить текущий):",
+        parse_mode="HTML",
+        reply_markup=get_back_btn()
+    )
+    await callback.answer()
+
+
+@content_router.message(ContentStates.edit_draft)
+async def edit_draft_save(message: Message, state: FSMContext):
+    """Сохраняет отредактированный текст черновика."""
+    data = await state.get_data()
+    post_id = data.get("edit_post_id")
+
+    if message.text == "/skip":
+        await state.clear()
+        await message.answer("✅ Текст оставлен без изменений.", reply_markup=get_back_btn())
+        return
+
+    new_text = ensure_quiz_and_hashtags(message.text)
+    try:
+        await db.update_content_plan_entry(post_id, body=new_text)
+        await state.clear()
+        post = await db.get_content_post(post_id)
+        kb = InlineKeyboardBuilder()
+        kb.button(text="📤 TG", callback_data=f"pub_tg:{post_id}")
+        kb.button(text="📘 VK", callback_data=f"pub_vk:{post_id}")
+        kb.button(text="⏰ Запланировать", callback_data=f"schedule:{post_id}")
+        kb.button(text="✏️ Редактировать", callback_data=f"edit_draft:{post_id}")
+        kb.adjust(2)
+        await message.answer(
+            f"✅ <b>Черновик #{post_id} обновлён!</b>\n\n{new_text[:600]}...",
+            reply_markup=kb.as_markup(),
+            parse_mode="HTML"
+        )
+    except Exception as e:
+        logger.error(f"edit_draft_save: ошибка: {e}")
+        await message.answer(f"❌ Ошибка сохранения: {e}", reply_markup=get_back_btn())
 
 # === 📰 НОВОСТЬ ===
 
