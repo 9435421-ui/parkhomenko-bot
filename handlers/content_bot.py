@@ -1257,12 +1257,12 @@ _PLAN_SYSTEM = (
 async def plan_start(message: Message, state: FSMContext):
     await message.answer(
         "📋 <b>Контент-план</b>\n\n"
-        "Укажите количество дней и тему (через запятую):\n\n"
+        "Введите тему — я сам предложу структуру и количество постов:\n\n"
         "Примеры:\n"
-        "• <code>7, перепланировка квартиры</code>\n"
-        "• <code>14, ипотека и недвижимость</code>\n"
-        "• <code>5, дизайн маленьких квартир</code>\n\n"
-        "<i>Я составлю план с разнообразными форматами постов на каждый день</i>",
+        "• <code>перепланировка квартиры</code>\n"
+        "• <code>ипотека и недвижимость</code>\n"
+        "• <code>дизайн маленьких квартир</code>\n\n"
+        "<i>Или укажите количество дней вручную: <code>7, перепланировка</code></i>",
         reply_markup=get_back_btn(),
         parse_mode="HTML"
     )
@@ -1272,31 +1272,76 @@ async def plan_start(message: Message, state: FSMContext):
 @content_router.message(ContentStates.ai_plan)
 async def ai_plan_handler(message: Message, state: FSMContext):
     text = message.text.strip()
+    days = None
+    topic = None
 
-    try:
-        if ',' in text:
+    if ',' in text:
+        # Ручной режим: "7, перепланировка"
+        try:
             parts = [p.strip() for p in text.split(',', 1)]
             days = int(parts[0])
             topic = parts[1]
-        else:
-            await message.answer(
-                "❌ Укажите через запятую: <b>дни, тема</b>\n"
-                "Например: <code>7, перепланировка квартиры</code>",
-                parse_mode="HTML"
-            )
+            if days < 1 or days > 30:
+                await message.answer("❌ Укажите от 1 до 30 дней")
+                return
+            await message.answer(f"⏳ <b>Составляю контент-план на {days} дней...</b>", parse_mode="HTML")
+        except Exception:
+            await message.answer("❌ Неверный формат. Пример: <code>7, перепланировка</code>", parse_mode="HTML")
             return
-    except Exception:
-        await message.answer(
-            "❌ Неверный формат. Пример: <code>7, перепланировка</code>",
-            parse_mode="HTML"
+    else:
+        # Авто режим: только тема — ИИ предлагает структуру
+        topic = text
+        await message.answer(f"🔍 <b>Анализирую тему...</b>", parse_mode="HTML")
+
+        analysis_prompt = (
+            f"Ты — контент-стратег компании TERION (перепланировка квартир в Москве).\n"
+            f"Пользователь хочет создать серию постов на тему: «{topic}»\n\n"
+            f"Задача: предложи оптимальную структуру контент-плана.\n"
+            f"Ответь СТРОГО в формате JSON без пояснений:\n"
+            f'{{"days": 7, "posts": [{{"day": 1, "title": "Название поста", "format": "экспертный совет"}}, ...]}}'
         )
-        return
 
-    if days < 1 or days > 30:
-        await message.answer("❌ Укажите от 1 до 30 дней")
-        return
+        try:
+            analysis = await router_ai.generate_response(
+                user_prompt=analysis_prompt,
+                system_prompt="Отвечай только валидным JSON. Без пояснений, без markdown.",
+                max_tokens=800,
+            )
+            import json, re
+            json_match = re.search(r'\{.*\}', analysis, re.DOTALL)
+            if json_match:
+                plan_data = json.loads(json_match.group())
+                days = plan_data.get("days", 7)
+                posts = plan_data.get("posts", [])
 
-    await message.answer(f"⏳ <b>Составляю контент-план на {days} дней...</b>", parse_mode="HTML")
+                posts_text = "\n".join([
+                    f"День {p['day']}: {p['title']} [{p.get('format', '')}]"
+                    for p in posts
+                ])
+
+                # Сохраняем структуру
+                import hashlib
+                plan_key = hashlib.md5(f"{topic}:{days}".encode()).hexdigest()[:8]
+                await db.set_setting(f"plan_{plan_key}", json.dumps({"topic": topic, "days": days}))
+
+                await message.answer(
+                    f"📋 <b>Предлагаю структуру на {days} постов:</b>\n\n{posts_text}",
+                    reply_markup=InlineKeyboardBuilder()
+                    .button(text=f"✅ Создать {days} постов", callback_data=f"cpp:{plan_key}")
+                    .button(text="✏️ Указать кол-во вручную", callback_data="plan_manual")
+                    .button(text="❌ Отмена", callback_data="back_menu")
+                    .adjust(1)
+                    .as_markup(),
+                    parse_mode="HTML"
+                )
+                await state.clear()
+                return
+        except Exception as e:
+            logger.error(f"ai_plan_handler: ошибка анализа темы: {e}")
+            # Fallback — используем 7 дней
+            days = 7
+
+        await message.answer(f"⏳ <b>Составляю контент-план на {days} дней...</b>", parse_mode="HTML")
 
     user_prompt = (
         f"Составь контент-план на {days} дней для Telegram-канала TERION.\n"
