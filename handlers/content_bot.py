@@ -1387,7 +1387,7 @@ async def ai_plan_handler(message: Message, state: FSMContext):
     # Сохраняем тему в БД чтобы не передавать в callback_data (лимит 64 байта)
     import hashlib, json
     plan_key = hashlib.md5(f"{topic}:{days}".encode()).hexdigest()[:8]
-    await db.set_setting(f"plan_{plan_key}", json.dumps({"topic": topic, "days": days}))
+    await db.set_setting(f"plan_{plan_key}", json.dumps({"topic": topic, "days": days, "posts": []}))
 
     await message.answer(
         f"✅ <b>Контент-план на {days} дней готов!</b>\n"
@@ -1435,6 +1435,7 @@ async def create_plan_posts(callback: CallbackQuery, state: FSMContext):
     plan_info = json.loads(plan_data)
     topic = plan_info["topic"]
     days = plan_info["days"]
+    plan_posts = plan_info.get("posts", [])
 
     await callback.answer("Создаю посты...")
     await callback.message.edit_text(
