@@ -1079,6 +1079,7 @@ async def series_start(message: Message, state: FSMContext):
 
 @content_router.message(ContentStates.ai_series)
 async def ai_series_handler(message: Message, state: FSMContext):
+    """Генерирует серию постов и разбивает их на отдельные черновики с обложками."""
     text = message.text.strip()
     
     if ',' in text:
@@ -1134,7 +1135,7 @@ async def ai_series_handler(message: Message, state: FSMContext):
         "- Сравнения ('Перепланировка vs новая квартира — что выгоднее?')\n"
         "- Лайфхаки с конкретными советами\n\n"
         "Экспертная база:\n{cases}\n\n"
-        "Формат каждого поста:\n"
+        "Формат КАЖДОГО дня:\n"
         "День N | [тип тренда]\n"
         "Текст 150-200 слов, живой язык, эмодзи 3-5 штук.\n"
         "В конце: призыв в TERION на консультацию.\n"
@@ -1145,7 +1146,6 @@ async def ai_series_handler(message: Message, state: FSMContext):
         prompt = prompt_tpl.format(days=days, topic=topic, cases=cases_content)
     except KeyError:
         prompt = prompt_default.format(days=days, topic=topic, cases=cases_content)
-    # Убедимся, что кейсы подставлены
     if "{cases}" in prompt:
         prompt = prompt.replace("{cases}", cases_content)
 
@@ -1154,12 +1154,11 @@ async def ai_series_handler(message: Message, state: FSMContext):
     try:
         result = await router_ai.generate_response(
             user_prompt=prompt,
-            max_tokens=2000,  # Увеличено до 2000 (было 4000, но 2000 достаточно)
+            max_tokens=2000,
         )
     except Exception as e:
         error_message = str(e)
         logger.error("ai_series_handler: router_ai error: %s", e)
-        # Отправляем ошибку в топик "Логи"
         try:
             from aiogram import Bot
             from aiogram.client.default import DefaultBotProperties
@@ -1176,95 +1175,122 @@ async def ai_series_handler(message: Message, state: FSMContext):
             logger.error("Не удалось отправить ошибку в топик: %s", notify_err)
     
     if not result:
-        # Даже при ошибке создаем черновик с fallback текстом и показываем кнопки публикации
-        fallback_text = (
-            f"<b>🏠 Серия постов: {topic}</b>\n\n"
-            f"Каждый объект уникален. Правильный подход — согласование с МЖИ, "
-            f"расчёт несущих конструкций и трассировка изменений по СНиП.\n\n"
-            f"👉 Записаться на консультацию: @Parkhovenko_i_kompaniya_bot"
+        await message.answer(
+            f"⚠️ <b>Ошибка генерации</b>\n\n{error_message[:200] if error_message else 'Попробуйте ещё раз.'}",
+            reply_markup=get_back_btn(),
+            parse_mode="HTML",
         )
-        post_id = await db.add_content_post(
-            title=f"Серия {days} дней: {topic[:40]}",
-            body=fallback_text,
-            cta="",
-            channel="series",
-            status="draft"
-        )
-    else:
-        post_id = await db.add_content_post(
-            title=f"Серия {days} дней: {topic[:40]}",
-            body=result,
-            cta="",
-            channel="series",
-            status="draft"
-        )
-    
-    await message.bot.send_message(
-        chat_id=LEADS_GROUP_CHAT_ID,
-        message_thread_id=THREAD_ID_DRAFTS,
-        text=f"📅 <b>Серия {days} дней</b>\n\n<b>Тема:</b> {topic}\n\n{result[:1500]}...",
-        parse_mode="HTML",
-        reply_markup=get_queue_keyboard(post_id)
-    )
-    
-    import hashlib, json as _json
-    _series_key = hashlib.md5(f"{topic}:{days}".encode()).hexdigest()[:8]
-    await db.set_setting(f"series_{_series_key}", _json.dumps({"topic": topic, "days": days}))
-    await message.answer(
-        f"✅ <b>Серия готова!</b>\n"
-        f"📊 {days} постов\n\n"
-        f"<b>Сгенерировать обложки?</b>",
-        reply_markup=InlineKeyboardBuilder()
-        .button(text="🎨 Сгенерировать обложки", callback_data=f"gsi:{_series_key}")
-        .button(text="❌ Нет", callback_data="back_menu")
-        .as_markup(),
-        parse_mode="HTML"
-    )
-    await state.clear()
-
-
-@content_router.callback_query(F.data.startswith("gsi:"))
-async def generate_series_images(callback: CallbackQuery, state: FSMContext):
-    import json as _json
-    _series_key = callback.data.split(":", 1)[1]
-    _series_data = await db.get_setting(f"series_{_series_key}")
-    if not _series_data:
-        await callback.answer("❌ Серия не найдена, создайте заново")
+        await state.clear()
         return
-    _info = _json.loads(_series_data)
-    topic = _info["topic"]
-    days = _info["days"]
 
-    await callback.answer("🎨 Генерация...")
-    await callback.message.edit_text(
-        f"⏳ <b>Генерация {days} обложек...</b>",
-        parse_mode="HTML"
-    )
-
+    # ── НОВОЕ: Парсим результат по дням и создаём отдельные черновики ──
+    await message.answer(f"📝 <b>Создаю {days} черновиков с обложками...</b>", parse_mode="HTML")
+    
+    # Парсим текст по паттерну "День N:" или "День N |"
+    import re
+    day_pattern = r"(?:День|день)\s+(\d+)\s*[:|](.+?)(?=(?:День|день)\s+\d+|$)"
+    day_matches = re.findall(day_pattern, result, re.DOTALL | re.IGNORECASE)
+    
+    created = 0
+    errors = 0
+    
     for i in range(1, days + 1):
-        art_prompt = (
-            f"{topic}, день {i}, перепланировка, professional interior, modern design. "
-            "No text, no words, no letters, no captions — image only."
-        )
-        await callback.message.answer(f"🎨 <b>День {i}...</b>", parse_mode="HTML")
-
-        image_b64 = await _auto_generate_image(art_prompt)
-
-        if image_b64:
+        try:
+            # Находим текст для этого дня из спарсенного результата
+            day_text = None
+            for match_day, match_text in day_matches:
+                if int(match_day) == i:
+                    day_text = match_text.strip()
+                    break
+            
+            # Если не нашли в парсе, используем ИИ для генерации текста для этого конкретного дня
+            if not day_text:
+                format_sample = ["до/после", "миф", "кейс", "вопрос", "факт", "совет"][i % 6]
+                day_text = await router_ai.generate_response(
+                    user_prompt=(
+                        f"Напиши готовый Telegram-пост для компании TERION (перепланировка квартир в Москве).\n"
+                        f"Тема: {topic}. День {i}/{days}. Формат: {format_sample}.\n"
+                        f"Требования: 150-200 слов, живой язык, эмодзи 3-5 штук, в конце призыв на консультацию. "
+                        f"БЕЗ пояснений, только готовый пост."
+                    ),
+                    max_tokens=400,
+                )
+            
+            if not day_text:
+                logger.error(f"ai_series_handler: не удалось получить текст дня {i}")
+                errors += 1
+                continue
+            
+            # 1. Генерируем обложку
+            post_excerpt = day_text[:150].replace('"', '').replace("'", '').strip()
+            art_prompt = (
+                f"{post_excerpt}. "
+                "Moscow apartment interior, professional architectural visualization, "
+                "modern realistic render, bright natural light. "
+                "No text, no words, no letters, no watermarks - image only."
+            )
+            image_b64 = await _auto_generate_image(art_prompt)
+            image_file_id = None
+            
+            if image_b64:
+                try:
+                    image_bytes = base64.b64decode(image_b64)
+                    photo = BufferedInputFile(image_bytes, filename=f"series_day_{i}.jpg")
+                    sent = await message.bot.send_photo(
+                        chat_id=LEADS_GROUP_CHAT_ID,
+                        message_thread_id=THREAD_ID_DRAFTS,
+                        photo=photo,
+                        caption=f"📅 День {i}: {topic}",
+                    )
+                    image_file_id = sent.photo[-1].file_id
+                except Exception as e:
+                    logger.error(f"ai_series_handler: ошибка обложки дня {i}: {e}")
+            
+            # 2. Применяем квиз и хэштеги
+            post_text_full = ensure_quiz_and_hashtags(day_text)
+            
+            # 3. Сохраняем черновик в БД
+            post_id = await db.add_content_post(
+                title=f"День {i}: {topic}",
+                body=post_text_full,
+                cta="",
+                channel="draft",
+                status="draft",
+                image_url=image_file_id,
+                theme=topic,
+            )
+            created += 1
+            
+            # 4. Анонс в топик 85 с кнопками
             try:
-                image_bytes = base64.b64decode(image_b64)
-                photo = BufferedInputFile(image_bytes, filename=f"day_{i}.jpg")
-                await callback.message.answer_photo(
-                    photo=photo,
-                    caption=f"🎨 <b>День {i}</b> — {topic}",
-                    parse_mode="HTML"
+                kb = InlineKeyboardBuilder()
+                kb.button(text="📤 TG", callback_data=f"pub_tg:{post_id}")
+                kb.button(text="📘 VK", callback_data=f"pub_vk:{post_id}")
+                kb.button(text="⏰ Запланировать", callback_data=f"schedule:{post_id}")
+                kb.button(text="✏️ Редактировать", callback_data=f"edit_draft:{post_id}")
+                kb.adjust(2)
+                draft_preview = post_text_full[:600] + ("..." if len(post_text_full) > 600 else "")
+                await message.bot.send_message(
+                    chat_id=LEADS_GROUP_CHAT_ID,
+                    message_thread_id=THREAD_ID_DRAFTS,
+                    text=f"<b>День {i}/{days}</b> — {topic}\n\n{draft_preview}",
+                    reply_markup=kb.as_markup(),
+                    parse_mode="HTML",
                 )
             except Exception as e:
-                logger.error(f"Ошибка отправки обложки дня {i}: {e}")
-        else:
-            await callback.message.answer(f"⚠️ День {i}: не удалось сгенерировать")
-
-    await callback.message.answer("✅ <b>Все обложки готовы!</b>", reply_markup=get_back_btn(), parse_mode="HTML")
+                logger.error(f"ai_series_handler: ошибка топика дня {i}: {e}")
+        
+        except Exception as e:
+            logger.error(f"ai_series_handler: ошибка дня {i}: {e}")
+            errors += 1
+    
+    # ── Финальное сообщение ──
+    await message.answer(
+        ("✅" if errors == 0 else "⚠️") + f" <b>Готово!</b>\n\nСоздано черновиков: <b>{created}/{days}</b>\nОшибок: <b>{errors}</b>\n\nЧерновики с обложками — в топике Черновики",
+        reply_markup=get_back_btn(),
+        parse_mode="HTML",
+    )
+    await state.clear()
 
 
 # === 📋 КОНТЕНТ-ПЛАН ===
