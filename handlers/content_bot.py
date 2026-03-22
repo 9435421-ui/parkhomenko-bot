@@ -1085,23 +1085,43 @@ async def series_start(message: Message, state: FSMContext):
 async def ai_series_handler(message: Message, state: FSMContext):
     text = message.text.strip()
     
-    try:
-        if ',' in text:
+    if ',' in text:
+        try:
             parts = [p.strip() for p in text.split(',', 1)]
             days = int(parts[0])
             topic = parts[1]
-        else:
-            await message.answer("❌ Введите: число, тема")
+            if days < 1 or days > 60:
+                await message.answer("❌ Введите 1-60")
+                return
+        except:
+            await message.answer("❌ Неверный формат. Пример: <code>5, ремонт новостройки</code>", parse_mode="HTML")
             return
-    except:
-        await message.answer("❌ Неверный формат")
-        return
-    
-    if days < 1 or days > 60:
-        await message.answer("❌ Введите 1-60")
-        return
-    
-    await message.answer(f"⏳ <b>Генерирую {days} постов...</b>", parse_mode="HTML")
+    else:
+        # Авторежим — только тема, ИИ выбирает количество
+        topic = text
+        await message.answer("🔍 <b>Анализирую тренды по теме...</b>", parse_mode="HTML")
+        try:
+            import json, re
+            analysis = await router_ai.generate_response(
+                user_prompt=(
+                    f"Тема: {topic}. TERION - перепланировка квартир в Москве. "
+                    f"Предложи количество трендовых постов (5-10) и форматы. "
+                    '{"days": 7, "formats": ["до/после", "миф", "кейс"]}'
+                ),
+                system_prompt="Отвечай только валидным JSON без пояснений.",
+                max_tokens=200,
+            )
+            json_match = re.search(r'\{.*\}', analysis, re.DOTALL)
+            if json_match:
+                data = json.loads(json_match.group())
+                days = data.get("days", 7)
+            else:
+                days = 7
+        except Exception as e:
+            logger.error(f"ai_series_handler: ошибка анализа: {e}")
+            days = 7
+
+    await message.answer(f"⏳ <b>Генерирую {days} трендовых постов...</b>", parse_mode="HTML")
 
     cases_content = _load_content_template("expert_cases.txt", "МЖИ, несущие стены, трассировка, акты скрытых работ.")
     kb_content = _find_knowledge_for_topic(topic)
