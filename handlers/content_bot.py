@@ -223,8 +223,16 @@ class ContentStates(StatesGroup):
     ai_visual_prompt = State()  # Ввод промпта после выбора модели
     news_topic = State()
     ai_plan = State()          # Интерактивный план (дни + тема)
+    edit_draft = State()       # Редактирование черновика
     quick_text = State()
     holiday_rf = State()       # Поздравление с официальным праздником РФ
+    ai_text = State()
+    ai_series = State()
+    ai_visual_select = State()
+    ai_news = State()
+    ai_news_choose = State()
+    ai_fact_choose = State()
+    edit_post = State()
 
 
 # === AI CLIENTS ===
@@ -388,38 +396,35 @@ class RouterAIClient:
         return None
     
     async def generate_image_gemini(self, prompt: str) -> Optional[str]:
-        """Генерация изображения через Gemini"""
+        """Генерация изображения через Flux.2-pro (Router AI)"""
         payload = {
-            "model": "gemini-1.5-flash",
-            "messages": [{
-                "role": "user",
-                "content": f"Generate image: {prompt}. Professional architectural photography, interior design, high quality. No text, no words, no letters, no captions — image only."
-            }],
+            "model": "black-forest-labs/flux.2-pro",
+            "messages": [{"role": "user", "content": prompt}],
             "max_tokens": 2000
         }
-        
         try:
             async with aiohttp.ClientSession() as session:
                 async with session.post(
                     "https://routerai.ru/api/v1/chat/completions",
                     headers=self.headers,
-                    json=payload
+                    json=payload,
+                    timeout=aiohttp.ClientTimeout(total=60)
                 ) as resp:
                     if resp.status == 200:
                         data = await resp.json()
-                        content = data["choices"][0]["message"]["content"]
-                        # Парсим base64
-                        if "data:image" in content:
-                            match = re.search(r'data:image/[^;]+;base64,([^"\']+)', content)
-                            if match:
-                                return match.group(1)
-                        return content
+                        images = data["choices"][0]["message"].get("images", [])
+                        if images:
+                            url = images[0]["image_url"]["url"]
+                            if "base64," in url:
+                                return url.split("base64,")[1]
+                        logger.error("Flux: no images in response")
+                        return None
                     else:
                         error = await resp.text()
-                        logger.error(f"Gemini Image error: {error}")
+                        logger.error(f"Flux error {resp.status}: {error[:200]}")
                         return None
         except Exception as e:
-            logger.error(f"Gemini Image exception: {e}")
+            logger.error(f"Flux exception: {e}")
             return None
 
 
@@ -437,24 +442,23 @@ async def _auto_generate_image(prompt: str) -> Optional[str]:
       3. ImageGenerator (DALL-E / OpenRouter) — запасной вариант
     Возвращает base64-строку или None при полном отказе всех сервисов.
     """
-    # 1. Яндекс АРТ
-    try:
-        image_b64 = await yandex_art.generate(prompt)
-        if image_b64:
-            logger.info("Image: Yandex ART OK")
-            return image_b64
-    except Exception as e:
-        logger.warning(f"Yandex ART failed: {e}")
-
-    # 2. Router AI (Gemini Nano)
+    # 1. Flux.2-pro (Router AI) — лучшее качество
     try:
         image_b64 = await router_ai.generate_image_gemini(prompt)
         if image_b64:
-            logger.info("Image: Router AI (Gemini) OK")
+            logger.info("Image: Flux.2-pro OK")
             return image_b64
     except Exception as e:
-        logger.warning(f"Router AI image failed: {e}")
-
+        logger.warning(f"Flux failed: {e}")
+    # 2. Яндекс АРТ — fallback
+    try:
+        image_b64 = await yandex_art.generate(prompt)
+        if image_b64:
+            logger.info("Image: Yandex ART fallback OK")
+            return image_b64
+    except Exception as e:
+        logger.warning(f"Yandex ART failed: {e}")
+    # 3. ImageGenerator (OpenRouter DALL-E)
     # 3. ImageGenerator (OpenRouter DALL-E)
     try:
         from services.image_generator import image_generator
@@ -573,21 +577,7 @@ vk_publisher = VKPublisher(VK_TOKEN, VK_GROUP_ID)
 
 # === FSM STATES ===
 
-class ContentStates(StatesGroup):
-    main_menu = State()
-    photo_topic = State()
-    photo_upload = State()
-    preview_mode = State()
-    ai_text = State()
-    ai_series = State()
-    ai_visual_select = State()
-    ai_visual_prompt = State()
-    ai_plan = State()
-    ai_news = State()
-    ai_news_choose = State()   # Выбор темы из горячих лидов или своя
-    ai_fact_choose = State()   # Выбор реальной ситуации для интересного факта
-    holiday_rf = State()
-    edit_post = State()
+
 
 
 # === KEYBOARDS ===
@@ -1074,10 +1064,13 @@ async def art_to_post_handler(callback: CallbackQuery, state: FSMContext):
 
 async def series_start(message: Message, state: FSMContext):
     await message.answer(
-        "✨ <b>Креатив (роль Копирайтер)</b>\n\n"
-        "Сторителлинг и прогрев. Введите: <code>дней, тема</code>\n\n"
-        "Пример: <code>7, перепланировка студии</code>\n\n"
-        "Боли, юмор, прогрев через эмоции.",
+        "✨ <b>Креатив — Тренды</b>\n\n"
+        "Введите тему — я найду актуальные тренды и адаптирую под TERION:\n\n"
+        "Примеры:\n"
+        "• <code>перепланировка квартиры</code>\n"
+        "• <code>маленькие квартиры</code>\n"
+        "• <code>ремонт новостройки</code>\n\n"
+        "<i>Или укажите количество: <code>5, перепланировка</code></i>",
         reply_markup=get_back_btn(),
         parse_mode="HTML"
     )
@@ -1088,33 +1081,64 @@ async def series_start(message: Message, state: FSMContext):
 async def ai_series_handler(message: Message, state: FSMContext):
     text = message.text.strip()
     
-    try:
-        if ',' in text:
+    if ',' in text:
+        try:
             parts = [p.strip() for p in text.split(',', 1)]
             days = int(parts[0])
             topic = parts[1]
-        else:
-            await message.answer("❌ Введите: число, тема")
+            if days < 1 or days > 60:
+                await message.answer("❌ Введите 1-60")
+                return
+        except:
+            await message.answer("❌ Неверный формат. Пример: <code>5, ремонт новостройки</code>", parse_mode="HTML")
             return
-    except:
-        await message.answer("❌ Неверный формат")
-        return
-    
-    if days < 1 or days > 60:
-        await message.answer("❌ Введите 1-60")
-        return
-    
-    await message.answer(f"⏳ <b>Генерирую {days} постов...</b>", parse_mode="HTML")
+    else:
+        # Авторежим — только тема, ИИ выбирает количество
+        topic = text
+        await message.answer("🔍 <b>Анализирую тренды по теме...</b>", parse_mode="HTML")
+        try:
+            import json, re
+            analysis = await router_ai.generate_response(
+                user_prompt=(
+                    f"Тема: {topic}. TERION - перепланировка квартир в Москве. "
+                    f"Предложи количество трендовых постов (5-10) и форматы. "
+                    '{"days": 7, "formats": ["до/после", "миф", "кейс"]}'
+                ),
+                system_prompt="Отвечай только валидным JSON без пояснений.",
+                max_tokens=200,
+            )
+            json_match = re.search(r'\{.*\}', analysis, re.DOTALL)
+            if json_match:
+                data = json.loads(json_match.group())
+                days = data.get("days", 7)
+            else:
+                days = 7
+        except Exception as e:
+            logger.error(f"ai_series_handler: ошибка анализа: {e}")
+            days = 7
+
+    await message.answer(f"⏳ <b>Генерирую {days} трендовых постов...</b>", parse_mode="HTML")
 
     cases_content = _load_content_template("expert_cases.txt", "МЖИ, несущие стены, трассировка, акты скрытых работ.")
     kb_content = _find_knowledge_for_topic(topic)
     if kb_content:
         cases_content = kb_content + "\n\n" + cases_content
     prompt_default = (
-        "Роль: Копирайтер TERION. Создай {days} постов для прогрева по теме «{topic}».\n\n"
-        "Стиль: сторителлинг, боли клиентов, лёгкий юмор, прогрев через эмоции. Перепланировки и недвижимость — живым языком.\n\n"
-        "Кейсы для опоры (используй по смыслу):\n{cases}\n\n"
-        "Формат: День N: Заголовок\nТекст 80-120 слов, призыв к действию. Эмодзи. Можно использовать МЖИ, несущие стены, трассировку по смыслу. Без клише 'уникальный дизайн', 'за 3 дня'."
+        "Роль: Контент-стратег TERION (перепланировка квартир в Москве).\n"
+        "Задача: создай {days} трендовых постов по теме «{topic}» для Telegram-канала.\n\n"
+        "ТРЕНДЫ 2025 в контенте про недвижимость и ремонт:\n"
+        "- Формат 'до/после' с конкретными цифрами (было 32м², стало 45м² по ощущению)\n"
+        "- Разоблачение мифов ('3 мифа о несущих стенах')\n"
+        "- Реальные кейсы с болями клиентов и happy end\n"
+        "- Провокационные вопросы ('А вы знали что это незаконно?')\n"
+        "- Сравнения ('Перепланировка vs новая квартира — что выгоднее?')\n"
+        "- Лайфхаки с конкретными советами\n\n"
+        "Экспертная база:\n{cases}\n\n"
+        "Формат каждого поста:\n"
+        "День N | [тип тренда]\n"
+        "Текст 150-200 слов, живой язык, эмодзи 3-5 штук.\n"
+        "В конце: призыв в TERION на консультацию.\n"
+        "БЕЗ клише 'уникальный', 'профессиональный подход', 'за 3 дня'."
     )
     prompt_tpl = _load_content_template("series_warmup_prompt.txt", prompt_default)
     try:
@@ -1183,12 +1207,15 @@ async def ai_series_handler(message: Message, state: FSMContext):
         reply_markup=get_queue_keyboard(post_id)
     )
     
+    import hashlib, json as _json
+    _series_key = hashlib.md5(f"{topic}:{days}".encode()).hexdigest()[:8]
+    await db.set_setting(f"series_{_series_key}", _json.dumps({"topic": topic, "days": days}))
     await message.answer(
         f"✅ <b>Серия готова!</b>\n"
         f"📊 {days} постов\n\n"
         f"<b>Сгенерировать обложки?</b>",
         reply_markup=InlineKeyboardBuilder()
-        .button(text="🎨 Сгенерировать обложки", callback_data=f"gen_series_img:{topic}:{days}")
+        .button(text="🎨 Сгенерировать обложки", callback_data=f"gsi:{_series_key}")
         .button(text="❌ Нет", callback_data="back_menu")
         .as_markup(),
         parse_mode="HTML"
@@ -1196,12 +1223,17 @@ async def ai_series_handler(message: Message, state: FSMContext):
     await state.clear()
 
 
-@content_router.callback_query(F.data.startswith("gen_series_img:"))
+@content_router.callback_query(F.data.startswith("gsi:"))
 async def generate_series_images(callback: CallbackQuery, state: FSMContext):
-    parts = callback.data.split(":")
-    # Формат: gen_series_img:{topic}:{days}
-    topic = parts[1]
-    days = int(parts[2])
+    import json as _json
+    _series_key = callback.data.split(":", 1)[1]
+    _series_data = await db.get_setting(f"series_{_series_key}")
+    if not _series_data:
+        await callback.answer("❌ Серия не найдена, создайте заново")
+        return
+    _info = _json.loads(_series_data)
+    topic = _info["topic"]
+    days = _info["days"]
 
     await callback.answer("🎨 Генерация...")
     await callback.message.edit_text(
@@ -1255,12 +1287,12 @@ _PLAN_SYSTEM = (
 async def plan_start(message: Message, state: FSMContext):
     await message.answer(
         "📋 <b>Контент-план</b>\n\n"
-        "Укажите количество дней и тему (через запятую):\n\n"
+        "Введите тему — я сам предложу структуру и количество постов:\n\n"
         "Примеры:\n"
-        "• <code>7, перепланировка квартиры</code>\n"
-        "• <code>14, ипотека и недвижимость</code>\n"
-        "• <code>5, дизайн маленьких квартир</code>\n\n"
-        "<i>Я составлю план с разнообразными форматами постов на каждый день</i>",
+        "• <code>перепланировка квартиры</code>\n"
+        "• <code>ипотека и недвижимость</code>\n"
+        "• <code>дизайн маленьких квартир</code>\n\n"
+        "<i>Или укажите количество дней вручную: <code>7, перепланировка</code></i>",
         reply_markup=get_back_btn(),
         parse_mode="HTML"
     )
@@ -1270,31 +1302,76 @@ async def plan_start(message: Message, state: FSMContext):
 @content_router.message(ContentStates.ai_plan)
 async def ai_plan_handler(message: Message, state: FSMContext):
     text = message.text.strip()
+    days = None
+    topic = None
 
-    try:
-        if ',' in text:
+    if ',' in text:
+        # Ручной режим: "7, перепланировка"
+        try:
             parts = [p.strip() for p in text.split(',', 1)]
             days = int(parts[0])
             topic = parts[1]
-        else:
-            await message.answer(
-                "❌ Укажите через запятую: <b>дни, тема</b>\n"
-                "Например: <code>7, перепланировка квартиры</code>",
-                parse_mode="HTML"
-            )
+            if days < 1 or days > 30:
+                await message.answer("❌ Укажите от 1 до 30 дней")
+                return
+            await message.answer(f"⏳ <b>Составляю контент-план на {days} дней...</b>", parse_mode="HTML")
+        except Exception:
+            await message.answer("❌ Неверный формат. Пример: <code>7, перепланировка</code>", parse_mode="HTML")
             return
-    except Exception:
-        await message.answer(
-            "❌ Неверный формат. Пример: <code>7, перепланировка</code>",
-            parse_mode="HTML"
+    else:
+        # Авто режим: только тема — ИИ предлагает структуру
+        topic = text
+        await message.answer(f"🔍 <b>Анализирую тему...</b>", parse_mode="HTML")
+
+        analysis_prompt = (
+            f"Ты — контент-стратег компании TERION (перепланировка квартир в Москве).\n"
+            f"Пользователь хочет создать серию постов на тему: «{topic}»\n\n"
+            f"Задача: предложи оптимальную структуру контент-плана.\n"
+            f"Ответь СТРОГО в формате JSON без пояснений:\n"
+            f'{{"days": 7, "posts": [{{"day": 1, "title": "Название поста", "format": "экспертный совет"}}, ...]}}'
         )
-        return
 
-    if days < 1 or days > 30:
-        await message.answer("❌ Укажите от 1 до 30 дней")
-        return
+        try:
+            analysis = await router_ai.generate_response(
+                user_prompt=analysis_prompt,
+                system_prompt="Отвечай только валидным JSON. Без пояснений, без markdown.",
+                max_tokens=800,
+            )
+            import json, re
+            json_match = re.search(r'\{.*\}', analysis, re.DOTALL)
+            if json_match:
+                plan_data = json.loads(json_match.group())
+                days = plan_data.get("days", 7)
+                posts = plan_data.get("posts", [])
 
-    await message.answer(f"⏳ <b>Составляю контент-план на {days} дней...</b>", parse_mode="HTML")
+                posts_text = "\n".join([
+                    f"День {p['day']}: {p['title']} [{p.get('format', '')}]"
+                    for p in posts
+                ])
+
+                # Сохраняем структуру
+                import hashlib
+                plan_key = hashlib.md5(f"{topic}:{days}".encode()).hexdigest()[:8]
+                await db.set_setting(f"plan_{plan_key}", json.dumps({"topic": topic, "days": days}))
+
+                await message.answer(
+                    f"📋 <b>Предлагаю структуру на {days} постов:</b>\n\n{posts_text}",
+                    reply_markup=InlineKeyboardBuilder()
+                    .button(text=f"✅ Создать {days} постов", callback_data=f"cpp:{plan_key}")
+                    .button(text="✏️ Указать кол-во вручную", callback_data="plan_manual")
+                    .button(text="❌ Отмена", callback_data="back_menu")
+                    .adjust(1)
+                    .as_markup(),
+                    parse_mode="HTML"
+                )
+                await state.clear()
+                return
+        except Exception as e:
+            logger.error(f"ai_plan_handler: ошибка анализа темы: {e}")
+            # Fallback — используем 7 дней
+            days = 7
+
+        await message.answer(f"⏳ <b>Составляю контент-план на {days} дней...</b>", parse_mode="HTML")
 
     user_prompt = (
         f"Составь контент-план на {days} дней для Telegram-канала TERION.\n"
@@ -1348,7 +1425,7 @@ async def ai_plan_handler(message: Message, state: FSMContext):
     # Сохраняем тему в БД чтобы не передавать в callback_data (лимит 64 байта)
     import hashlib, json
     plan_key = hashlib.md5(f"{topic}:{days}".encode()).hexdigest()[:8]
-    await db.set_setting(f"plan_{plan_key}", json.dumps({"topic": topic, "days": days}))
+    await db.set_setting(f"plan_{plan_key}", json.dumps({"topic": topic, "days": days, "posts": []}))
 
     await message.answer(
         f"✅ <b>Контент-план на {days} дней готов!</b>\n"
@@ -1363,9 +1440,30 @@ async def ai_plan_handler(message: Message, state: FSMContext):
     await state.clear()
 
 
+@content_router.callback_query(F.data.startswith("plan_manual"))
+async def plan_manual_callback(callback: CallbackQuery, state: FSMContext):
+    await callback.answer()
+    await callback.message.answer(
+        "Укажите количество дней и тему через запятую:\n<code>7, перепланировка</code>",
+        parse_mode="HTML", reply_markup=get_back_btn()
+    )
+    await state.set_state(ContentStates.ai_plan)
+
+
+@content_router.callback_query(F.data.startswith("plan_manual"))
+async def plan_manual_callback(callback: CallbackQuery, state: FSMContext):
+    await callback.answer()
+    await callback.message.answer(
+        "Укажите количество дней и тему через запятую:\n<code>7, перепланировка</code>",
+        parse_mode="HTML", reply_markup=get_back_btn()
+    )
+    await state.set_state(ContentStates.ai_plan)
+
+
 @content_router.callback_query(F.data.startswith("cpp:"))
 async def create_plan_posts(callback: CallbackQuery, state: FSMContext):
     """Создаёт черновики постов для каждого дня плана: текст + обложка -> БД -> топик 85."""
+    logger.warning(f"DEBUG cpp: handler reached! data={callback.data}")
     import json
     plan_key = callback.data.split(":", 1)[1]
     plan_data = await db.get_setting(f"plan_{plan_key}")
@@ -1375,6 +1473,7 @@ async def create_plan_posts(callback: CallbackQuery, state: FSMContext):
     plan_info = json.loads(plan_data)
     topic = plan_info["topic"]
     days = plan_info["days"]
+    plan_posts = plan_info.get("posts", [])
 
     await callback.answer("Создаю посты...")
     await callback.message.edit_text(
@@ -1395,12 +1494,27 @@ async def create_plan_posts(callback: CallbackQuery, state: FSMContext):
             pass
 
         # 1. Генерируем текст поста
+        _formats = ["экспертный совет", "кейс клиента", "лайфхак", "вопрос аудитории", "интересный факт", "разбор ошибок", "пошаговая инструкция"]
+        post_format = _formats[(i - 1) % len(_formats)]
+        # Берём описание дня из плана если есть
+        day_info = next((p for p in plan_posts if p.get("day") == i), None)
+        day_title = day_info.get("title", "") if day_info else ""
+        day_idea = day_info.get("idea", "") if day_info else ""
+        day_format = day_info.get("format", post_format) if day_info else post_format
         post_prompt = (
-            f"Напиши пост для Telegram-канала TERION.\n"
-            f"Тема контент-плана: {topic}\n"
-            f"День {i} из {days}.\n"
-            f"Используй разнообразный формат: экспертный совет, кейс, лайфхак, вопрос аудитории или факт.\n"
-            f"Объём: 150-200 слов. Добавь эмодзи по смыслу."
+            f"Напиши готовый пост для Telegram-канала компании TERION (перепланировка квартир в Москве).\n"
+            f"Тема: {topic}. День {i} из {days}.\n"
+            + (f"Заголовок поста: {day_title}\n" if day_title else "")
+            + (f"Идея: {day_idea}\n" if day_idea else "")
+            + f"Формат: {day_format}.\n\n"
+            "ОБЯЗАТЕЛЬНЫЕ ТРЕБОВАНИЯ:\n"
+            "1. Объём: 200-250 слов, текст полный и законченный\n"
+            "2. Начни с цепляющего первого предложения\n"
+            f"3. Раскрой тему через формат '{day_format}' — включая все детали из идеи\n"
+            "4. В конце ОБЯЗАТЕЛЬНО: призыв записаться на консультацию в TERION. НЕ вставляй ссылки — только текст\n"
+            "5. Тон: экспертный, дружелюбный, живой\n"
+            "6. Эмодзи — 3-5 штук по смыслу\n"
+            "7. НЕ пиши заголовок отдельно — начинай сразу с текста поста"
         )
         post_text = None
         try:
@@ -1416,11 +1530,13 @@ async def create_plan_posts(callback: CallbackQuery, state: FSMContext):
             errors += 1
             continue
 
-        # 2. Генерируем обложку
+        # 2. Генерируем обложку на основе текста поста
+        post_excerpt = post_text[:150].replace('"', '').replace("'", '').strip()
         art_prompt = (
-            f"{topic}, день {i}, перепланировка квартиры Москва, "
-            "professional architectural visualization, modern interior design. "
-            "No text, no words, no letters - image only."
+            f"{post_excerpt}. "
+            "Moscow apartment interior, professional architectural visualization, "
+            "modern realistic render, bright natural light. "
+            "No text, no words, no letters, no watermarks - image only."
         )
         image_b64 = await _auto_generate_image(art_prompt)
         image_file_id = None
@@ -1439,11 +1555,12 @@ async def create_plan_posts(callback: CallbackQuery, state: FSMContext):
             except Exception as e:
                 logger.error(f"create_plan_posts: ошибка обложки день {i}: {e}")
 
-        # 3. Сохраняем черновик в БД
+        # 3. Применяем квиз и хэштеги, сохраняем черновик в БД
+        post_text_full = ensure_quiz_and_hashtags(post_text)
         try:
             post_id = await db.add_content_post(
                 title=f"День {i}: {topic}",
-                body=post_text,
+                body=post_text_full,
                 cta="",
                 channel="draft",
                 status="draft",
@@ -1462,8 +1579,9 @@ async def create_plan_posts(callback: CallbackQuery, state: FSMContext):
             kb.button(text="📤 TG", callback_data=f"pub_tg:{post_id}")
             kb.button(text="📘 VK", callback_data=f"pub_vk:{post_id}")
             kb.button(text="⏰ Запланировать", callback_data=f"schedule:{post_id}")
+            kb.button(text="✏️ Редактировать", callback_data=f"edit_draft:{post_id}")
             kb.adjust(2)
-            draft_preview = post_text[:800] + ("..." if len(post_text) > 800 else "")
+            draft_preview = post_text_full[:800] + ("..." if len(post_text_full) > 800 else "")
             await callback.bot.send_message(
                 chat_id=LEADS_GROUP_CHAT_ID,
                 message_thread_id=THREAD_ID_DRAFTS,
@@ -1480,6 +1598,59 @@ async def create_plan_posts(callback: CallbackQuery, state: FSMContext):
         parse_mode="HTML",
     )
 
+
+
+
+@content_router.callback_query(F.data.startswith("edit_draft:"))
+async def edit_draft_start(callback: CallbackQuery, state: FSMContext):
+    """Начало редактирования черновика."""
+    post_id = int(callback.data.split(":")[1])
+    post = await db.get_content_post(post_id)
+    if not post:
+        await callback.answer("❌ Пост не найден")
+        return
+    await state.update_data(edit_post_id=post_id)
+    await state.set_state(ContentStates.edit_draft)
+    await callback.message.answer(
+        f"✏️ <b>Редактирование черновика #{post_id}</b>\n\n"
+        f"Текущий текст:\n<blockquote>{post['body'][:500]}...</blockquote>\n\n"
+        f"Напишите новый текст поста (или /skip чтобы оставить текущий):",
+        parse_mode="HTML",
+        reply_markup=get_back_btn()
+    )
+    await callback.answer()
+
+
+@content_router.message(ContentStates.edit_draft)
+async def edit_draft_save(message: Message, state: FSMContext):
+    """Сохраняет отредактированный текст черновика."""
+    data = await state.get_data()
+    post_id = data.get("edit_post_id")
+
+    if message.text == "/skip":
+        await state.clear()
+        await message.answer("✅ Текст оставлен без изменений.", reply_markup=get_back_btn())
+        return
+
+    new_text = ensure_quiz_and_hashtags(message.text)
+    try:
+        await db.update_content_plan_entry(post_id, body=new_text)
+        await state.clear()
+        post = await db.get_content_post(post_id)
+        kb = InlineKeyboardBuilder()
+        kb.button(text="📤 TG", callback_data=f"pub_tg:{post_id}")
+        kb.button(text="📘 VK", callback_data=f"pub_vk:{post_id}")
+        kb.button(text="⏰ Запланировать", callback_data=f"schedule:{post_id}")
+        kb.button(text="✏️ Редактировать", callback_data=f"edit_draft:{post_id}")
+        kb.adjust(2)
+        await message.answer(
+            f"✅ <b>Черновик #{post_id} обновлён!</b>\n\n{new_text[:600]}...",
+            reply_markup=kb.as_markup(),
+            parse_mode="HTML"
+        )
+    except Exception as e:
+        logger.error(f"edit_draft_save: ошибка: {e}")
+        await message.answer(f"❌ Ошибка сохранения: {e}", reply_markup=get_back_btn())
 
 # === 📰 НОВОСТЬ ===
 

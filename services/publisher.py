@@ -29,9 +29,11 @@ class Publisher:
             if image:
                 from aiogram.types import BufferedInputFile
                 photo = BufferedInputFile(image, filename="post_image.jpg")
-                await self.bot.send_photo(channel_id, photo=photo, caption=text[:1024])
+                # Отправляем фото отдельно, текст отдельно (обходим лимит caption 1024)
+                await self.bot.send_photo(channel_id, photo=photo)
+                await self.bot.send_message(channel_id, text, parse_mode="HTML")
             else:
-                await self.bot.send_message(channel_id, text)
+                await self.bot.send_message(channel_id, text, parse_mode="HTML")
             logger.info(f"✅ Опубликовано в TG канал {channel_id}")
             return True
         except Exception as e:
