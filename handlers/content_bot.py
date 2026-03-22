@@ -396,38 +396,35 @@ class RouterAIClient:
         return None
     
     async def generate_image_gemini(self, prompt: str) -> Optional[str]:
-        """Генерация изображения через Gemini"""
+        """Генерация изображения через Flux.2-pro (Router AI)"""
         payload = {
-            "model": "gemini-1.5-flash",
-            "messages": [{
-                "role": "user",
-                "content": f"Generate image: {prompt}. Professional architectural photography, interior design, high quality. No text, no words, no letters, no captions — image only."
-            }],
+            "model": "black-forest-labs/flux.2-pro",
+            "messages": [{"role": "user", "content": prompt}],
             "max_tokens": 2000
         }
-        
         try:
             async with aiohttp.ClientSession() as session:
                 async with session.post(
                     "https://routerai.ru/api/v1/chat/completions",
                     headers=self.headers,
-                    json=payload
+                    json=payload,
+                    timeout=aiohttp.ClientTimeout(total=60)
                 ) as resp:
                     if resp.status == 200:
                         data = await resp.json()
-                        content = data["choices"][0]["message"]["content"]
-                        # Парсим base64
-                        if "data:image" in content:
-                            match = re.search(r'data:image/[^;]+;base64,([^"\']+)', content)
-                            if match:
-                                return match.group(1)
-                        return content
+                        images = data["choices"][0]["message"].get("images", [])
+                        if images:
+                            url = images[0]["image_url"]["url"]
+                            if "base64," in url:
+                                return url.split("base64,")[1]
+                        logger.error("Flux: no images in response")
+                        return None
                     else:
                         error = await resp.text()
-                        logger.error(f"Gemini Image error: {error}")
+                        logger.error(f"Flux error {resp.status}: {error[:200]}")
                         return None
         except Exception as e:
-            logger.error(f"Gemini Image exception: {e}")
+            logger.error(f"Flux exception: {e}")
             return None
 
 
@@ -445,24 +442,23 @@ async def _auto_generate_image(prompt: str) -> Optional[str]:
       3. ImageGenerator (DALL-E / OpenRouter) — запасной вариант
     Возвращает base64-строку или None при полном отказе всех сервисов.
     """
-    # 1. Яндекс АРТ
-    try:
-        image_b64 = await yandex_art.generate(prompt)
-        if image_b64:
-            logger.info("Image: Yandex ART OK")
-            return image_b64
-    except Exception as e:
-        logger.warning(f"Yandex ART failed: {e}")
-
-    # 2. Router AI (Gemini Nano)
+    # 1. Flux.2-pro (Router AI) — лучшее качество
     try:
         image_b64 = await router_ai.generate_image_gemini(prompt)
         if image_b64:
-            logger.info("Image: Router AI (Gemini) OK")
+            logger.info("Image: Flux.2-pro OK")
             return image_b64
     except Exception as e:
-        logger.warning(f"Router AI image failed: {e}")
-
+        logger.warning(f"Flux failed: {e}")
+    # 2. Яндекс АРТ — fallback
+    try:
+        image_b64 = await yandex_art.generate(prompt)
+        if image_b64:
+            logger.info("Image: Yandex ART fallback OK")
+            return image_b64
+    except Exception as e:
+        logger.warning(f"Yandex ART failed: {e}")
+    # 3. ImageGenerator (OpenRouter DALL-E)
     # 3. ImageGenerator (OpenRouter DALL-E)
     try:
         from services.image_generator import image_generator
