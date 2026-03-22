@@ -1467,11 +1467,13 @@ async def create_plan_posts(callback: CallbackQuery, state: FSMContext):
             errors += 1
             continue
 
-        # 2. Генерируем обложку
+        # 2. Генерируем обложку на основе текста поста
+        post_excerpt = post_text[:150].replace('"', '').replace("'", '').strip()
         art_prompt = (
-            f"{topic}, день {i}, перепланировка квартиры Москва, "
-            "professional architectural visualization, modern interior design. "
-            "No text, no words, no letters - image only."
+            f"{post_excerpt}. "
+            "Moscow apartment interior, professional architectural visualization, "
+            "modern realistic render, bright natural light. "
+            "No text, no words, no letters, no watermarks - image only."
         )
         image_b64 = await _auto_generate_image(art_prompt)
         image_file_id = None
