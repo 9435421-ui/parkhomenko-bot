@@ -226,6 +226,13 @@ class ContentStates(StatesGroup):
     edit_draft = State()       # Редактирование черновика
     quick_text = State()
     holiday_rf = State()       # Поздравление с официальным праздником РФ
+    ai_text = State()
+    ai_series = State()
+    ai_visual_select = State()
+    ai_news = State()
+    ai_news_choose = State()
+    ai_fact_choose = State()
+    edit_post = State()
 
 
 # === AI CLIENTS ===
@@ -574,22 +581,7 @@ vk_publisher = VKPublisher(VK_TOKEN, VK_GROUP_ID)
 
 # === FSM STATES ===
 
-class ContentStates(StatesGroup):
-    main_menu = State()
-    photo_topic = State()
-    photo_upload = State()
-    preview_mode = State()
-    ai_text = State()
-    ai_series = State()
-    ai_visual_select = State()
-    ai_visual_prompt = State()
-    ai_plan = State()
-    edit_draft = State()
-    ai_news = State()
-    ai_news_choose = State()   # Выбор темы из горячих лидов или своя
-    ai_fact_choose = State()   # Выбор реальной ситуации для интересного факта
-    holiday_rf = State()
-    edit_post = State()
+
 
 
 # === KEYBOARDS ===
@@ -1410,9 +1402,30 @@ async def ai_plan_handler(message: Message, state: FSMContext):
     await state.clear()
 
 
+@content_router.callback_query(F.data.startswith("plan_manual"))
+async def plan_manual_callback(callback: CallbackQuery, state: FSMContext):
+    await callback.answer()
+    await callback.message.answer(
+        "Укажите количество дней и тему через запятую:\n<code>7, перепланировка</code>",
+        parse_mode="HTML", reply_markup=get_back_btn()
+    )
+    await state.set_state(ContentStates.ai_plan)
+
+
+@content_router.callback_query(F.data.startswith("plan_manual"))
+async def plan_manual_callback(callback: CallbackQuery, state: FSMContext):
+    await callback.answer()
+    await callback.message.answer(
+        "Укажите количество дней и тему через запятую:\n<code>7, перепланировка</code>",
+        parse_mode="HTML", reply_markup=get_back_btn()
+    )
+    await state.set_state(ContentStates.ai_plan)
+
+
 @content_router.callback_query(F.data.startswith("cpp:"))
 async def create_plan_posts(callback: CallbackQuery, state: FSMContext):
     """Создаёт черновики постов для каждого дня плана: текст + обложка -> БД -> топик 85."""
+    logger.warning(f"DEBUG cpp: handler reached! data={callback.data}")
     import json
     plan_key = callback.data.split(":", 1)[1]
     plan_data = await db.get_setting(f"plan_{plan_key}")
@@ -1442,16 +1455,19 @@ async def create_plan_posts(callback: CallbackQuery, state: FSMContext):
             pass
 
         # 1. Генерируем текст поста
+        _formats = ["экспертный совет", "кейс клиента", "лайфхак", "вопрос аудитории", "интересный факт", "разбор ошибок", "пошаговая инструкция"]
+        post_format = _formats[(i - 1) % len(_formats)]
         post_prompt = (
             f"Напиши готовый пост для Telegram-канала компании TERION (перепланировка квартир в Москве).\n"
-            f"Тема контент-плана: {topic}\n"
-            f"День {i} из {days}. Используй формат: экспертный совет, кейс, лайфхак, вопрос аудитории или факт — чередуй по дням.\n"
-            f"Требования:\n"
-            f"- Объём: 180-250 слов, полный законченный текст\n"
-            f"- В конце ОБЯЗАТЕЛЬНО призыв: обратиться в TERION за консультацией по перепланировке/согласованию\n"
-            f"- Тон: экспертный, дружелюбный, без воды\n"
-            f"- Эмодзи умеренно по смыслу\n"
-            f"- НЕ пиши заголовок отдельной строкой — начинай сразу с текста"
+            f"Тема: {topic}. День {i} из {days}. Формат: {post_format}.\n\n"
+            f"ОБЯЗАТЕЛЬНЫЕ ТРЕБОВАНИЯ:\n"
+            f"1. Объём: 200-250 слов, текст полный и законченный\n"
+            f"2. Начни с цепляющего первого предложения\n"
+            f"3. Раскрой тему через формат '{post_format}'\n"
+            f"4. В конце ОБЯЗАТЕЛЬНО: призыв записаться на консультацию в TERION или пройти квиз по перепланировке\n"
+            f"5. Тон: экспертный, дружелюбный, живой\n"
+            f"6. Эмодзи — 3-5 штук по смыслу\n"
+            f"7. НЕ пиши заголовок отдельно — начинай сразу с текста поста"
         )
         post_text = None
         try:
