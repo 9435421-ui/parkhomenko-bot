@@ -800,26 +800,10 @@ async def show_preview(message: Message, text: str, image_file_id: Optional[str]
 
 async def photo_start(message: Message, state: FSMContext):
     await message.answer(
-        "📸 <b>Фото → Описание → Пост</b>\n\n"
-        "Шаг 1/2: Введите <b>тему поста</b>:\n\n"
-        "Примеры:\n"
-        "• Перепланировка студии в старом фонде\n"
-        "• Объединение кухни и гостиной\n"
-        "• Ремонт ванной с перепланировкой",
+        "📸 <b>Фото → Пост</b>\n\n"
+        "Загрузите фото — интерьер, планировку или ремонт.\n"
+        "Бот сам проанализирует и напишет экспертный пост.",
         reply_markup=get_back_btn(),
-        parse_mode="HTML"
-    )
-    await state.set_state(ContentStates.photo_topic)
-
-
-@content_router.message(ContentStates.photo_topic)
-async def process_photo_topic(message: Message, state: FSMContext):
-    topic = message.text
-    await state.update_data(photo_topic=topic)
-    
-    await message.answer(
-        f"✅ Тема: <b>{topic}</b>\n\n"
-        f"Шаг 2/2: Загрузите <b>фото</b> (поэтажный план, интерьер):",
         parse_mode="HTML"
     )
     await state.set_state(ContentStates.photo_upload)
@@ -827,13 +811,10 @@ async def process_photo_topic(message: Message, state: FSMContext):
 
 @content_router.message(ContentStates.photo_upload, F.photo)
 async def process_photo(message: Message, state: FSMContext):
-    data = await state.get_data()
-    topic = data.get('photo_topic', 'Перепланировка')
-    
     photo = message.photo[-1]
     file_id = photo.file_id
     
-    await message.answer(f"🔍 <b>Анализирую фото...</b>\nТема: {topic}", parse_mode="HTML")
+    await message.answer(f"🔍 <b>Анализирую фото...</b>", parse_mode="HTML")
     
     image_bytes = await download_photo(message.bot, file_id)
     if not image_bytes:
@@ -844,15 +825,15 @@ async def process_photo(message: Message, state: FSMContext):
     compressed = await compress_image(image_bytes, max_size=1024)
     image_b64 = base64.b64encode(compressed).decode()
     
-    cases_content = _load_content_template("expert_cases.txt", "МЖИ, несущие стены, трассировка, акты скрытых работ, СНиП.")
     prompt = (
-        f"Ты — ведущий эксперт TERION. Тема: «{topic}»\n\n"
-        f"Задача: проанализировать изображение и написать технический пост.\n\n"
-        f"1. Опиши, что на фото: планировка, демонтаж, ремонт, тип здания.\n"
-        f"2. Обязательно используй термины: МЖИ (Мосжилинспекция), трассировка (изменения на плане), СНиП (своды правил) — по смыслу.\n"
-        f"3. Экспертный комментарий и призыв к действию (@terion_bot).\n\n"
-        f"Кейсы для опоры:\n{cases_content}\n\n"
-        f"Формат: <b>Заголовок</b>, описание, технический комментарий (МЖИ/трассировка/СНиП), призыв. 400-700 знаков, эмодзи. Без общих фраз."
+        "Ты — ведущий эксперт TERION по перепланировке квартир в Москве.\n\n"
+        "Задача: проанализируй фото и напиши готовый экспертный пост для Telegram.\n\n"
+        "1. Определи что на фото: интерьер, планировка, ремонт, демонтаж\n"
+        "2. Напиши экспертный пост 150-200 слов\n"
+        "3. Используй термины по смыслу: МЖИ, трассировка, СНиП\n"
+        "4. В конце: призыв обратиться в TERION на консультацию\n"
+        "5. Эмодзи 3-5 штук\n"
+        "6. НЕ вставляй ссылки — только текст"
     )
     
     description = await router_ai.analyze_image(image_b64, prompt)
@@ -873,7 +854,7 @@ async def process_photo(message: Message, state: FSMContext):
         description += f"\n\n📍 <a href='{VK_QUIZ_LINK}'>Пройти квиз</a> @terion_bot\n#TERION #перепланировка #москва"
     
     post_id = await db.add_content_post(
-        title=f"Фото: {topic[:40]}",
+        title=f"Фото-анализ: экспертный пост",
         body=description,
         cta="",
         image_url=file_id,
