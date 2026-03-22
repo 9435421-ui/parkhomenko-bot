@@ -1207,12 +1207,15 @@ async def ai_series_handler(message: Message, state: FSMContext):
         reply_markup=get_queue_keyboard(post_id)
     )
     
+    import hashlib, json as _json
+    _series_key = hashlib.md5(f"{topic}:{days}".encode()).hexdigest()[:8]
+    await db.set_setting(f"series_{_series_key}", _json.dumps({"topic": topic, "days": days}))
     await message.answer(
         f"✅ <b>Серия готова!</b>\n"
         f"📊 {days} постов\n\n"
         f"<b>Сгенерировать обложки?</b>",
         reply_markup=InlineKeyboardBuilder()
-        .button(text="🎨 Сгенерировать обложки", callback_data=f"gen_series_img:{topic}:{days}")
+        .button(text="🎨 Сгенерировать обложки", callback_data=f"gsi:{_series_key}")
         .button(text="❌ Нет", callback_data="back_menu")
         .as_markup(),
         parse_mode="HTML"
@@ -1220,12 +1223,17 @@ async def ai_series_handler(message: Message, state: FSMContext):
     await state.clear()
 
 
-@content_router.callback_query(F.data.startswith("gen_series_img:"))
+@content_router.callback_query(F.data.startswith("gsi:"))
 async def generate_series_images(callback: CallbackQuery, state: FSMContext):
-    parts = callback.data.split(":")
-    # Формат: gen_series_img:{topic}:{days}
-    topic = parts[1]
-    days = int(parts[2])
+    import json as _json
+    _series_key = callback.data.split(":", 1)[1]
+    _series_data = await db.get_setting(f"series_{_series_key}")
+    if not _series_data:
+        await callback.answer("❌ Серия не найдена, создайте заново")
+        return
+    _info = _json.loads(_series_data)
+    topic = _info["topic"]
+    days = _info["days"]
 
     await callback.answer("🎨 Генерация...")
     await callback.message.edit_text(
