@@ -228,6 +228,7 @@ class ContentStates(StatesGroup):
     holiday_rf = State()       # Поздравление с официальным праздником РФ
     ai_text = State()
     ai_series = State()
+    schedule_series = State()
     ai_visual_select = State()
     ai_news = State()
     ai_news_choose = State()
@@ -1245,9 +1246,10 @@ async def ai_series_handler(message: Message, state: FSMContext):
             # 4. Анонс в топик 85 с кнопками
             try:
                 kb = InlineKeyboardBuilder()
+                kb.button(text="📤 Во все каналы", callback_data=f"pub_all:{post_id}")
+                kb.button(text="⏰ Запланировать", callback_data=f"schedule:{post_id}")
                 kb.button(text="📤 TG", callback_data=f"pub_tg:{post_id}")
                 kb.button(text="📘 VK", callback_data=f"pub_vk:{post_id}")
-                kb.button(text="⏰ Запланировать", callback_data=f"schedule:{post_id}")
                 kb.button(text="✏️ Редактировать", callback_data=f"edit_draft:{post_id}")
                 kb.adjust(2)
                 draft_preview = post_text_full[:600] + ("..." if len(post_text_full) > 600 else "")
@@ -1482,6 +1484,8 @@ async def create_plan_posts(callback: CallbackQuery, state: FSMContext):
     days = plan_info["days"]
     plan_posts = plan_info.get("posts", [])
 
+    created_ids = []
+
     await callback.answer("Создаю посты...")
     await callback.message.edit_text(
         f"<b>Создаю {days} черновиков...</b>\n\nДля каждого дня: текст + обложка -&gt; сохраняю в базу -&gt; топик Черновики",
@@ -1575,6 +1579,7 @@ async def create_plan_posts(callback: CallbackQuery, state: FSMContext):
                 theme=topic,
             )
             created += 1
+            created_ids.append(post_id)
         except Exception as e:
             logger.error(f"create_plan_posts: ошибка БД день {i}: {e}")
             errors += 1
@@ -1583,9 +1588,10 @@ async def create_plan_posts(callback: CallbackQuery, state: FSMContext):
         # 4. Анонс черновика в топик 85
         try:
             kb = InlineKeyboardBuilder()
+            kb.button(text="📤 Во все каналы", callback_data=f"pub_all:{post_id}")
+            kb.button(text="⏰ Запланировать", callback_data=f"schedule:{post_id}")
             kb.button(text="📤 TG", callback_data=f"pub_tg:{post_id}")
             kb.button(text="📘 VK", callback_data=f"pub_vk:{post_id}")
-            kb.button(text="⏰ Запланировать", callback_data=f"schedule:{post_id}")
             kb.button(text="✏️ Редактировать", callback_data=f"edit_draft:{post_id}")
             kb.adjust(2)
             draft_preview = post_text_full[:800] + ("..." if len(post_text_full) > 800 else "")
@@ -1599,9 +1605,20 @@ async def create_plan_posts(callback: CallbackQuery, state: FSMContext):
         except Exception as e:
             logger.error(f"create_plan_posts: ошибка топика день {i}: {e}")
 
+    # Сохраняем список post_id серии для массового планирования
+    import json
+    series_ids = ",".join(str(pid) for pid in created_ids)
+    series_key = f"series_ids_{plan_key}"
+    await db.set_setting(series_key, series_ids)
+
+    kb_final = InlineKeyboardBuilder()
+    kb_final.button(text="📅 Запланировать всю серию", callback_data=f"schedule_series:{plan_key}")
+    kb_final.button(text="✅ Готово", callback_data="back_menu")
+    kb_final.adjust(1)
+
     await callback.message.edit_text(
         ("✅" if errors == 0 else "⚠️") + f" <b>Готово!</b>\n\nСоздано черновиков: <b>{created}/{days}</b>\nОшибок: <b>{errors}</b>\n\nЧерновики с кнопками публикации — в топике Черновики",
-        reply_markup=get_back_btn(),
+        reply_markup=kb_final.as_markup(),
         parse_mode="HTML",
     )
 
@@ -1645,9 +1662,10 @@ async def edit_draft_save(message: Message, state: FSMContext):
         await state.clear()
         post = await db.get_content_post(post_id)
         kb = InlineKeyboardBuilder()
+        kb.button(text="📤 Во все каналы", callback_data=f"pub_all:{post_id}")
+        kb.button(text="⏰ Запланировать", callback_data=f"schedule:{post_id}")
         kb.button(text="📤 TG", callback_data=f"pub_tg:{post_id}")
         kb.button(text="📘 VK", callback_data=f"pub_vk:{post_id}")
-        kb.button(text="⏰ Запланировать", callback_data=f"schedule:{post_id}")
         kb.button(text="✏️ Редактировать", callback_data=f"edit_draft:{post_id}")
         kb.adjust(2)
         await message.answer(
@@ -1658,6 +1676,65 @@ async def edit_draft_save(message: Message, state: FSMContext):
     except Exception as e:
         logger.error(f"edit_draft_save: ошибка: {e}")
         await message.answer(f"❌ Ошибка сохранения: {e}", reply_markup=get_back_btn())
+
+@content_router.callback_query(F.data.startswith("schedule_series:"))
+async def schedule_series_start(callback: CallbackQuery, state: FSMContext):
+    """Массовое планирование серии постов"""
+    plan_key = callback.data.split(":", 1)[1]
+    await state.update_data(schedule_plan_key=plan_key)
+    await state.set_state(ContentStates.schedule_series)
+    
+    from datetime import datetime, timedelta
+    now = datetime.now()
+    tomorrow = (now + timedelta(days=1)).strftime("%d.%m")
+    
+    await callback.message.answer(
+        "📅 <b>Запланировать всю серию</b>\n\n"
+        "Введите дату первой публикации и время:\n"
+        "<code>ДД.ММ ЧЧ:ММ</code>\n\n"
+        f"Например: <code>{tomorrow} 10:00</code>\n\n"
+        "<i>Каждый следующий пост — через 24 часа</i>",
+        parse_mode="HTML",
+        reply_markup=get_back_btn()
+    )
+    await callback.answer()
+
+@content_router.message(ContentStates.schedule_series)
+async def schedule_series_input(message: Message, state: FSMContext):
+    """Получаем дату и планируем все посты серии"""
+    data = await state.get_data()
+    plan_key = data.get("schedule_plan_key")
+    
+    try:
+        from datetime import datetime, timedelta
+        dt = datetime.strptime(message.text.strip(), "%d.%m %H:%M").replace(year=datetime.now().year)
+    except ValueError:
+        await message.answer("❌ Неверный формат. Пример: <code>25.03 10:00</code>", parse_mode="HTML")
+        return
+    
+    # Получаем список post_id серии
+    series_ids_str = await db.get_setting(f"series_ids_{plan_key}")
+    if not series_ids_str:
+        await message.answer("❌ Серия не найдена", reply_markup=get_back_btn())
+        await state.clear()
+        return
+    
+    post_ids = [int(pid) for pid in series_ids_str.split(",") if pid]
+    
+    scheduled = []
+    for i, post_id in enumerate(post_ids):
+        publish_dt = dt + timedelta(days=i)
+        await db.update_content_plan_entry(post_id, status="approved", publish_date=publish_dt)
+        scheduled.append(f"День {i+1}: {publish_dt.strftime('%d.%m в %H:%M')}")
+    
+    result = "\n".join(scheduled)
+    await message.answer(
+        f"✅ <b>Серия запланирована!</b>\n\n{result}\n\n"
+        f"Посты будут опубликованы автоматически во все каналы.",
+        parse_mode="HTML",
+        reply_markup=get_back_btn()
+    )
+    await state.clear()
 
 # === 📰 НОВОСТЬ ===
 
@@ -2471,6 +2548,64 @@ async def publish_vk_only(callback: CallbackQuery, state: FSMContext):
             await callback.message.edit_text("❌ Ошибка VK", reply_markup=get_back_btn(), parse_mode="HTML")
     except Exception as e:
         await callback.message.edit_text(f"❌ Ошибка: {e}", reply_markup=get_back_btn())
+    
+    await state.clear()
+
+
+@content_router.callback_query(F.data.startswith("pub_all:"))
+async def publish_all_channels(callback: CallbackQuery, state: FSMContext):
+    """Публикация во все каналы: TG + VK"""
+    post_id = int(callback.data.split(":")[1])
+    post = await db.get_content_post(post_id)
+
+    if not post:
+        await callback.answer("❌ Пост не найден")
+        return
+
+    from services.publisher import publisher
+    if not publisher.bot:
+        publisher.bot = callback.bot
+
+    text_tg = ensure_quiz_and_hashtags(post['body']) + _get_expert_signature()
+    text_vk = clean_html_for_vk(post['body'])
+    if VK_QUIZ_LINK not in text_vk:
+        text_vk += f"\n\n📍 Пройти квиз: {VK_QUIZ_LINK}"
+    if CONTENT_HASHTAGS and CONTENT_HASHTAGS.strip() and CONTENT_HASHTAGS.strip() not in text_vk:
+        text_vk += f"\n\n{CONTENT_HASHTAGS.strip()}"
+
+    image_bytes = None
+    if post.get("image_url"):
+        image_bytes = await download_photo(callback.bot, post["image_url"])
+
+    results = []
+
+    # TG
+    try:
+        success_terion = await publisher.publish_to_telegram(CHANNEL_ID_TERION, text_tg, image_bytes)
+        results.append("✅ TERION" if success_terion else "❌ TERION")
+        
+        success_dom_grad = await publisher.publish_to_telegram(CHANNEL_ID_DOM_GRAD, text_tg, image_bytes)
+        results.append("✅ ДОМ ГРАНД" if success_dom_grad else "❌ ДОМ ГРАНД")
+    except Exception as e:
+        results.extend([f"❌ TG: {e}"])
+
+    # VK
+    try:
+        vk_id = await vk_publisher.post_with_photo(text_vk, image_bytes) if image_bytes else await vk_publisher.post_text_only(text_vk)
+        vk_link = f"https://vk.com/wall-{VK_GROUP_ID}_{vk_id}" if vk_id else None
+        results.append("✅ VK" if vk_id else "❌ VK")
+    except Exception as e:
+        results.append(f"❌ VK: {e}")
+
+    await db.update_content_post(post_id, status="published")
+    await callback.message.edit_text(f"✅ <b>Во все каналы:</b>\n" + "\n".join(results), reply_markup=get_back_btn(), parse_mode="HTML")
+    
+    # Финансовый лог
+    cost = 4.00  # TG + VK
+    await callback.bot.send_message(
+        chat_id=LEADS_GROUP_CHAT_ID,
+        text=f"💰 Пост #{post_id} опубликован во все каналы. Списано: {cost}₽"
+    )
     
     await state.clear()
 
