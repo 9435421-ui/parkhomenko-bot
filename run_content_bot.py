@@ -74,6 +74,13 @@ async def main():
     me = await bot.get_me()
     logger.info(f"🚀 Контент-бот: @{me.username}")
 
+    # Запускаем планировщик автопубликации
+    scheduler = AsyncIOScheduler(timezone="Europe/Moscow")
+    scheduler.add_job(publish_scheduled_posts, 'interval', minutes=1, args=[bot])
+    scheduler.start()
+    set_scheduler(scheduler)
+    logger.info("✅ Планировщик автопубликации запущен")
+
     await bot.delete_webhook(drop_pending_updates=True)
     await dp.start_polling(bot, skip_updates=True)
 
