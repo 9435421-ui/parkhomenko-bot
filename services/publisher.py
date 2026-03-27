@@ -220,6 +220,43 @@ class Publisher:
                 
         return results
 
+    async def prepare_dzen_draft(self, post_id: int) -> bool:
+        """Подготовка черновика для Дзена: отправка title и body в технический канал"""
+        try:
+            from database.db import db
+            from config import NOTIFICATIONS_CHANNEL_ID
+
+            # Получаем пост из БД
+            post = await db.get_content_post(post_id)
+            if not post:
+                logger.error(f"❌ Пост {post_id} не найден")
+                return False
+
+            title = post.get('title', 'Без заголовка')
+            body = post.get('body', '')
+
+            # Формируем сообщение для Дзена
+            dzen_message = f"🎯 <b>ДЛЯ ДЗЕНА</b>\n\n"
+            dzen_message += f"<b>Заголовок:</b> {title}\n\n"
+            dzen_message += f"<b>Текст:</b>\n{body}"
+
+            # Отправляем в технический канал
+            if self.bot and NOTIFICATIONS_CHANNEL_ID:
+                await self.bot.send_message(
+                    NOTIFICATIONS_CHANNEL_ID,
+                    dzen_message,
+                    parse_mode="HTML"
+                )
+                logger.info(f"✅ Черновик для Дзена отправлен в канал: пост {post_id}")
+                return True
+            else:
+                logger.error("❌ Bot или NOTIFICATIONS_CHANNEL_ID не настроены")
+                return False
+
+        except Exception as e:
+            logger.error(f"❌ Ошибка подготовки черновика для Дзена: {e}")
+            return False
+
     async def check_and_publish(self):
         """Проверка расписания и публикация постов (заглушка для совместимости)"""
         logger.info("📋 check_and_publish: Мониторинг расписания постов")
