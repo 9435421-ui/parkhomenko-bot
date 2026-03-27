@@ -23,6 +23,7 @@ router = Router()
 class VideoReportStates(StatesGroup):
     """Состояния видео-репортажа"""
     waiting_for_video = State()
+    waiting_for_post_selection = State()
     waiting_for_title = State()
     waiting_for_description = State()
     waiting_for_confirmation = State()
@@ -76,13 +77,32 @@ async def receive_video(message: Message, state: FSMContext, bot):
             duration=duration
         )
         
+        # Получаем список постов для выбора
+        async with db.conn.cursor() as cursor:
+            await cursor.execute(
+                "SELECT id, title FROM content_plan WHERE status='draft' AND theme='base_expert' ORDER BY id LIMIT 9"
+            )
+            posts = await cursor.fetchall()
+        
+        if not posts:
+            await message.reply("❌ Нет доступных экспертных постов в плане")
+            await state.clear()
+            return
+        
+        # Формируем список для выбора
+        post_list = "\n".join([f"{i+1}. {post[1]}" for i, post in enumerate(posts)])
+        
+        await state.update_data(available_posts=posts)
+        
         await message.reply(
             f"✅ Видео получено ({file_size_mb:.1f} МБ)\n\n"
-            "Напишите <b>название</b> видео",
+            "🎯 <b>Выберите экспертный пост из плана:</b>\n\n"
+            f"{post_list}\n\n"
+            "Отправьте номер поста (1-9):",
             parse_mode="HTML"
         )
         
-        await state.set_state(VideoReportStates.waiting_for_title)
+        await state.set_state(VideoReportStates.waiting_for_post_selection)
     
     except Exception as e:
         logger.error(f"❌ Ошибка: {e}")
@@ -90,53 +110,72 @@ async def receive_video(message: Message, state: FSMContext, bot):
         await state.clear()
 
 
-@router.message(VideoReportStates.waiting_for_title)
-async def receive_title(message: Message, state: FSMContext):
-    """Получить название"""
+@router.message(VideoReportStates.waiting_for_post_selection)
+async def select_post(message: Message, state: FSMContext):
+    """Выбор поста из плана"""
     
-    title = message.text.strip()
+    try:
+        choice = message.text.strip()
+        
+        if not choice.isdigit():
+            await message.reply("❌ Отправьте номер поста (цифру)")
+            return
+        
+        choice_num = int(choice) - 1  # 0-based
+        
+        data = await state.get_data()
+        posts = data.get('available_posts', [])
+        
+        if choice_num < 0 or choice_num >= len(posts):
+            await message.reply(f"❌ Неверный номер. Выберите от 1 до {len(posts)}")
+            return
+        
+        selected_post = posts[choice_num]
+        post_id, post_title = selected_post
+        
+        # Получаем полный пост
+        async with db.conn.cursor() as cursor:
+            await cursor.execute(
+                "SELECT body FROM content_plan WHERE id=?",
+                (post_id,)
+            )
+            result = await cursor.fetchone()
+        
+        if not result:
+            await message.reply("❌ Пост не найден")
+            return
+        
+        post_body = result[0]
+        
+        # Обновляем статус поста
+        await db.conn.execute(
+            "UPDATE content_plan SET status='published' WHERE id=?",
+            (post_id,)
+        )
+        await db.conn.commit()
+        
+        # Сохраняем данные поста
+        await state.update_data(
+            selected_post_id=post_id,
+            selected_post_title=post_title,
+            selected_post_body=post_body
+        )
+        
+        await message.reply(
+            f"✅ <b>Выбран пост:</b> {post_title}\n\n"
+            f"<b>Описание:</b>\n{post_body}\n\n"
+            "✅ Добавится ватермарк ГЕОРИС\n"
+            "✅ Опубликуется в TG и VK\n\n"
+            "Публиковать? (Да/Нет)",
+            parse_mode="HTML"
+        )
+        
+        await state.set_state(VideoReportStates.waiting_for_confirmation)
     
-    if len(title) < 3:
-        await message.reply("❌ Название слишком короткое")
-        return
-    
-    await state.update_data(title=title)
-    
-    await message.reply(
-        f"✅ Название: <b>{title}</b>\n\n"
-        "Напишите <b>описание</b> видео",
-        parse_mode="HTML"
-    )
-    
-    await state.set_state(VideoReportStates.waiting_for_description)
-
-
-@router.message(VideoReportStates.waiting_for_description)
-async def receive_description(message: Message, state: FSMContext):
-    """Получить описание"""
-    
-    description = message.text.strip()
-    
-    if len(description) < 5:
-        await message.reply("❌ Описание слишком короткое")
-        return
-    
-    await state.update_data(description=description)
-    
-    data = await state.get_data()
-    
-    await message.reply(
-        f"📋 <b>Проверка:</b>\n\n"
-        f"Название: {data['title']}\n"
-        f"Размер: {data['file_size_mb']:.1f} МБ\n\n"
-        f"Описание: {description}\n\n"
-        "✅ Добавится ватермарк ГЕОРИС\n"
-        "✅ Опубликуется в TG и VK\n\n"
-        "Публиковать? (Да/Нет)",
-        parse_mode="HTML"
-    )
-    
-    await state.set_state(VideoReportStates.waiting_for_confirmation)
+    except Exception as e:
+        logger.error(f"❌ Ошибка выбора поста: {e}")
+        await message.reply(f"❌ Ошибка: {e}")
+        await state.clear()
 
 
 @router.message(VideoReportStates.waiting_for_confirmation, F.text.lower() == "да")
@@ -169,8 +208,8 @@ async def confirm_publish(message: Message, state: FSMContext, bot):
             VALUES (?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
-                data['title'],
-                data['description'],
+                data['selected_post_title'],
+                data['selected_post_body'],
                 output_video,
                 data['duration'],
                 data['file_size_mb'],
@@ -183,7 +222,7 @@ async def confirm_publish(message: Message, state: FSMContext, bot):
         
         # Публикуем
         publisher = VideoPublisher(bot=bot)
-        caption = f"{data['description']}\n\n#ГЕОРИС #перепланировка"
+        caption = f"{data['selected_post_body']}\n\n#ГЕОРИС #перепланировка"
         
         tg1 = await publisher.publish_to_telegram(CHANNEL_ID_GEORIS, output_video, caption, data['title'])
         tg2 = await publisher.publish_to_telegram(CHANNEL_ID_DOM_GRAD, output_video, caption, data['title'])
@@ -196,7 +235,7 @@ async def confirm_publish(message: Message, state: FSMContext, bot):
         await db.conn.commit()
         
         result = f"✅ <b>Видео опубликовано!</b>\n\n"
-        result += f"Название: {data['title']}\n"
+        result += f"Название: {data['selected_post_title']}\n"
         result += f"TG каналы: {'✅' if (tg1 or tg2) else '❌'}\n"
         
         await message.reply(result, parse_mode="HTML")
