@@ -1633,12 +1633,16 @@ async def edit_draft_start(callback: CallbackQuery, state: FSMContext):
     if not post:
         await callback.answer("❌ Пост не найден")
         return
-    await state.update_data(edit_post_id=post_id)
+    await state.update_data(
+        edit_post_id=post_id,
+        original_msg_id=callback.message.message_id  # сохраняем ID сообщения
+    )
     await state.set_state(ContentStates.edit_draft)
     await callback.message.answer(
-        f"✏️ <b>Редактирование черновика #{post_id}</b>\n\n"
-        f"Текущий текст:\n<blockquote>{post['body'][:500]}...</blockquote>\n\n"
-        f"Напишите новый текст поста (или /skip чтобы оставить текущий):",
+        f"✏️ <b>Редактирование #{post_id}</b>\n\n"
+        f"Текущий текст:\n<blockquote>{post['body'][:400]}...</blockquote>\n\n"
+        f"Напишите новый текст или укажите что изменить.\n"
+        f"Или /skip чтобы оставить без изменений:",
         parse_mode="HTML",
         reply_markup=get_back_btn()
     )
@@ -1647,20 +1651,20 @@ async def edit_draft_start(callback: CallbackQuery, state: FSMContext):
 
 @content_router.message(ContentStates.edit_draft)
 async def edit_draft_save(message: Message, state: FSMContext):
-    """Сохраняет отредактированный текст черновика."""
     data = await state.get_data()
     post_id = data.get("edit_post_id")
-
+    original_msg_id = data.get("original_msg_id")  # ID сообщения в топике 85
+    
     if message.text == "/skip":
         await state.clear()
         await message.answer("✅ Текст оставлен без изменений.", reply_markup=get_back_btn())
         return
-
+    
     new_text = ensure_quiz_and_hashtags(message.text)
     try:
         await db.update_content_plan_entry(post_id, body=new_text)
         await state.clear()
-        post = await db.get_content_post(post_id)
+        
         kb = InlineKeyboardBuilder()
         kb.button(text="📤 Во все каналы", callback_data=f"pub_all:{post_id}")
         kb.button(text="⏰ Запланировать", callback_data=f"schedule:{post_id}")
@@ -1668,14 +1672,30 @@ async def edit_draft_save(message: Message, state: FSMContext):
         kb.button(text="📘 VK", callback_data=f"pub_vk:{post_id}")
         kb.button(text="✏️ Редактировать", callback_data=f"edit_draft:{post_id}")
         kb.adjust(2)
+        
+        draft_preview = new_text[:800] + ("..." if len(new_text) > 800 else "")
+        
+        # Редактируем оригинальное сообщение в топике если есть его ID
+        if original_msg_id:
+            try:
+                await message.bot.edit_message_text(
+                    chat_id=LEADS_GROUP_CHAT_ID,
+                    message_id=original_msg_id,
+                    text=f"✏️ <b>Обновлено</b>\n\n{draft_preview}",
+                    reply_markup=kb.as_markup(),
+                    parse_mode="HTML"
+                )
+            except Exception:
+                pass
+        
         await message.answer(
-            f"✅ <b>Черновик #{post_id} обновлён!</b>\n\n{new_text[:600]}...",
-            reply_markup=kb.as_markup(),
+            f"✅ <b>Черновик #{post_id} обновлён!</b>",
+            reply_markup=get_back_btn(),
             parse_mode="HTML"
         )
     except Exception as e:
-        logger.error(f"edit_draft_save: ошибка: {e}")
-        await message.answer(f"❌ Ошибка сохранения: {e}", reply_markup=get_back_btn())
+        logger.error(f"edit_draft_save: {e}")
+        await message.answer(f"❌ Ошибка: {e}", reply_markup=get_back_btn())
 
 @content_router.callback_query(F.data.startswith("schedule_series:"))
 async def schedule_series_start(callback: CallbackQuery, state: FSMContext):
@@ -2466,6 +2486,7 @@ async def publish_all(callback: CallbackQuery, state: FSMContext):
     await callback.message.edit_text(
         f"✅ <b>Опубликовано!</b>\n\n" + "\n".join(results),
         reply_markup=get_back_btn(),
+<<<<<<< HEAD
         parse_mode="HTML"
     )
     await state.clear()
@@ -2608,6 +2629,8 @@ async def publish_all_channels(callback: CallbackQuery, state: FSMContext):
     )
     
     await state.clear()
+=======
+>>>>>>> 72b8464 (force: sync georis changes)
 
 
 @content_router.callback_query(F.data.startswith("draft:"))

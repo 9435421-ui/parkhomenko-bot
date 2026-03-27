@@ -42,6 +42,22 @@ class CreativeAgent:
             logger.error(f"Ошибка scout_topics: {e}")
             return []
 
+    async def generate_base_expert_pack(self, count: int = 9) -> List[Dict[str, str]]:
+        """Генерирует базовый экспертный пакет (9 постов) из тем агента."""
+        topics = await self.scout_topics(count=count)
+        posts = []
+        for t in topics:
+            title = t.get("title", "Экспертный пост")
+            base_body = t.get("insight", "") or f"Пост эксперта по теме: {title}."
+            posts.append({
+                "title": title,
+                "body": base_body,
+                "cta": "Запишитесь на консультацию по перепланировке", 
+                "theme": "base_expert",
+                "image_prompt": f"Экспертная обложка для темы: {title}"
+            })
+        return posts
+
     async def ideas_from_spy_leads(self, leads: list, count: int = 3, trends: list = None) -> List[Dict[str, str]]:
         """Генерирует идеи для контента на основе свежих лидов из шпиона"""
         if not leads:
