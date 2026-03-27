@@ -1,4 +1,4 @@
-# 📦 Установка TERION Content Bot
+# 📦 Установка GEORIS Content Bot
 
 ## 📁 Структура проекта
 
@@ -46,9 +46,9 @@ nano config.py
 ```
 
 ```python
-# === CONTENT BOT (TERION) ===
+# === CONTENT BOT (GEORIS) ===
 # Альтернативные названия каналов (для совместимости)
-TERION_CHANNEL_ID = CHANNEL_ID_TERION
+GEORIS_CHANNEL_ID = CHANNEL_ID_GEORIS
 DOM_GRAND_CHANNEL_ID = CHANNEL_ID_DOM_GRAD
 
 # MAX.ru (ready-to-enable)
@@ -69,7 +69,7 @@ nano .env
 ```
 
 ```env
-# Content Bot (TERION/DOM GRAND)
+# Content Bot (GEORIS/DOM GRAND)
 CONTENT_BOT_TOKEN=your_content_bot_token_here
 
 # VK
@@ -88,7 +88,7 @@ MAX_API_KEY=b5766865e14b364805c35984fd158b5e5fd5caa1b450728f252c0787aa129460
 MAX_ENABLED=false
 
 # Квиз ссылка
-VK_QUIZ_LINK=https://t.me/TERION_KvizBot?start=quiz
+VK_QUIZ_LINK=https://t.me/GEORIS_KvizBot?start=quiz
 ```
 
 ### 4. Установка зависимостей
@@ -123,11 +123,11 @@ python main.py 2>&1 | tee bot.log
 
 ## 🔧 Systemd сервис (автозапуск)
 
-**Файл:** `/etc/systemd/system/terion-bot.service`
+**Файл:** `/etc/systemd/system/georis-bot.service`
 
 ```ini
 [Unit]
-Description=TERION Content Bot
+Description=GEORIS Content Bot
 After=network.target
 
 [Service]
@@ -147,25 +147,25 @@ WantedBy=multi-user.target
 
 ```bash
 # Создать сервис
-sudo nano /etc/systemd/system/terion-bot.service
+sudo nano /etc/systemd/system/georis-bot.service
 
 # Активировать
 sudo systemctl daemon-reload
-sudo systemctl enable terion-bot
-sudo systemctl start terion-bot
+sudo systemctl enable georis-bot
+sudo systemctl start georis-bot
 
 # Проверить статус
-sudo systemctl status terion-bot
+sudo systemctl status georis-bot
 
 # Логи
-sudo journalctl -u terion-bot -f
+sudo journalctl -u georis-bot -f
 ```
 
 ---
 
 ## ✅ Проверка работы
 
-1. Отправить `/start` боту **@TERION_Content_Bot**
+1. Отправить `/start` боту **@GEORIS_Content_Bot**
 2. Должно появиться меню:
    - 📸 Фото → Описание → Пост
    - 🎨 ИИ-Визуал
@@ -189,7 +189,7 @@ sudo journalctl -u terion-bot -f
 
 ### Кнопки публикации
 
-- 🚀 **Опубликовать везде** — TG (TERION + ДОМ ГРАНД) + VK
+- 🚀 **Опубликовать везде** — TG (GEORIS + ДОМ ГРАНД) + VK
 - 📱 **Только TG** — только Telegram каналы
 - 🌐 **Только VK** — только ВКонтакте
 - 🗑 **В черновики** — сохранить в топик 85
@@ -221,10 +221,10 @@ apscheduler>=3.9.0
 
 ```bash
 # Создать сессию
-screen -S terion-bot
+screen -S georis-bot
 python main.py
 # Ctrl+A, D — отключиться
 
 # Подключиться обратно
-screen -r terion-bot
+screen -r georis-bot
 ```

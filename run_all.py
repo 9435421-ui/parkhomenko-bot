@@ -41,7 +41,7 @@ async def run_main_bot():
     dp.include_router(main_router)
     dp.include_router(content_router)
     
-    logger.info("🚀 Запуск основного бота TERION...")
+    logger.info("🚀 Запуск основного бота GEORIS...")
     
     try:
         await dp.start_polling(bot)
@@ -110,7 +110,7 @@ async def run_vk_parser():
 async def main():
     """Запуск обоих процессов."""
     logger.info("=" * 50)
-    logger.info("🎯 TERION Bot + Chat Parser")
+    logger.info("🎯 GEORIS Bot + Chat Parser")
     logger.info("=" * 50)
     
     # Запускаем все процессы параллельно

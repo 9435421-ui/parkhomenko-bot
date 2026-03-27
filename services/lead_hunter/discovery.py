@@ -7,7 +7,7 @@ logger = logging.getLogger(__name__)
 
 class Discovery:
     """
-    Discovery — поиск новых источников (групп VK) для ТЕРИОН.
+    Discovery — поиск новых источников (групп VK) для ГЕОРИС.
     """
     def __init__(self, vk_token: str = None):
         # Загружаем VK_TOKEN из config, если не передан параметром

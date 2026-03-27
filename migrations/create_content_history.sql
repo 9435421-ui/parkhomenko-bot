@@ -9,7 +9,7 @@ CREATE TABLE IF NOT EXISTS content_history (
     model_used VARCHAR(50),       -- Nano Banana / Yandex ART
     cost_rub DECIMAL(10, 2),      -- Для финансового отчета
     platform VARCHAR(20),         -- TG или VK
-    channel VARCHAR(50),          -- TERION, DOM_GRAD, VK
+    channel VARCHAR(50),          -- GEORIS, DOM_GRAD, VK
     post_id INTEGER,              -- Ссылка на original post
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, -- Для очистки
     is_archived BOOLEAN DEFAULT FALSE -- Пометка для статистики

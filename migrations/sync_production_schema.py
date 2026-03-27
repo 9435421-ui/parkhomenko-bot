@@ -211,7 +211,7 @@ def migrate_database(db_path: str = None):
             columns = get_table_columns(cursor, 'content_plan')
             
             if 'channel' not in columns:
-                cursor.execute("ALTER TABLE content_plan ADD COLUMN channel TEXT DEFAULT 'terion'")
+                cursor.execute("ALTER TABLE content_plan ADD COLUMN channel TEXT DEFAULT 'georis'")
                 logger.info("✅ Added channel column to content_plan")
             
             if 'theme' not in columns:

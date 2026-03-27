@@ -66,7 +66,7 @@ class VKPublisher:
         if not quiz_link:
             quiz_link = "https://vk.com/app51781232" # Дефолтная ссылка на квиз ВК
         if not consult_link:
-            consult_link = "https://t.me/terion_bot?start=consult"
+            consult_link = "https://t.me/georis_bot?start=consult"
         
         buttons = {
             "inline": True,

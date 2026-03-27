@@ -13,7 +13,7 @@ class Publisher:
     def __init__(self, bot: Bot = None):
         self.bot = bot
         self.tg_channels = {
-            'terion': int(os.getenv('CHANNEL_ID_GEORIS', 0)),
+            'georis': int(os.getenv('CHANNEL_ID_GEORIS', 0)),
             'dom_grad': int(os.getenv('CHANNEL_ID_DOM_GRAD', 0))
         }
         self.vk_token = os.getenv('VK_TOKEN')
@@ -41,7 +41,7 @@ class Publisher:
             return False
     
     # Подпись эксперта для VK
-    VK_SIGNATURE = "\n\n---\nАнтон, ИИ-ассистент компании TERION\n#TERION #перепланировка"
+    VK_SIGNATURE = "\n\n---\nАнтон, ИИ-ассистент компании GEORIS\n#GEORIS #перепланировка"
     
     async def publish_to_vk(self, text: str, image: bytes = None, add_signature: bool = True, keyboard: str = None) -> bool:
         """Публикация в VK группу через API"""
@@ -135,8 +135,8 @@ class Publisher:
             return None
     
     def format_max_post(self, text: str, title: str = "", lead_id: int = None) -> str:
-        """Форматирование поста для MAX в стиле TERION."""
-        header = f"# {title or 'Инсайт TERION'}\n\n"
+        """Форматирование поста для MAX в стиле GEORIS."""
+        header = f"# {title or 'Инсайт GEORIS'}\n\n"
         
         # Очистка текста от HTML тегов aiogram для чистого Markdown в MAX
         import re
@@ -145,14 +145,14 @@ class Publisher:
         body = f"{clean_text}\n\n"
         
         footer = "---\n"
-        footer += "Антон, ИИ-ассистент компании TERION\n"
+        footer += "Антон, ИИ-ассистент компании GEORIS\n"
         if lead_id:
             footer += f"📎 ID кейса: {lead_id}\n"
         
         return f"{header}{body}{footer}"
 
     async def publish_to_max(self, text: str, title: str = "", is_raw: bool = False) -> bool:
-        """Публикация в Max.ru с форматированием TERION."""
+        """Публикация в Max.ru с форматированием GEORIS."""
         device_token = os.getenv("MAX_DEVICE_TOKEN", "").strip()
         subsite_id = os.getenv("MAX_SUBSITE_ID", "").strip()
         
@@ -171,7 +171,7 @@ class Publisher:
         }
         
         payload = {
-            "title": (title or "Инсайт TERION")[:200],
+            "title": (title or "Инсайт GEORIS")[:200],
             "body": final_body[:5000],
             "type": "post"
         }

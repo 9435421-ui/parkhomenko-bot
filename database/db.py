@@ -122,7 +122,7 @@ class Database:
                 CREATE TABLE IF NOT EXISTS content_plan (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     type TEXT NOT NULL,
-                    channel TEXT DEFAULT 'terion',
+                    channel TEXT DEFAULT 'georis',
                     title TEXT,
                     body TEXT NOT NULL,
                     cta TEXT,
@@ -832,7 +832,7 @@ class Database:
             await self.conn.commit()
 
     async def save_post(self, post_type: str, title: str, body: str, cta: str, publish_date: datetime,
-                       channel: str = 'terion', theme: Optional[str] = None, 
+                       channel: str = 'georis', theme: Optional[str] = None, 
                        image_url: Optional[str] = None, admin_id: Optional[int] = None,
                        status: str = 'draft') -> int:
         """Сохранить пост в контент-план"""

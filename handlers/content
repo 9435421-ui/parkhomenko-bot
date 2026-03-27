@@ -47,7 +47,7 @@ def get_back_btn():
 def get_publish_btns(post_id: int):
     """Кнопки публикации"""
     builder = InlineKeyboardBuilder()
-    builder.add(InlineKeyboardButton(text="📤 TERION", callback_data=f"publish_terion_{post_id}"))
+    builder.add(InlineKeyboardButton(text="📤 GEORIS", callback_data=f"publish_georis_{post_id}"))
     builder.add(InlineKeyboardButton(text="📤 ДОМ ГРАНД", callback_data=f"publish_dom_{post_id}"))
     builder.add(InlineKeyboardButton(text="📤 ВК", callback_data=f"publish_vk_{post_id}"))
     builder.add(InlineKeyboardButton(text="◀️ В меню", callback_data="content_back"))
@@ -318,7 +318,7 @@ async def handle_publish(callback: CallbackQuery, state: FSMContext):
         await callback.answer("Пост не найден!")
         return
     
-    channel_id = CHANNEL_ID if channel == "terion" else DOM_GRAND_CHANNEL_ID
+    channel_id = CHANNEL_ID if channel == "georis" else DOM_GRAND_CHANNEL_ID
     
     try:
         if post.get("image_url"):

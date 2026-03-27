@@ -70,7 +70,7 @@ async def process_changes(message: Message, state: FSMContext):
         logger.error(f"Failed to send invest report to admin: {e}")
 
     await message.answer(
-        "✅ Данные приняты. Специалист компании TERION свяжется с вами в ближайшее время для уточнения деталей и консультации.",
+        "✅ Данные приняты. Специалист компании GEORIS свяжется с вами в ближайшее время для уточнения деталей и консультации.",
         parse_mode="HTML"
     )
     await state.clear()

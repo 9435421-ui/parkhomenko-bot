@@ -7,7 +7,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 # === TELEGRAM BOT TOKENS ===
-BOT_TOKEN = os.getenv("BOT_TOKEN")  # ТЕРИОН (Антон)
+BOT_TOKEN = os.getenv("BOT_TOKEN")  # ГЕОРИС (Антон)
 CONTENT_BOT_TOKEN = os.getenv("CONTENT_BOT_TOKEN")  # ДОМ ГРАНД
 
 # === TELETHON CREDENTIALS (for Chat Parsing) ===

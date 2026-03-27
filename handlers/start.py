@@ -23,12 +23,12 @@ logger = logging.getLogger(__name__)
 router = Router()
 
 GREETING_TEXT = (
-    "🏢 <b>Вас приветствует компания ТЕРИОН!</b>\n\n"
+    "🏢 <b>Вас приветствует компания ГЕОРИС!</b>\n\n"
     "Я — Антон, ваш ИИ-помощник по перепланировкам.\n\n"
     "Нажимая кнопку ниже, вы даёте согласие на обработку "
     "персональных данных, получение уведомлений и информационную переписку.\n\n"
     "📞 Все консультации носят информационный характер, "
-    "финальное решение подтверждает эксперт ТЕРИОН."
+    "финальное решение подтверждает эксперт ГЕОРИС."
 )
 
 
@@ -58,7 +58,7 @@ async def handle_start(message: Message, state: FSMContext):
 
     await state.clear()
     
-    # Ссылка из канала/поста: t.me/terion_bot?start=quiz → сразу начинаем квиз (Бриф)
+    # Ссылка из канала/поста: t.me/georis_bot?start=quiz → сразу начинаем квиз (Бриф)
     if start_arg == "quiz":
         await state.set_state(QuizStates.consent_pdp)
         from handlers.quiz import get_consent_keyboard
@@ -83,7 +83,7 @@ async def handle_start(message: Message, state: FSMContext):
             if len(lead.get("text") or "") > 150:
                 pain += "…"
             await message.answer(
-                "🏢 <b>Вас приветствует компания ТЕРИОН!</b>\n\n"
+                "🏢 <b>Вас приветствует компания ГЕОРИС!</b>\n\n"
                 f"Мы заметили ваш вопрос в <b>{source}</b> про перепланировку. "
                 "Готовы подсказать по согласованию и документам — бесплатно ответим на первые вопросы.\n\n"
                 "Напишите, что именно хотите сделать с объектом (квартира/дом), и мы подскажем с чего начать.",
@@ -130,7 +130,7 @@ async def content_back_handler(callback: CallbackQuery, state: FSMContext):
     if is_admin(callback.from_user.id):
         await callback.message.edit_text(
             "🎯 <b>Главное меню</b>\n\n"
-            "🛠 Создать пост — Текст / Фото / ИИ-Визуал → публикация TERION, ДОМ ГРАНД, MAX\n"
+            "🛠 Создать пост — Текст / Фото / ИИ-Визуал → публикация GEORIS, ДОМ ГРАНД, MAX\n"
             "🕵️‍♂️ Темы от Шпиона\n"
             "📅 Очередь постов\n\n"
             "Выберите кнопку ниже:"
@@ -199,7 +199,7 @@ async def create_post_from_topic_handler(callback: CallbackQuery, state: FSMCont
         title=title,
         body=body,
         cta="Записаться на консультацию",
-        channel="terion",
+        channel="georis",
         status="draft",
     )
     await callback.answer(f"📋 Сохранено в черновики #{post_id}")
@@ -228,7 +228,7 @@ async def topic_to_draft_handler(callback: CallbackQuery, state: FSMContext):
         title=title,
         body=body,
         cta="Записаться на консультацию",
-        channel="terion",
+        channel="georis",
         status="draft",
     )
     await callback.answer(f"📋 Сохранено #{post_id}")
@@ -341,7 +341,7 @@ async def queue_publish_handler(callback: CallbackQuery, state: FSMContext):
         return
     title = (post.get("title") or "").strip()
     body = (post.get("body") or "").strip()
-    text = f"📌 <b>{title}</b>\n\n{body}\n\n#перепланировка #согласование #терион" if title else body + "\n\n#перепланировка #согласование #терион"
+    text = f"📌 <b>{title}</b>\n\n{body}\n\n#перепланировка #согласование #георис" if title else body + "\n\n#перепланировка #согласование #георис"
     await callback.answer("📤 Публикую...")
     results = await publisher.publish_all(text, image_bytes=None)
     await db.mark_as_published(post_id)

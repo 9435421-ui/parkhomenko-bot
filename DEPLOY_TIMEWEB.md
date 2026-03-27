@@ -1,4 +1,4 @@
-# Деплой бота ТЕРИОН на сервер Таймвеб
+# Деплой бота ГЕОРИС на сервер Таймвеб
 
 Краткая инструкция по развёртыванию на VPS/облачном сервере [Таймвеб](https://timeweb.com).
 
@@ -113,7 +113,7 @@ nano /etc/systemd/system/anton_bot.service
 
 ```ini
 [Unit]
-Description=TERION Bot - Telegram Bot (Антон + ДОМ ГРАНД)
+Description=GEORIS Bot - Telegram Bot (Антон + ДОМ ГРАНД)
 After=network.target
 
 [Service]

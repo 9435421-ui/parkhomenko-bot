@@ -6,12 +6,12 @@
     python scripts/seed_base_expert_pack.py
 
 Генерирует 9 постов с фокусом на:
-- Доверие (экспертность Юлии, опыт TERION)
+- Доверие (экспертность Юлии, опыт GEORIS)
 - Кейсы (московские ЖК: Зиларт, Династия, Символ)
 - Регуляции 2026 года (новые правила, изменения в законодательстве)
 
 Все посты сохраняются в content_plan со статусом 'approved' и готовы к публикации.
-Канал: TERION (корпоративный стиль).
+Канал: GEORIS (корпоративный стиль).
 """
 import asyncio
 import sys
@@ -26,7 +26,7 @@ from database.db import Database
 
 async def seed():
     """Генерирует и сохраняет Base Expert Pack (9 постов) в контент-план."""
-    print("🚀 Запуск генерации базового пакета ТЕРИОН...")
+    print("🚀 Запуск генерации базового пакета ГЕОРИС...")
     
     # Инициализируем агента и БД
     agent = CreativeAgent()
@@ -64,7 +64,7 @@ async def seed():
                     body=body,
                     cta=cta,
                     publish_date=publish_date,
-                    channel="terion",  # Корпоративный стиль TERION
+                    channel="georis",  # Корпоративный стиль GEORIS
                     theme=theme,
                     image_url=None,  # Изображение будет сгенерировано при публикации из image_prompt
                     status="approved"

@@ -55,7 +55,7 @@
 
 ### Структура проекта:
 ```
-TERION_BOT/
+GEORIS_BOT/
 ├── bot_unified.py          # Основной файл бота
 ├── main.py                 # Точка входа
 ├── config.py               # Конфигурация

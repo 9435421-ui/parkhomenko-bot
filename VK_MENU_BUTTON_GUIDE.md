@@ -4,7 +4,7 @@
 
 Используйте прямую ссылку на квиз:
 ```
-https://t.me/TERION_KvizBot?start=quiz
+https://t.me/GEORIS_KvizBot?start=quiz
 ```
 
 ## Шаг 2: Перейдите в настройки сообщества
@@ -21,7 +21,7 @@ https://t.me/TERION_KvizBot?start=quiz
 2. Нажмите **"Редактировать"**
 3. В поле **"Ссылка"** вставьте:
    ```
-   https://t.me/TERION_KvizBot?start=quiz
+   https://t.me/GEORIS_KvizBot?start=quiz
    ```
 4. Нажмите **"Сохранить"**
 
@@ -31,7 +31,7 @@ https://t.me/TERION_KvizBot?start=quiz
 2. Заполните поля:
    - **Название**: "📝 Записаться на квиз"
    - **Тип**: "Открыть ссылку"
-   - **Ссылка**: `https://t.me/TERION_KvizBot?start=quiz`
+   - **Ссылка**: `https://t.me/GEORIS_KvizBot?start=quiz`
 3. Нажмите **"Добавить"**
 
 ## Шаг 4: Проверка
@@ -64,7 +64,7 @@ https://t.me/TERION_KvizBot?start=quiz
 
 Для отслеживания трафика из ВК:
 ```
-https://t.me/TERION_KvizBot?start=quiz&utm_source=vk&utm_medium=menu&utm_campaign=quiz
+https://t.me/GEORIS_KvizBot?start=quiz&utm_source=vk&utm_medium=menu&utm_campaign=quiz
 ```
 
 ## ❓ Проблемы и решения

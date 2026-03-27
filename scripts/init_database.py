@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Скрипт инициализации базы данных TERION.
+Скрипт инициализации базы данных GEORIS.
 Удаляет старую базу и создает новую с правильной структурой.
 """
 import asyncio
@@ -46,7 +46,7 @@ async def init_database():
             
             await main_db.conn.commit()
         
-        print('✅ База TERION инициализирована!')
+        print('✅ База GEORIS инициализирована!')
         print('✅ Таблица target_resources создана')
         print('✅ Добавлены стартовые чаты: ПИК Соседи, Самолет Live')
         

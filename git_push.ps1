@@ -1,4 +1,4 @@
-# Git Push Script для TERION Bot
+# Git Push Script для GEORIS Bot
 # Автоматически удаляет lock файл, добавляет изменения, коммитит и пушит
 
 Write-Host "========================================" -ForegroundColor Cyan

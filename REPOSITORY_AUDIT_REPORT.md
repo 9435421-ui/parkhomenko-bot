@@ -1,8 +1,8 @@
-# Repository Audit Report: TERION Lead Hunting System
+# Repository Audit Report: GEORIS Lead Hunting System
 
 **Date:** February 17, 2026  
 **Auditor:** Technical Lead / AI Assistant  
-**Project:** TERION Bot (Anton AI Assistant)
+**Project:** GEORIS Bot (Anton AI Assistant)
 
 ---
 

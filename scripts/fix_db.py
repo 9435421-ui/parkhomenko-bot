@@ -107,8 +107,8 @@ async def main():
     possible_paths = [
         "parkhomenko_bot.db",
         "database/bot.db",
-        "database/terion.db",
-        "terion.db",
+        "database/georis.db",
+        "georis.db",
         "bot.db"
     ]
     

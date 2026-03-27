@@ -6,7 +6,7 @@
 
 PATCH_FILE = "/root/PARKHOMENKO_BOT/handlers/content_bot.py"
 OLD_QUEUE_KB = '''    builder.button(text="📤 Во все каналы", callback_data=f"pub_all:{post_id}")
-    builder.button(text="🚀 TERION", callback_data=f"pub_terion:{post_id}")
+    builder.button(text="🚀 GEORIS", callback_data=f"pub_georis:{post_id}")
     builder.button(text="🏘 ДОМ ГРАНД", callback_data=f"pub_dom_grnd:{post_id}")
     builder.button(text="📱 MAX", callback_data=f"pub_max:{post_id}")
     builder.button(text="🌐 VK", callback_data=f"pub_vk:{post_id}")
@@ -15,7 +15,7 @@ OLD_QUEUE_KB = '''    builder.button(text="📤 Во все каналы", callb
     return builder.as_markup()'''
 
 NEW_QUEUE_KB = '''    builder.button(text="📤 Во все каналы", callback_data=f"pub_all:{post_id}")
-    builder.button(text="🚀 TERION", callback_data=f"pub_terion:{post_id}")
+    builder.button(text="🚀 GEORIS", callback_data=f"pub_georis:{post_id}")
     builder.button(text="🏘 ДОМ ГРАНД", callback_data=f"pub_dom_grnd:{post_id}")
     builder.button(text="📱 MAX", callback_data=f"pub_max:{post_id}")
     builder.button(text="🌐 VK", callback_data=f"pub_vk:{post_id}")

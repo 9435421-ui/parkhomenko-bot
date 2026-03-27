@@ -120,12 +120,12 @@ if not data or not response:
 **Изменения:**
 ```python
 # Было:
-await callback.bot.send_photo(CHANNEL_ID_TERION, photo, caption=text)
+await callback.bot.send_photo(CHANNEL_ID_GEORIS, photo, caption=text)
 
 # Стало:
 from services.publisher import publisher
 publisher.bot = callback.bot
-await publisher.publish_to_telegram(CHANNEL_ID_TERION, text, image_bytes)
+await publisher.publish_to_telegram(CHANNEL_ID_GEORIS, text, image_bytes)
 ```
 
 #### Восстановление цепочки для визуалов
@@ -159,18 +159,18 @@ saved_prompt = state_data.get("visual_prompt", topic)
 **Проблема:** Использовал `os.getenv` вместо `config.py`, публиковал во все каналы вместо целевого.
 
 **Решение:**
-- Переведен на использование `config.py` для получения `CHANNEL_ID_TERION`, `CHANNEL_ID_DOM_GRAD`, `CHANNEL_NAMES`
-- Реализована корректная отправка в целевой канал (TERION или ДОМ ГРАНД) вместо рассылки "всем подряд"
+- Переведен на использование `config.py` для получения `CHANNEL_ID_GEORIS`, `CHANNEL_ID_DOM_GRAD`, `CHANNEL_NAMES`
+- Реализована корректная отправка в целевой канал (GEORIS или ДОМ ГРАНД) вместо рассылки "всем подряд"
 - **Файл:** `auto_poster.py` (строки 90-102, 104-132)
 
 **Изменения:**
 ```python
 # Было:
-'chat_id': int(os.getenv("TERION_CHANNEL_ID", "-1003612599428"))
+'chat_id': int(os.getenv("GEORIS_CHANNEL_ID", "-1003612599428"))
 
 # Стало:
-from config import CHANNEL_ID_TERION, CHANNEL_ID_DOM_GRAD, CHANNEL_NAMES
-'chat_id': CHANNEL_ID_TERION
+from config import CHANNEL_ID_GEORIS, CHANNEL_ID_DOM_GRAD, CHANNEL_NAMES
+'chat_id': CHANNEL_ID_GEORIS
 
 # Публикация в целевой канал:
 success = await publisher.publish_to_telegram(channel_id, text, image_bytes)
@@ -260,7 +260,7 @@ if col not in column_names:
 
 ### AutoPoster:
 1. Добавить пост в контент-план
-2. Проверить, что публикация идет в правильный канал (TERION или ДОМ ГРАНД)
+2. Проверить, что публикация идет в правильный канал (GEORIS или ДОМ ГРАНД)
 
 ### DB Migration:
 1. Запустить бота - миграции выполнятся автоматически

@@ -1,5 +1,5 @@
 [Unit]
-Description=TERION Bot (Антон + контент, квиз, шпион)
+Description=GEORIS Bot (Антон + контент, квиз, шпион)
 After=network.target
 
 [Service]

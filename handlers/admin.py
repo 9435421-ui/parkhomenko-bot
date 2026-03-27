@@ -100,7 +100,7 @@ async def start_interview(callback: CallbackQuery, state: FSMContext):
     await callback.message.answer(
         "🎙 <b>Режим Интервью активирован.</b>\n\n"
         "Юлия, запишите голосовое сообщение с вашей мыслью или новостью. "
-        "Я расшифрую его, структурирую и подготовлю варианты постов для ТЕРИОН или Дом Гранд.",
+        "Я расшифрую его, структурирую и подготовлю варианты постов для ГЕОРИС или Дом Гранд.",
         parse_mode="HTML"
     )
     await state.set_state(AdminStates.waiting_for_voice)

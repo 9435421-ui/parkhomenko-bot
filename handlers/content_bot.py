@@ -1,5 +1,5 @@
 """
-Content Handler — TERION Ecosystem (RouterAI + YandexART Edition)
+Content Handler — GEORIS Ecosystem (RouterAI + YandexART Edition)
 TG + VK публикация, AI-генерация контента, квиз-интеграция
 """
 from aiogram import Router, F, Bot
@@ -150,7 +150,7 @@ def _load_content_template(filename: str, default: str) -> str:
 
 def _get_expert_signature() -> str:
     """Подпись эксперта для постов (из signature.txt или дефолт)."""
-    default = "\n\n---\n🏡 Эксперт: Юлия Пархоменко\nКомпания: TERION"
+    default = "\n\n---\n🏡 Эксперт: Юлия Пархоменко\nКомпания: GEORIS"
     return _load_content_template("signature.txt", default).rstrip("\n") or default
 
 
@@ -536,7 +536,7 @@ class VKPublisher:
         if not quiz_link:
             quiz_link = VK_QUIZ_LINK
         if not consult_link:
-            consult_link = "https://t.me/terion_bot?start=consult"
+            consult_link = "https://t.me/georis_bot?start=consult"
         
         buttons = {
             "inline": True,
@@ -597,7 +597,7 @@ def get_main_menu() -> ReplyKeyboardMarkup:
 def get_preview_keyboard(post_id: int, has_image: bool = False) -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
     builder.button(text="📤 Во все каналы", callback_data=f"pub_all:{post_id}")
-    builder.button(text="🚀 TERION", callback_data=f"pub_terion:{post_id}")
+    builder.button(text="🚀 GEORIS", callback_data=f"pub_georis:{post_id}")
     builder.button(text="🏘 ДОМ ГРАНД", callback_data=f"pub_dom_grnd:{post_id}")
     builder.button(text="📱 MAX", callback_data=f"pub_max:{post_id}")
     builder.button(text="🌐 VK", callback_data=f"pub_vk:{post_id}")
@@ -609,10 +609,10 @@ def get_preview_keyboard(post_id: int, has_image: bool = False) -> InlineKeyboar
 
 
 def get_queue_keyboard(post_id: int) -> InlineKeyboardMarkup:
-    """Кнопки для черновиков в рабочей группе: TERION, ДОМ ГРАНД, MAX, VK, Во все каналы."""
+    """Кнопки для черновиков в рабочей группе: GEORIS, ДОМ ГРАНД, MAX, VK, Во все каналы."""
     builder = InlineKeyboardBuilder()
     builder.button(text="📤 Во все каналы", callback_data=f"pub_all:{post_id}")
-    builder.button(text="🚀 TERION", callback_data=f"pub_terion:{post_id}")
+    builder.button(text="🚀 GEORIS", callback_data=f"pub_georis:{post_id}")
     builder.button(text="🏘 ДОМ ГРАНД", callback_data=f"pub_dom_grnd:{post_id}")
     builder.button(text="📱 MAX", callback_data=f"pub_max:{post_id}")
     builder.button(text="🌐 VK", callback_data=f"pub_vk:{post_id}")
@@ -827,12 +827,12 @@ async def process_photo(message: Message, state: FSMContext):
     image_b64 = base64.b64encode(compressed).decode()
     
     prompt = (
-        "Ты — ведущий эксперт TERION по перепланировке квартир в Москве.\n\n"
+        "Ты — ведущий эксперт GEORIS по перепланировке квартир в Москве.\n\n"
         "Задача: проанализируй фото и напиши готовый экспертный пост для Telegram.\n\n"
         "1. Определи что на фото: интерьер, планировка, ремонт, демонтаж\n"
         "2. Напиши экспертный пост 150-200 слов\n"
         "3. Используй термины по смыслу: МЖИ, трассировка, СНиП\n"
-        "4. В конце: призыв обратиться в TERION на консультацию\n"
+        "4. В конце: призыв обратиться в GEORIS на консультацию\n"
         "5. Эмодзи 3-5 штук\n"
         "6. НЕ вставляй ссылки — только текст"
     )
@@ -848,11 +848,11 @@ async def process_photo(message: Message, state: FSMContext):
             f"• Юридическое оформление\n\n"
             f"Все работы — только с разрешения и под контролем специалистов.\n\n"
             f"📍 <a href='{VK_QUIZ_LINK}'>Пройти квиз</a>\n"
-            f"#перепланировка #терион"
+            f"#перепланировка #георис"
         )
     
     if VK_QUIZ_LINK not in description:
-        description += f"\n\n📍 <a href='{VK_QUIZ_LINK}'>Пройти квиз</a> @terion_bot\n#TERION #перепланировка #москва"
+        description += f"\n\n📍 <a href='{VK_QUIZ_LINK}'>Пройти квиз</a> @georis_bot\n#GEORIS #перепланировка #москва"
     
     post_id = await db.add_content_post(
         title=f"Фото-анализ: экспертный пост",
@@ -988,7 +988,7 @@ async def art_to_post_handler(callback: CallbackQuery, state: FSMContext):
     actual_topic = saved_prompt if saved_prompt else topic
 
     prompt = (
-        f"Напиши экспертный пост для Telegram-канала по перепланировкам (TERION).\n\n"
+        f"Напиши экспертный пост для Telegram-канала по перепланировкам (GEORIS).\n\n"
         f"Тема изображения: «{actual_topic}»\n\n"
         f"Структура:\n"
         f"1) Цепляющий заголовок с эмодзи\n"
@@ -1047,7 +1047,7 @@ async def art_to_post_handler(callback: CallbackQuery, state: FSMContext):
 async def series_start(message: Message, state: FSMContext):
     await message.answer(
         "✨ <b>Креатив — Тренды</b>\n\n"
-        "Введите тему — я найду актуальные тренды и адаптирую под TERION:\n\n"
+        "Введите тему — я найду актуальные тренды и адаптирую под GEORIS:\n\n"
         "Примеры:\n"
         "• <code>перепланировка квартиры</code>\n"
         "• <code>маленькие квартиры</code>\n"
@@ -1083,7 +1083,7 @@ async def ai_series_handler(message: Message, state: FSMContext):
             import json, re
             analysis = await router_ai.generate_response(
                 user_prompt=(
-                    f"Тема: {topic}. TERION - перепланировка квартир в Москве. "
+                    f"Тема: {topic}. GEORIS - перепланировка квартир в Москве. "
                     f"Предложи количество трендовых постов (5-10) и форматы. "
                     '{"days": 7, "formats": ["до/после", "миф", "кейс"]}'
                 ),
@@ -1107,7 +1107,7 @@ async def ai_series_handler(message: Message, state: FSMContext):
     if kb_content:
         cases_content = kb_content + "\n\n" + cases_content
     prompt_default = (
-        "Роль: Контент-стратег TERION (перепланировка квартир в Москве).\n"
+        "Роль: Контент-стратег GEORIS (перепланировка квартир в Москве).\n"
         "Задача: создай {days} трендовых постов по теме «{topic}» для Telegram-канала.\n\n"
         "ТРЕНДЫ 2025 в контенте про недвижимость и ремонт:\n"
         "- Формат 'до/после' с конкретными цифрами (было 32м², стало 45м² по ощущению)\n"
@@ -1120,7 +1120,7 @@ async def ai_series_handler(message: Message, state: FSMContext):
         "Формат КАЖДОГО дня:\n"
         "День N | [тип тренда]\n"
         "Текст 150-200 слов, живой язык, эмодзи 3-5 штук.\n"
-        "В конце: призыв в TERION на консультацию.\n"
+        "В конце: призыв в GEORIS на консультацию.\n"
         "БЕЗ клише 'уникальный', 'профессиональный подход', 'за 3 дня'."
     )
     prompt_tpl = _load_content_template("series_warmup_prompt.txt", prompt_default)
@@ -1190,7 +1190,7 @@ async def ai_series_handler(message: Message, state: FSMContext):
                 format_sample = ["до/после", "миф", "кейс", "вопрос", "факт", "совет"][i % 6]
                 day_text = await router_ai.generate_response(
                     user_prompt=(
-                        f"Напиши готовый Telegram-пост для компании TERION (перепланировка квартир в Москве).\n"
+                        f"Напиши готовый Telegram-пост для компании GEORIS (перепланировка квартир в Москве).\n"
                         f"Тема: {topic}. День {i}/{days}. Формат: {format_sample}.\n"
                         f"Требования: 150-200 слов, живой язык, эмодзи 3-5 штук, в конце призыв на консультацию. "
                         f"БЕЗ пояснений, только готовый пост."
@@ -1279,7 +1279,7 @@ async def ai_series_handler(message: Message, state: FSMContext):
 # === 📋 КОНТЕНТ-ПЛАН ===
 
 _PLAN_SYSTEM = (
-    "Ты — контент-стратег компании TERION (перепланировки квартир в Москве).\n"
+    "Ты — контент-стратег компании GEORIS (перепланировки квартир в Москве).\n"
     "Создай редакционный контент-план для Telegram-канала. Требования:\n"
     "— Для каждого дня: тип поста, заголовок/тема, ключевое сообщение (1 предложение), формат (текст / фото / карусель / видео)\n"
     "— Чередуй форматы: экспертный пост, живая история клиента, интересный факт, вопрос аудитории, новость/тренд\n"
@@ -1333,7 +1333,7 @@ async def ai_plan_handler(message: Message, state: FSMContext):
         await message.answer(f"🔍 <b>Анализирую тему...</b>", parse_mode="HTML")
 
         analysis_prompt = (
-            f"Ты — контент-стратег компании TERION (перепланировка квартир в Москве).\n"
+            f"Ты — контент-стратег компании GEORIS (перепланировка квартир в Москве).\n"
             f"Пользователь хочет создать серию постов на тему: «{topic}»\n\n"
             f"Задача: предложи оптимальную структуру контент-плана.\n"
             f"Ответь СТРОГО в формате JSON без пояснений:\n"
@@ -1383,7 +1383,7 @@ async def ai_plan_handler(message: Message, state: FSMContext):
         await message.answer(f"⏳ <b>Составляю контент-план на {days} дней...</b>", parse_mode="HTML")
 
     user_prompt = (
-        f"Составь контент-план на {days} дней для Telegram-канала TERION.\n"
+        f"Составь контент-план на {days} дней для Telegram-канала GEORIS.\n"
         f"Тема: «{topic}»\n"
         f"Аудитория: владельцы квартир в Москве, которые думают о перепланировке или уже начали её."
     )
@@ -1513,7 +1513,7 @@ async def create_plan_posts(callback: CallbackQuery, state: FSMContext):
         day_idea = day_info.get("idea", "") if day_info else ""
         day_format = day_info.get("format", post_format) if day_info else post_format
         post_prompt = (
-            f"Напиши готовый пост для Telegram-канала компании TERION (перепланировка квартир в Москве).\n"
+            f"Напиши готовый пост для Telegram-канала компании GEORIS (перепланировка квартир в Москве).\n"
             f"Тема: {topic}. День {i} из {days}.\n"
             + (f"Заголовок поста: {day_title}\n" if day_title else "")
             + (f"Идея: {day_idea}\n" if day_idea else "")
@@ -1522,7 +1522,7 @@ async def create_plan_posts(callback: CallbackQuery, state: FSMContext):
             "1. Объём: 200-250 слов, текст полный и законченный\n"
             "2. Начни с цепляющего первого предложения\n"
             f"3. Раскрой тему через формат '{day_format}' — включая все детали из идеи\n"
-            "4. В конце ОБЯЗАТЕЛЬНО: призыв записаться на консультацию в TERION. НЕ вставляй ссылки — только текст\n"
+            "4. В конце ОБЯЗАТЕЛЬНО: призыв записаться на консультацию в GEORIS. НЕ вставляй ссылки — только текст\n"
             "5. Тон: экспертный, дружелюбный, живой\n"
             "6. Эмодзи — 3-5 штук по смыслу\n"
             "7. НЕ пиши заголовок отдельно — начинай сразу с текста поста"
@@ -1749,7 +1749,7 @@ _NEWS_CATEGORIES = {
 }
 
 _NEWS_SYSTEM = (
-    "Ты — контент-редактор компании TERION, специализирующейся на перепланировках квартир в Москве.\n"
+    "Ты — контент-редактор компании GEORIS, специализирующейся на перепланировках квартир в Москве.\n"
     "Пиши экспертный информационный пост на заданную тему. Требования:\n"
     "— Структура: яркий заголовок → суть → что это значит для москвичей → лёгкий призыв к действию\n"
     "— Объём: 150-200 слов\n"
@@ -1771,7 +1771,7 @@ async def _generate_news_by_topic(message_or_callback, state: FSMContext, topic:
         await message_or_callback.answer("🔍 <b>Пишу новость...</b>", parse_mode="HTML")
         target = message_or_callback
 
-    user_prompt = f"Напиши информационный пост для Telegram-канала TERION на тему: «{topic}»."
+    user_prompt = f"Напиши информационный пост для Telegram-канала GEORIS на тему: «{topic}»."
     if hint:
         user_prompt += f"\nАкцент: {hint}"
 
@@ -1891,7 +1891,7 @@ async def holiday_rf_start(message: Message, state: FSMContext):
 
 
 _HOLIDAY_SYSTEM = (
-    "Ты — голос бренда TERION (перепланировки квартир в Москве).\n"
+    "Ты — голос бренда GEORIS (перепланировки квартир в Москве).\n"
     "Напиши тёплое праздничное поздравление для Telegram-канала. Требования:\n"
     "— Начни с яркого поздравления, создай праздничное настроение\n"
     "— Свяжи праздник с темой дома, уюта, семьи или пространства — органично, без натяжки\n"
@@ -1912,7 +1912,7 @@ async def holiday_rf_selected(callback: CallbackQuery, state: FSMContext):
     await callback.message.edit_text(f"⏳ <b>Пишу поздравление с {label}...</b>", parse_mode="HTML")
     try:
         user_prompt = (
-            f"Напиши поздравление с праздником «{occasion}» для подписчиков Telegram-канала TERION."
+            f"Напиши поздравление с праздником «{occasion}» для подписчиков Telegram-канала GEORIS."
         )
         body = None
         error_message = None
@@ -2008,7 +2008,7 @@ _FACT_SYSTEM = (
     "• Начни с неожиданного факта, вопроса или цифры — сразу цепляй\n"
     "• Лёгкий, разговорный тон — без канцелярита и инструкций\n"
     "• Эмодзи уместно, не перегружай\n"
-    "• Если тема близка к ремонту — в конце одно предложение-намёк на TERION (без навязывания)\n\n"
+    "• Если тема близка к ремонту — в конце одно предложение-намёк на GEORIS (без навязывания)\n\n"
     "СТРОГО ЗАПРЕЩЕНО:\n"
     "• Писать процедуры, требования, шаги согласования\n"
     "• Принудительно вставлять: МЖИ, СНиП, трассировка, акты скрытых работ — только если сами по себе делают факт интереснее\n"
@@ -2167,7 +2167,7 @@ async def ai_text_handler(message: Message, state: FSMContext):
         prompt = (
             f"Пост для TG на тему «{topic}». "
             f"Экспертный, живой стиль. 100-150 слов. "
-            f"Эмодзи + призыв к консультации @terion_bot"
+            f"Эмодзи + призыв к консультации @georis_bot"
         )
     
     text = None
@@ -2298,9 +2298,9 @@ async def _check_daily_limit(callback) -> bool:
     return True
 
 
-@content_router.callback_query(F.data.startswith("pub_terion:"))
-async def publish_terion(callback: CallbackQuery, state: FSMContext):
-    """Публикация только в TERION"""
+@content_router.callback_query(F.data.startswith("pub_georis:"))
+async def publish_georis(callback: CallbackQuery, state: FSMContext):
+    """Публикация только в GEORIS"""
     post_id = int(callback.data.split(":")[1])
     post = await db.get_content_post(post_id)
 
@@ -2310,20 +2310,20 @@ async def publish_terion(callback: CallbackQuery, state: FSMContext):
     if not await _check_daily_limit(callback):
         return
 
-    await callback.answer("🚀 Публикую в TERION...")
+    await callback.answer("🚀 Публикую в GEORIS...")
     
-    success, result = await send_post(callback.bot, CHANNEL_ID_GEORIS, post, "TERION")
+    success, result = await send_post(callback.bot, CHANNEL_ID_GEORIS, post, "GEORIS")
     
     if success:
         await db.update_content_post(post_id, status="published")
         await callback.message.edit_text(
-            f"✅ <b>Опубликовано в TERION</b>\n\n🔗 <a href='{result}'>Ссылка на пост</a>",
+            f"✅ <b>Опубликовано в GEORIS</b>\n\n🔗 <a href='{result}'>Ссылка на пост</a>",
             reply_markup=get_back_btn(),
             parse_mode="HTML"
         )
     else:
         await callback.message.edit_text(
-            f"❌ <b>Ошибка публикации в TERION</b>\n\n{result}",
+            f"❌ <b>Ошибка публикации в GEORIS</b>\n\n{result}",
             reply_markup=get_back_btn(),
             parse_mode="HTML"
         )
@@ -2432,12 +2432,12 @@ async def publish_all(callback: CallbackQuery, state: FSMContext):
     if post.get("image_url"):
         image_bytes = await download_photo(callback.bot, post["image_url"])
     
-    # TG TERION через Publisher
+    # TG GEORIS через Publisher
     try:
         success = await publisher.publish_to_telegram(CHANNEL_ID_GEORIS, text, image_bytes)
-        results.append("✅ TERION TG" if success else "❌ TERION TG")
+        results.append("✅ GEORIS TG" if success else "❌ GEORIS TG")
     except Exception as e:
-        results.append(f"❌ TERION: {e}")
+        results.append(f"❌ GEORIS: {e}")
     
     # TG ДОМ ГРАНД через Publisher
     try:
@@ -2497,9 +2497,9 @@ async def publish_tg_only(callback: CallbackQuery, state: FSMContext):
         image_bytes = await download_photo(callback.bot, post["image_url"])
     
     try:
-        # Публикуем в TERION через Publisher
-        success_terion = await publisher.publish_to_telegram(CHANNEL_ID_GEORIS, text, image_bytes)
-        results.append("✅ TERION" if success_terion else "❌ TERION")
+        # Публикуем в GEORIS через Publisher
+        success_georis = await publisher.publish_to_telegram(CHANNEL_ID_GEORIS, text, image_bytes)
+        results.append("✅ GEORIS" if success_georis else "❌ GEORIS")
         
         # Публикуем в ДОМ ГРАНД через Publisher
         success_dom_grad = await publisher.publish_to_telegram(CHANNEL_ID_DOM_GRAD, text, image_bytes)
@@ -2581,8 +2581,8 @@ async def publish_all_channels(callback: CallbackQuery, state: FSMContext):
 
     # TG
     try:
-        success_terion = await publisher.publish_to_telegram(CHANNEL_ID_GEORIS, text_tg, image_bytes)
-        results.append("✅ TERION" if success_terion else "❌ TERION")
+        success_georis = await publisher.publish_to_telegram(CHANNEL_ID_GEORIS, text_tg, image_bytes)
+        results.append("✅ GEORIS" if success_georis else "❌ GEORIS")
         
         success_dom_grad = await publisher.publish_to_telegram(CHANNEL_ID_DOM_GRAD, text_tg, image_bytes)
         results.append("✅ ДОМ ГРАНД" if success_dom_grad else "❌ ДОМ ГРАНД")
@@ -2633,7 +2633,7 @@ async def save_draft(callback: CallbackQuery, state: FSMContext):
                     time_str = d.strftime("%d.%m %H:%M")
             except Exception:
                 pass
-        hint = f"\n\n🕐 <b>Время публикации:</b> {time_str}\n💡 Кнопки: 📤 Во все каналы | 🚀 TERION | 🏘 ДОМ ГРАНД | 📱 MAX | 🌐 VK"
+        hint = f"\n\n🕐 <b>Время публикации:</b> {time_str}\n💡 Кнопки: 📤 Во все каналы | 🚀 GEORIS | 🏘 ДОМ ГРАНД | 📱 MAX | 🌐 VK"
         body = f"📝 <b>Черновик #{post_id}</b>\n\n{post['body']}{hint}"
         if post.get("image_url"):
             photo = await _photo_input_for_send(callback.bot, post["image_url"])
@@ -2768,7 +2768,7 @@ async def cancel_handler(callback: CallbackQuery, state: FSMContext):
 async def back_to_menu(callback: CallbackQuery, state: FSMContext):
     await callback.answer()
     await state.clear()
-    await callback.message.edit_text("🎯 <b>TERION Content Bot</b>", reply_markup=get_back_btn(), parse_mode="HTML")
+    await callback.message.edit_text("🎯 <b>GEORIS Content Bot</b>", reply_markup=get_back_btn(), parse_mode="HTML")
 
 @content_router.callback_query(F.data.startswith("queue_img_"))
 async def queue_img_handler(callback: CallbackQuery):
@@ -2841,5 +2841,5 @@ async def wrong_photo(message: Message):
 @content_router.message(CommandStart())
 async def cmd_start(message: Message, state: FSMContext):
     await state.clear()
-    await message.answer("🎯 <b>TERION Content Bot</b>\n\nСоздание и публикация контента:\n• Telegram (TERION + ДОМ ГРАНД)\n• ВКонтакте (с кнопками)\n\nВыберите действие:", reply_markup=get_main_menu(), parse_mode="HTML")
+    await message.answer("🎯 <b>GEORIS Content Bot</b>\n\nСоздание и публикация контента:\n• Telegram (GEORIS + ДОМ ГРАНД)\n• ВКонтакте (с кнопками)\n\nВыберите действие:", reply_markup=get_main_menu(), parse_mode="HTML")
     await state.set_state(ContentStates.main_menu)

@@ -354,7 +354,7 @@ class LeadHunter:
                 # Fallback: простая статистика без AI
                 avg_hotness = sum(l.get('hotness', 0) for l in hot_leads) / len(hot_leads)
                 insight = (
-                    f"📊 Еженедельный инсайт ТЕРИОН\n\n"
+                    f"📊 Еженедельный инсайт ГЕОРИС\n\n"
                     f"Проанализировано лидов: {len(hot_leads)}\n"
                     f"Средняя температура: {avg_hotness:.1f}/5\n"
                     f"Топ-запрос: {hot_leads[0].get('content', '')[:100]}\n\n"

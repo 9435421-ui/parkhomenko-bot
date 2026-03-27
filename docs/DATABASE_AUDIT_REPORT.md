@@ -378,7 +378,7 @@ ALTER TABLE leads ADD COLUMN thread_id INTEGER;
 -- ADD MISSING COLUMNS TO content_plan TABLE
 -- ============================================
 -- Check if these columns exist first:
-ALTER TABLE content_plan ADD COLUMN channel TEXT DEFAULT 'terion';
+ALTER TABLE content_plan ADD COLUMN channel TEXT DEFAULT 'georis';
 ALTER TABLE content_plan ADD COLUMN theme TEXT;
 ALTER TABLE content_plan ADD COLUMN image_url TEXT;
 ALTER TABLE content_plan ADD COLUMN admin_id INTEGER DEFAULT NULL;
