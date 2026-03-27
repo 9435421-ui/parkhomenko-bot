@@ -859,8 +859,13 @@ class Database:
             return [dict(row) for row in await cursor.fetchall()]
 
     async def mark_as_published(self, post_id: int):
+        from datetime import datetime
         async with self.conn.cursor() as cursor:
-            await cursor.execute("UPDATE content_plan SET status = 'published' WHERE id = ?", (post_id,))
+            now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            await cursor.execute(
+                "UPDATE content_plan SET status = 'published', published_at = ? WHERE id = ?",
+                (now, post_id)
+            )
             await self.conn.commit()
 
     # Разрешённые поля для update_content_plan_entry (whitelist)

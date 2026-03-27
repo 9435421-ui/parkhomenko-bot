@@ -20,13 +20,13 @@ VK_TOKEN = os.getenv("VK_TOKEN")
 VK_GROUP_ID = int(os.getenv("VK_GROUP_ID", "235569022"))
 
 # === CHANNELS (ПУБЛИКАЦИЯ) ===
-CHANNEL_ID_TERION = int(os.getenv("CHANNEL_ID_TERION", "-1003612599428"))
+CHANNEL_ID_GEORIS = int(os.getenv("CHANNEL_ID_GEORIS", "-1003612599428"))
 CHANNEL_ID_DOM_GRAD = int(os.getenv("CHANNEL_ID_DOM_GRAD", "-1002628548032"))
 NOTIFICATIONS_CHANNEL_ID = int(os.getenv("NOTIFICATIONS_CHANNEL_ID", "-1003471218598"))
 
 # === CHANNEL NAMES ===
 CHANNEL_NAMES = {
-    "terion": "TERION",
+    "georis": "ГЕОРИС",
     "dom_grand": "ДОМ ГРАНД"
 }
 
@@ -42,7 +42,7 @@ POSTS_PER_DAY_LIMIT = int(os.getenv("POSTS_PER_DAY_LIMIT", "2"))
 # === QUIZ LINK И ХЭШТЕГИ ДЛЯ ПОСТОВ ===
 VK_QUIZ_LINK = os.getenv("VK_QUIZ_LINK", "https://t.me/Parkhovenko_i_kompaniya_bot?start=quiz")
 # Обязательные хэштеги в каждом посте (можно переопределить в .env)
-CONTENT_HASHTAGS = os.getenv("CONTENT_HASHTAGS", "#TERION #перепланировка #недвижимость #москва")
+CONTENT_HASHTAGS = os.getenv("CONTENT_HASHTAGS", "#ГЕОРИС #перепланировка #недвижимость #москва")
 
 # === THREADS IN WORKING GROUP ===
 THREAD_ID_KVARTIRY = int(os.getenv("THREAD_ID_KVARTIRY", "2"))
@@ -75,7 +75,7 @@ YANDEX_AI_AGENT_ANTON_ID = os.getenv("YANDEX_AI_AGENT_ANTON_ID", "fvtrdfvmv1u84s
 YANDEX_AI_AGENTS_ENDPOINT = os.getenv("YANDEX_AI_AGENTS_ENDPOINT")  # опционально: URL вызова агента по ID
 # Контакт Юлии для кнопки «Взять в работу»
 JULIA_CONTACT = os.getenv("JULIA_CONTACT", "Юлия Пархоменко — эксперт по перепланировкам. Связь: @Parkhovenko_i_kompaniya_bot")
-TERION_CHANNEL_ID = CHANNEL_ID_TERION
+GEORIS_CHANNEL_ID = CHANNEL_ID_GEORIS
 DOM_GRAND_CHANNEL_ID = CHANNEL_ID_DOM_GRAD
 # === ADMIN ===
 ADMIN_ID = int(os.getenv("ADMIN_ID", "223465437"))

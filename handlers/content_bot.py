@@ -37,7 +37,7 @@ from agents.content_agent import ContentAgent
 from config import (
     CONTENT_BOT_TOKEN,
     BOT_TOKEN,
-    CHANNEL_ID_TERION,
+    CHANNEL_ID_GEORIS,
     CHANNEL_ID_DOM_GRAD,
     LEADS_GROUP_CHAT_ID,
     THREAD_ID_DRAFTS,
@@ -2312,7 +2312,7 @@ async def publish_terion(callback: CallbackQuery, state: FSMContext):
 
     await callback.answer("🚀 Публикую в TERION...")
     
-    success, result = await send_post(callback.bot, CHANNEL_ID_TERION, post, "TERION")
+    success, result = await send_post(callback.bot, CHANNEL_ID_GEORIS, post, "TERION")
     
     if success:
         await db.update_content_post(post_id, status="published")
@@ -2434,7 +2434,7 @@ async def publish_all(callback: CallbackQuery, state: FSMContext):
     
     # TG TERION через Publisher
     try:
-        success = await publisher.publish_to_telegram(CHANNEL_ID_TERION, text, image_bytes)
+        success = await publisher.publish_to_telegram(CHANNEL_ID_GEORIS, text, image_bytes)
         results.append("✅ TERION TG" if success else "❌ TERION TG")
     except Exception as e:
         results.append(f"❌ TERION: {e}")
@@ -2498,7 +2498,7 @@ async def publish_tg_only(callback: CallbackQuery, state: FSMContext):
     
     try:
         # Публикуем в TERION через Publisher
-        success_terion = await publisher.publish_to_telegram(CHANNEL_ID_TERION, text, image_bytes)
+        success_terion = await publisher.publish_to_telegram(CHANNEL_ID_GEORIS, text, image_bytes)
         results.append("✅ TERION" if success_terion else "❌ TERION")
         
         # Публикуем в ДОМ ГРАНД через Publisher
@@ -2581,7 +2581,7 @@ async def publish_all_channels(callback: CallbackQuery, state: FSMContext):
 
     # TG
     try:
-        success_terion = await publisher.publish_to_telegram(CHANNEL_ID_TERION, text_tg, image_bytes)
+        success_terion = await publisher.publish_to_telegram(CHANNEL_ID_GEORIS, text_tg, image_bytes)
         results.append("✅ TERION" if success_terion else "❌ TERION")
         
         success_dom_grad = await publisher.publish_to_telegram(CHANNEL_ID_DOM_GRAD, text_tg, image_bytes)

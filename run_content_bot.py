@@ -7,7 +7,7 @@ load_dotenv('/root/PARKHOMENKO_BOT/.env')
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
-from config import CHANNEL_ID_TERION, CHANNEL_ID_DOM_GRAD
+from config import CHANNEL_ID_GEORIS, CHANNEL_ID_DOM_GRAD
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from services.scheduler_ref import set_scheduler
 
@@ -39,7 +39,7 @@ async def publish_scheduled_posts(bot):
                 image_bytes = await download_photo(bot, image_url)
             
             # Публикуем в TG
-            await publisher.publish_to_telegram(CHANNEL_ID_TERION, text, image_bytes)
+            await publisher.publish_to_telegram(CHANNEL_ID_GEORIS, text, image_bytes)
             await publisher.publish_to_telegram(CHANNEL_ID_DOM_GRAD, text, image_bytes)
             
             # Публикуем в VK
@@ -61,6 +61,7 @@ async def main():
     from aiogram.client.default import DefaultBotProperties
     from config import CONTENT_BOT_TOKEN
     from handlers.content_bot import content_router
+    from handlers.video_report_handler import router as video_router
     from database.db import db
     from utils.bot_config import set_content_bot
 
@@ -70,6 +71,7 @@ async def main():
 
     dp = Dispatcher(storage=MemoryStorage())
     dp.include_router(content_router)
+    dp.include_router(video_router)
 
     me = await bot.get_me()
     logger.info(f"🚀 Контент-бот: @{me.username}")

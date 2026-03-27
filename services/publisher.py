@@ -13,7 +13,7 @@ class Publisher:
     def __init__(self, bot: Bot = None):
         self.bot = bot
         self.tg_channels = {
-            'terion': int(os.getenv('CHANNEL_ID_TERION', 0)),
+            'terion': int(os.getenv('CHANNEL_ID_GEORIS', 0)),
             'dom_grad': int(os.getenv('CHANNEL_ID_DOM_GRAD', 0))
         }
         self.vk_token = os.getenv('VK_TOKEN')

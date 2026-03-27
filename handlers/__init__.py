@@ -4,6 +4,7 @@ aiogram 3.x версия
 """
 from aiogram import Dispatcher
 from .content import content_router
+from .video_report_handler import router as video_router
 from .creator import creator_router
 from .start import start_router
 from .admin import admin_router
