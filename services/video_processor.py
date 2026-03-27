@@ -21,6 +21,8 @@ class VideoProcessor:
         self.project_root = Path(project_root)
         self.videos_dir = self.project_root / "videos"
         self.watermarks_dir = self.project_root / "watermarks"
+        self.fonts_dir = self.project_root / "templates" / "fonts"
+        self.font_path = self.fonts_dir / "Roboto-Bold.ttf"
         
         # Проверяем FFmpeg
         self.ffmpeg_available = self._check_ffmpeg()
