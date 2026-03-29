@@ -281,3 +281,14 @@ async def cmd_video_list(message: Message):
     
     except Exception as e:
         await message.reply(f"❌ Ошибка: {e}")
+
+# Добавляем обработку видео при загрузке
+# В функцию confirm_publish добавляем:
+# success = await editor.process_full(
+#     input_video, 
+#     output_video,
+#     remove_silence=True,
+#     reduce_noise=True,
+#     speed_up=True,
+#     speed=1.2
+# )

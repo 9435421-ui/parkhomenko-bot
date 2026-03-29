@@ -2486,7 +2486,6 @@ async def publish_all(callback: CallbackQuery, state: FSMContext):
     await callback.message.edit_text(
         f"✅ <b>Опубликовано!</b>\n\n" + "\n".join(results),
         reply_markup=get_back_btn(),
-<<<<<<< HEAD
         parse_mode="HTML"
     )
     await state.clear()
@@ -2629,8 +2628,6 @@ async def publish_all_channels(callback: CallbackQuery, state: FSMContext):
     )
     
     await state.clear()
-=======
->>>>>>> 72b8464 (force: sync georis changes)
 
 
 @content_router.callback_query(F.data.startswith("draft:"))

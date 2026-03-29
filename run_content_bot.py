@@ -61,7 +61,7 @@ async def main():
     from aiogram.client.default import DefaultBotProperties
     from config import CONTENT_BOT_TOKEN
     from handlers.content_bot import content_router
-    from handlers.video_report_handler import router as video_router
+    from handlers.video_handler_v2 import router as video_router_v2
     from database.db import db
     from utils.bot_config import set_content_bot
 
@@ -71,15 +71,15 @@ async def main():
 
     dp = Dispatcher(storage=MemoryStorage())
     dp.include_router(content_router)
-    dp.include_router(video_router)
+    dp.include_router(video_router_v2)
 
     me = await bot.get_me()
     logger.info(f"🚀 Контент-бот: @{me.username}")
 
     # Запускаем планировщик автопубликации
     scheduler = AsyncIOScheduler(timezone="Europe/Moscow")
-    scheduler.add_job(publish_scheduled_posts, 'interval', minutes=1, args=[bot])
-    scheduler.start()
+    #     scheduler.add_job(publish_scheduled_posts, 'interval', minutes=1, args=[bot])
+    #     scheduler.start()
     set_scheduler(scheduler)
     logger.info("✅ Планировщик автопубликации запущен")
 
