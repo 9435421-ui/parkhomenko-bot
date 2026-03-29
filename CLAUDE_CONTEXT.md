@@ -1,41 +1,95 @@
 # ГЕОРИС — контекст проекта для Claude
 
 ## Суть проекта
-CRM-бот для компании по согласованию перепланировок квартир (Москва).
+Мультиагентная система для компании по согласованию перепланировок квартир (Москва).
 Владелец: Юлия Пархоменко.
-Бот ищет лидов в VK и Telegram, ведёт квиз-воронку, публикует контент, анализирует конкурентов.
+Что делает система:
+Бот-консультант «Антон» ведёт клиентов через квиз-воронку
+Контент-бот публикует экспертный контент в TG, VK, Яндекс Дзен
+VK-шпион ищет горячих лидов в жилых ЖК группах
+Юлия управляет всем через диалог с ботом в Telegram (пишет задание → бот предлагает варианты → одобрение → публикация)
 
 ## Репозиторий
 GitHub: https://github.com/9435421-ui/parkhomenko-bot
-Сервер: /root/PARKHOMENKO_BOT/
-Стек: Python 3.11, Aiogram 3.x, Telethon, APScheduler, aiohttp, SQLite/aiosqlite, YandexGPT, Router AI
+Сервер: 176.124.219.183, /root/PARKHOMENKO_BOT/
+Стек: Python 3.11, Aiogram 3.x, Telethon, APScheduler, aiohttp, SQLite/aiosqlite, YandexGPT, Router AI, FFmpeg, Pillow
+
+## Два активных бота
+| Бот | Username | Роль |
+|-----|----------|------|
+| Антон | @Parkhovenko_i_kompaniya_bot | ИИ-консультант по перепланировкам |
+| Дом Гранд | @domGrad_bot | Контент-бот бренда Дом Гранд |
+
+## Каналы и группы
+| ID | Назначение |
+|----|------------|
+| `-1003612599428` | TG канал ГЕОРИС |
+| `-1002628548032` | TG канал Дом Гранд |
+| `235569022` | VK группа |
+| `-1003370698977` | LEADS_GROUP_CHAT_ID (рабочая группа лидов) |
+| `THREAD_ID_DRAFTS=85` | Топик черновиков |
+| `THREAD_ID_HOT_LEADS=811` | Топик горячих лидов |
+| `ADMIN_ID=8438024806` | Юлия |
 
 ## Ключевые файлы
 | Файл | Назначение | Статус |
 |------|-----------|--------|
 | `bot_anton.py` | Основной бот-консультант (aiogram 3.x) | ✅ активный |
 | `bot_spy.py` | Демон шпиона (Telethon + ScoutParser) | ✅ активный |
+| `handlers/content_bot.py` | Контент-бот (~2600+ строк), диалог с Юлией | ✅ активный |
+| `run_content_bot.py` | Запуск контент-бота + APScheduler | ✅ активный |
 | `services/scout_parser.py` | Парсер TG+VK, VK API реализован | ✅ TG чаты из БД, горячие лиды в 811 |
 | `session_manager.py` | Единый менеджер Telethon-сессии | ✅ исправлен |
 | `config.py` | Все переменные окружения | ⚠️ дубль NOTIFICATIONS_CHANNEL_ID |
 | `database/database.py` | SQLite + WAL mode | ✅ исправлен |
-| `handlers/` | start, quiz, dialog, admin, content, invest, vk_publisher, sales_agent | ✅ admin: голосовые интервью |
-| `services/lead_hunter/` | hunter.py с Discovery + scheduler, analyzer.py, discovery.py, outreach.py | ✅ TG Discovery добавлен |
+| `handlers/video_handler_v2.py` | FSM-обработчик команды /video | ✅ готов |
+| `services/video_editor.py` | FFmpeg обработка видео | ✅ готов |
+| `services/video_publisher.py` | Публикация видео в TG/VK | ✅ готов |
+| `services/content_generator.py` | Генерация текстов (YandexGPT) | ✅ готов |
 | `utils/yandex_gpt.py` | YandexGPT интеграция | ✅ исправлен |
-| `agents/` | content_agent, creative_agent, image_agent, viral_hooks_agent, content_repurpose_agent | ✅ расширенная система агентов |
+| `agents/` | content_agent, creative_agent, image_agent, viral_hooks_agent, content_repurpose_agent | ✅ активны |
+
+## Видео-модуль (добавлен март 2026)
+Команда `/video` — полный цикл:
+Юлия загружает видео в бот
+FFmpeg: шумоподавление, удаление пауз, ускорение 1.2x
+Ватермарк ГЕОРИС (шрифт Roboto-Bold.ttf)
+YandexGPT генерирует текст поста
+Публикация в TG (ГЕОРИС + Дом Гранд) и VK
+Дзен-бот автоматически публикует в Яндекс Дзен
+
+Папочная структура видео:
+```
+videos/
+├── raw/          # исходники
+├── processed/    # обработанные
+├── published/    # опубликованные
+├── failed/       # ошибки
+├── thumbnails/   # превью
+└── watermarks/   # ватермарки
+```
+
+Таблица БД: `video_reports` — хранит статусы и метаданные видео.
+Статус: ✅ готов, ожидает первого живого теста
+
+## Контент-бот — диалоговый режим
+Юлия пишет задание в Telegram (например: "подготовь серию постов на 5 дней по перепланировкам в маленьких квартирах с газовой плитой"), бот:
+Генерирует черновики через YandexGPT
+Предлагает варианты с кнопками одобрения
+После одобрения публикует по расписанию
+
+Ключевые механизмы:
+APScheduler: автопубликация каждую минуту (проверка БД)
+Генерация изображений: Flux.2-pro через Router AI (`black-forest-labs/flux.2-pro`, base64)
+Callback data: MD5 hash-ключи в `bot_settings` (стабильность при длинных данных)
+`prepare_dzen_draft` + колонка `dzen_status` для Яндекс Дзен
+9 экспертных постов загружены в `content_plan`
+Черновики → топик 85, горячие лиды → топик 811
 
 ## Имя Telethon-сессии
 `anton_scout` — основная сессия для парсинга и Discovery.
-Файл: `anton_parser.session` — в .gitignore, не коммитить!
-Статус: ⚠️ авторизация не пройдена (проблемы с получением кода)
-
-## Текущий фокус
-VK-шпион (`bot_spy.py`) работает автономно — без Telethon-сессии.
-Карточки лидов приходят в Telegram с кнопками:
-- ✅ Взять в работу
-- ❌ Не наш клиент
-- 🔗 Открыть в VK
-- 📋 Квиз
+Файл: `anton_parser.session` — ⚠️ НЕ коммитить (но сейчас лежит в репо — нужно удалить!)
+Статус: авторизована под аккаунтом @Ylya_dorogaya
 
 ## .env — ключевые переменные
 ```
@@ -44,10 +98,123 @@ CONTENT_BOT_TOKEN=...
 API_ID=...
 API_HASH=...
 PHONE=+7...
-VK_TOKEN=vk1.a....
-LEADS_GROUP_CHAT_ID=-100...
+VK_TOKEN=vk1.a....           # VK Standalone app ID: 54491024, scope: wall,groups,photos,offline
+LEADS_GROUP_CHAT_ID=-1003370698977
 THREAD_ID_HOT_LEADS=811
-SCOUT_VK_GROUPS=225569022,...
+THREAD_ID_DRAFTS=85
+SCOUT_VK_GROUPS=235569022,...
+VK_SCAN_INTERVAL=1800
+ADMIN_ID=8438024806
+JULIA_USER_ID=...
+VK_QUIZ_LINK=https://t.me/Parkhovenko_i_kompaniya_bot?start=quiz
+```
+
+⚠️ Важно: `override=True` в `load_dotenv()` — обязательно, иначе конфликт переменных.
+
+## Команды запуска на сервере
+```bash
+# Основной бот
+systemctl start anton_bot   # или: python bot_anton.py
+
+# Контент-бот
+systemctl start domgrad_bot  # или: python run_content_bot.py
+# ⚠️ описание сервиса ещё читается как "TERION Content Bot" — нужно обновить
+
+# Шпион
+screen -S bot_spy
+python bot_spy.py
+
+# Деплой обновлений
+cd /root/PARKHOMENKO_BOT && git pull --rebase
+```
+
+## Известные баги (не исправлены)
+🔴 `get_main_bot()` возвращает None в контексте scout_parser → уведомления в топик 811 не работают
+🔴 Telethon SQLite session: "database is locked" при параллельном доступе
+🟠 Дублирующийся обработчик `pub_all:` в `content_bot.py`
+🟠 `edit_draft` отправляет новое сообщение вместо редактирования inline
+🟠 Бесконечная публикация (спам одобренных постов) — временно исправлен bulk-update статусов, root cause не найден
+🟡 Описание systemd сервиса контент-бота: ещё читается "TERION Content Bot"
+🟡 `anton_parser.session` лежит в репо (нужно удалить и добавить в .gitignore)
+
+## Дорожная карта (приоритеты)
+### Сейчас (конец марта 2026)
+🎯 Первый живой тест команды `/video`
+🎯 Настройка контент-плана на следующую неделю
+
+### Ближайшее (апрель 2026)
+🔵 Дзен синхронизация — тест
+🔵 Дизайн/брендинг VK сообщества
+🔵 Команда `/edit_post` для редактирования черновиков
+🔵 Настройка шпиона (TG Discovery, фильтры лидов)
+🔵 Реклама (настройка после шпиона)
+
+### Ожидает регистрации компании
+⏳ MAX.ru — интеграция публикаций (токен получим после регистрации ООО)
+Файл: `handlers/max_uploader.py` — уже есть заготовка
+
+## Структура проекта
+```
+/root/PARKHOMENKO_BOT/
+├── bot_anton.py              # Консультант Антон
+├── bot_spy.py                # VK/TG шпион
+├── run_content_bot.py        # Контент-бот + APScheduler
+├── config.py
+├── handlers/
+│   ├── content_bot.py        # ~2600+ строк, основной контент-обработчик
+│   ├── video_handler_v2.py   # FSM /video
+│   ├── admin.py              # Голосовые интервью, кнопки лидов
+│   ├── quiz.py               # 8-шаговый квиз
+│   ├── dialog.py             # RAG диалог
+│   ├── sales_agent.py
+│   ├── vk_publisher.py
+│   └── max_uploader.py       # заготовка, ждёт токен
+├── services/
+│   ├── scout_parser.py       # TG+VK парсер
+│   ├── video_editor.py       # FFmpeg
+│   ├── video_publisher.py    # TG/VK публикация видео
+│   ├── content_generator.py  # YandexGPT тексты
+│   ├── publisher.py          # Общий публикатор
+│   ├── vk_token_manager.py   # Мониторинг VK токена (6ч)
+│   ├── lead_hunter/
+│   │   ├── hunter.py
+│   │   ├── discovery.py
+│   │   └── outreach.py
+│   └── ...
+├── agents/
+│   ├── content_agent.py
+│   ├── creative_agent.py
+│   ├── image_agent.py
+│   ├── viral_hooks_agent.py
+│   └── content_repurpose_agent.py
+├── database/
+│   └── database.py           # SQLite WAL, таблицы: video_reports, content_plan, bot_settings, ...
+├── knowledge_base/           # 83+ документа по нормативке
+├── utils/
+│   ├── yandex_gpt.py
+│   ├── router_ai.py          # Flux.2-pro для изображений
+│   └── knowledge_base.py
+└── videos/                   # raw/processed/published/failed/thumbnails/watermarks/
+```
+
+## Проектные брифы (история разработки)
+январь 2026 — Бот-консультант Антон, RAG, 8-шаговый квиз, YandexGPT
+январь 2026 — Контент-агент, типы контента, связка канал→бот→деньги
+22 января 2026 — Первый чистый прогон контента, ImageAgent, автопостинг
+март 2026 (до 22) — VK-шпион, TG Discovery, очистка 48 файлов (17,288 строк), исправлено 31 баг
+март 2026 (после 22) — Ребрендинг ТЕРИОН→ГЕОРИС (60+ файлов), видео-модуль, Flux.2-pro, MD5 callbacks, Дзен
+
+## Текущий статус (29 марта 2026)
+Проект: ГЕОРИС v2.0 (Video Production)
+Техническое состояние: ✅ Production Ready
+Активные компоненты:
+✅ Бот-консультант Антон (квиз, RAG, диалог)
+✅ Контент-бот с диалоговым управлением (Юлия пишет → бот генерирует → публикует)
+✅ VK-шпион (автономный, горячие лиды в топик 811)
+✅ Видео-модуль (FFmpeg, ватермарк, /video команда)
+✅ Автопубликация (APScheduler, каждую минуту)
+✅ Публикация: TG + VK + Яндекс Дзен
+⏳ MAX.ru — ждёт регистрации компании
 VK_SCAN_INTERVAL=1800
 ADMIN_ID=...           # ← было 'your_admin_user_id_here', нужно исправить!
 JULIA_USER_ID=...
